@@ -1,0 +1,6 @@
+.DS_Store
+.ddev/
+.tmp-test/
+vendor/
+node_modules/
+*.log

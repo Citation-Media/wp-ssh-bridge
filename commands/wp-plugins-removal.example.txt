@@ -1,0 +1,24 @@
+#ddev-generated
+# One plugin slug or plugin basename per line.
+# Listed plugins are excluded from upstream pulls and deactivated locally.
+# Mounted package directories are never deleted.
+
+# Backup, migration, and restore plugins.
+wpvivid-backuprestore
+updraftplus
+duplicator
+all-in-one-wp-migration
+backwpup
+backupwordpress
+
+# SMTP and mail delivery plugins.
+wp-mail-smtp
+post-smtp
+easy-wp-smtp
+fluent-smtp
+smtp-mailer
+wp-smtp
+gmail-smtp
+mailgun
+sendgrid-email-delivery-simplified
+mailersend-official-smtp-integration

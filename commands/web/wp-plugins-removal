@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Remove local-only blocked WordPress plugins listed in .ddev/commands/wp-plugins-removal.txt
+## Usage: remove-blocked-plugins [wordpress-root]
+## Example: ddev remove-blocked-plugins\nddev remove-blocked-plugins web
+## ProjectTypes: wordpress
+## ExecRaw: true
+## MutagenSync: true
+
+set -eu -o pipefail
+
+PROJECT_ROOT="${DDEV_APPROOT:-/var/www/html}"
+PLUGIN_LIST_DEFAULT="${PROJECT_ROOT}/.ddev/commands/wp-plugins-removal.txt"
+PROJECT_PATH="${1:-}"
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+local_wp_root() {
+  local local_path
+
+  local_path="${PROJECT_PATH:-${WP_SSH_PULL_LOCAL_WP_PATH:-${DDEV_DOCROOT:-}}}"
+
+  if [ -z "${local_path}" ] || [ "${local_path}" = "." ]; then
+    printf '%s' "${PROJECT_ROOT}"
+    return
+  fi
+
+  case "${local_path}" in
+    /*) printf '%s' "${local_path%/}" ;;
+    *) printf '%s/%s' "${PROJECT_ROOT}" "${local_path%/}" ;;
+  esac
+}
+
+plugin_list_file() {
+  printf '%s' "${WP_SSH_PULL_PLUGIN_REMOVE_FILE:-${PLUGIN_LIST_DEFAULT}}"
+}
+
+read_plugin_list() {
+  local list_file
+  local plugin
+
+  list_file="$(plugin_list_file)"
+  [ -f "${list_file}" ] || return 0
+
+  while IFS= read -r plugin || [ -n "${plugin}" ]; do
+    plugin="${plugin%%#*}"
+    plugin="${plugin#${plugin%%[![:space:]]*}}"
+    plugin="${plugin%${plugin##*[![:space:]]}}"
+
+    [ -n "${plugin}" ] || continue
+
+    case "${plugin}" in
+      /*|*..*|*" "*|*$'\t'*|*[^A-Za-z0-9._/-]*)
+        die "Invalid plugin entry '${plugin}' in ${list_file}. Use a plugin slug or basename."
+        ;;
+    esac
+
+    printf '%s\n' "${plugin}"
+  done < "${list_file}"
+}
+
+normalize_plugin_slug() {
+  local plugin="$1"
+
+  plugin="${plugin%%/*}"
+  plugin="${plugin%.php}"
+  printf '%s' "${plugin}"
+}
+
+installed_plugin_slugs() {
+  local wp_root="$1"
+  local plugins_json
+
+  command -v wp >/dev/null || return 0
+  [ -f "${wp_root}/wp-config.php" ] || return 0
+
+  plugins_json="$(wp --path="${wp_root}" plugin list --format=json --fields=name --allow-root --skip-plugins --skip-themes 2>/dev/null)" || return 0
+
+  PLUGINS_JSON="${plugins_json}" php <<'PHP'
+<?php
+$plugins = json_decode(getenv('PLUGINS_JSON'), true);
+if (!is_array($plugins)) {
+    exit(0);
+}
+
+foreach ($plugins as $plugin) {
+    if (isset($plugin['name']) && is_string($plugin['name']) && $plugin['name'] !== '') {
+        echo $plugin['name'], PHP_EOL;
+    }
+}
+PHP
+}
+
+remove_plugin_path() {
+  local path="$1"
+
+  [ -e "${path}" ] || return 0
+
+  if mountpoint -q "${path}" 2>/dev/null; then
+    printf 'Skipping mounted plugin path %s\n' "${path}"
+    return 0
+  fi
+
+  rm -rf "${path}"
+}
+
+remove_plugins() {
+  local wp_root
+  local plugin
+  local plugin_slug
+  local installed_slug
+  local plugins_root
+  declare -A installed_slugs=()
+  declare -A removal_slugs=()
+
+  wp_root="$(local_wp_root)"
+  plugins_root="${wp_root}/wp-content/plugins"
+  [ -d "${plugins_root}" ] || return 0
+
+  while IFS= read -r installed_slug; do
+    [ -n "${installed_slug}" ] || continue
+    installed_slugs["${installed_slug}"]=1
+  done < <(installed_plugin_slugs "${wp_root}")
+
+  while IFS= read -r plugin; do
+    plugin_slug="$(normalize_plugin_slug "${plugin}")"
+    [ -n "${plugin_slug}" ] || continue
+    removal_slugs["${plugin_slug}"]=1
+  done < <(read_plugin_list)
+
+  [ "${#removal_slugs[@]}" -gt 0 ] || return 0
+
+  for plugin_slug in "${!removal_slugs[@]}"; do
+    if [ -n "${installed_slugs["${plugin_slug}"]:-}" ]; then
+      printf 'Removing local-only blocked plugin %s...\n' "${plugin_slug}"
+      wp --path="${wp_root}" plugin deactivate "${plugin_slug}" --allow-root >/dev/null 2>&1 || true
+    fi
+
+    remove_plugin_path "${plugins_root}/${plugin_slug}"
+    remove_plugin_path "${plugins_root}/${plugin_slug}.php"
+  done
+}
+
+remove_plugins

@@ -1,0 +1,35 @@
+name: wp-ssh
+ddev_version_constraint: ">= v1.25.2"
+
+pre_install_actions:
+  - |
+    #ddev-description: Validate WordPress project type
+    if [ "${DDEV_PROJECT_TYPE:-}" != "wordpress" ]; then
+      echo "The wp-ssh add-on only supports DDEV WordPress projects." >&2
+      exit 1
+    fi
+
+project_files:
+  - config.wp-ssh.yaml
+  - providers/wp-ssh.yaml
+  - pull/wp-ssh-pull.sh
+  - commands/web/wp-plugins-removal
+  - commands/wp-plugins-removal.example.txt
+
+global_files: []
+
+post_install_actions:
+  - |
+    #ddev-description: Prepare wp-ssh pull files
+    chmod +x pull/wp-ssh-pull.sh
+    chmod +x commands/web/wp-plugins-removal
+
+    if [ ! -f commands/wp-plugins-removal.txt ]; then
+      cp commands/wp-plugins-removal.example.txt commands/wp-plugins-removal.txt
+      perl -0pi -e 's/^#ddev-generated\n//' commands/wp-plugins-removal.txt
+      echo "Created editable plugin removal list at commands/wp-plugins-removal.txt"
+    fi
+
+    echo "Configure WP_SSH_PULL_HOST and WP_SSH_PULL_REMOTE_PATH in a project config file before running ddev pull wp-ssh."
+
+removal_actions: []

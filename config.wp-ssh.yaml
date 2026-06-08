@@ -1,0 +1,5 @@
+#ddev-generated
+# Enables wp-ssh post-pull cleanup after DDEV imports database and files.
+hooks:
+  post-pull:
+    - exec: bash .ddev/pull/wp-ssh-pull.sh post-pull
