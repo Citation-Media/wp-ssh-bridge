@@ -11,10 +11,18 @@ The add-on does not install push commands.
 
 ## Install
 
-Install from the private GitHub repository with a host that has access to `Citation-Media/ddev-wp-ssh`.
+For private repositories, clone with GitHub access and install from the local checkout. DDEV does not install this private add-on directly from `git@github.com:Citation-Media/ddev-wp-ssh.git`.
 
 ```bash title="Install the private add-on"
-ddev add-on get git@github.com:Citation-Media/ddev-wp-ssh.git
+git clone git@github.com:Citation-Media/ddev-wp-ssh.git /tmp/ddev-wp-ssh
+ddev add-on get /tmp/ddev-wp-ssh
+ddev restart
+```
+
+If the repository becomes public and is published as a DDEV add-on, install with the GitHub shorthand instead.
+
+```bash title="Install a published public add-on"
+ddev add-on get Citation-Media/ddev-wp-ssh
 ddev restart
 ```
 
