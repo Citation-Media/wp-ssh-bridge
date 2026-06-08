@@ -1,102 +1,186 @@
----
-title: DDEV WP SSH Pull
-description: Private DDEV add-on for pulling WordPress databases and files from SSH-only upstream environments.
----
+# DDEV WP SSH
 
-## DDEV WP SSH Pull
+`ddev-wp-ssh` is a Go CLI for pulling and pushing WordPress databases and full application files through SSH-only environments. It runs as a standalone host-side binary and uses a generated DDEV provider layer only when it detects a DDEV project.
 
-`ddev-wp-ssh` installs a pull-only DDEV provider named `wp-ssh` for WordPress projects. It uses SSH key authentication, WP-CLI, and rsync to pull an upstream database and files into a local DDEV environment.
-
-The add-on does not install push commands.
+The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` route through `ddev pull` and `ddev push` with generated provider files. If it fails, the same commands run in standalone mode with interactive input and local WP-CLI.
 
 ## Install
 
-Install the private add-on from a versioned GitHub release. The `GITHUB_TOKEN` environment variable lets DDEV download the private release tarball.
+Download a release artifact from the private repository:
 
-```bash title="Install the private add-on"
-GITHUB_TOKEN="$(gh auth token)" ddev add-on get Citation-Media/ddev-wp-ssh --version v0.1.1
-ddev restart
+```bash
+gh release download v0.2.0 \
+  --repo Citation-Media/ddev-wp-ssh \
+  --pattern 'ddev-wp-ssh_v0.2.0_darwin_arm64.tar.gz'
+tar -xzf ddev-wp-ssh_v0.2.0_darwin_arm64.tar.gz
+install ddev-wp-ssh /usr/local/bin/ddev-wp-ssh
 ```
 
-Install a specific release by changing the version flag.
+Or build directly from the private GitHub repository with Go:
 
-```bash title="Install a specific private release"
-GITHUB_TOKEN="$(gh auth token)" ddev add-on get Citation-Media/ddev-wp-ssh --version v0.1.0
-ddev restart
+```bash
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.0
 ```
 
-For local add-on development, install from a checkout path with `ddev add-on get /path/to/ddev-wp-ssh`.
+## Configure A Project
 
-## Configure
+Run this from a DDEV WordPress project to create provider files:
 
-Create a project-specific config file for upstream connection settings.
-
-```yaml title=".ddev/config.wp-ssh.local.yaml"
-web_environment:
-  - WP_SSH_PULL_HOST=example.com
-  - WP_SSH_PULL_REMOTE_PATH=/home/example/public_html
-  - WP_SSH_PULL_CLONE_IMAGES=false
+```bash
+ddev-wp-ssh init
 ```
 
-Pass the SSH user at runtime.
+The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
 
-```bash title="Pull from upstream"
-ddev auth ssh
-ddev pull wp-ssh --environment=WP_SSH_PULL_USER=deploy -y
+When it runs inside a DDEV project, it reads `ddev describe -j` and `.ddev/config.yaml` to default the provider name, local URL, docroot, and temp directories before writing config.
+
+Silent setup is available for repeatable project bootstrap:
+
+```bash
+ddev-wp-ssh init --silent \
+  --user deploy \
+  --host example.com \
+  --port 22 \
+  --remote-path /home/example/public_html \
+  --push-user deploy \
+  --push-host staging.example.com \
+  --push-remote-path /home/staging/public_html \
+  --push-url https://staging.example.com
 ```
 
-Pull media for a single run by overriding `WP_SSH_PULL_CLONE_IMAGES`.
+This creates:
 
-```bash title="Pull database, files, and media"
-ddev pull wp-ssh --environment="WP_SSH_PULL_USER=deploy,WP_SSH_PULL_CLONE_IMAGES=true" -y
+```text
+.ddev/wp-ssh.yaml
+.ddev/providers/wp-ssh.yaml
+.ddev/config.wp-ssh.yaml
+.ddev/wp-ssh-plugins.txt
 ```
 
-## Configuration Variables
+Outside DDEV, this creates:
 
-| Variable | Purpose |
-| --- | --- |
-| `WP_SSH_PULL_USER` | Remote SSH user. Pass with `ddev pull --environment`. |
-| `WP_SSH_PULL_HOST` | Remote SSH host. |
-| `WP_SSH_PULL_REMOTE_PATH` | Remote WordPress root containing `wp-config.php`, `wp-content/`, `wp-admin/`, and `wp-includes/`. |
-| `WP_SSH_PULL_CLONE_IMAGES` | Set to `true` to download `wp-content/uploads`. Defaults to `false`. |
-| `WP_SSH_PULL_LOCAL_WP_PATH` | Optional local WordPress root relative to `/var/www/html`. |
-| `WP_SSH_PULL_PORT` | Optional SSH port override. |
-| `WP_SSH_PULL_REMOTE_TMP_DIR` | Optional remote temporary directory for database exports. Defaults to `/tmp`. |
-| `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Optional plugin removal list path. |
-| `WP_SSH_PULL_LOCAL_URL` | Optional local URL override for post-pull search-replace. Defaults to `DDEV_PRIMARY_URL_WITHOUT_PORT`, then `DDEV_PRIMARY_URL`. |
-| `WP_SSH_PULL_SKIP_SEARCH_REPLACE` | Set to `true` to skip post-pull URL replacement. |
-
-## Pull Behavior
-
-The provider exports the upstream database with WP-CLI, downloads it to `.ddev/.downloads/db.sql.gz`, and lets DDEV import it with the normal pull flow.
-
-The provider rsyncs the upstream WordPress root into the local WordPress root. It excludes `.git/`, `.ddev/`, DDEV config files, common WordPress cache and backup folders, blocked plugin paths, and `wp-content/uploads/` unless `WP_SSH_PULL_CLONE_IMAGES=true`.
-
-After DDEV imports the database and files, the add-on sanitizes `wp-config.php`, replaces upstream URLs with the local DDEV URL, and removes blocked plugins listed in `.ddev/commands/wp-plugins-removal.txt`.
-
-## Plugin Removal
-
-The add-on seeds `.ddev/commands/wp-plugins-removal.txt` when the file does not exist. This file is intentionally editable and is not overwritten on add-on updates.
-
-Run plugin removal independently with:
-
-```bash title="Remove blocked plugins"
-ddev remove-blocked-plugins
+```text
+.wp-ssh.yaml
+.wp-ssh-plugins.txt
 ```
+
+The generated provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project.
+
+## Pull
+
+Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs `ddev pull`; outside DDEV it runs the pull directly with SSH, rsync, and local WP-CLI.
+
+```bash
+ddev-wp-ssh pull --silent
+```
+
+Or use DDEV after initialization:
+
+```bash
+ddev pull wp-ssh -y
+```
+
+One-shot overrides are supported:
+
+```bash
+ddev-wp-ssh pull --silent --user deploy --host example.com --remote-path /home/example/public_html
+```
+
+## Push
+
+Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs `ddev push`; outside DDEV it runs the push directly with SSH, rsync, and local WP-CLI.
+
+```bash
+ddev-wp-ssh push --silent
+```
+
+Or use DDEV after initialization:
+
+```bash
+ddev push wp-ssh -y
+```
+
+One-shot push target overrides are supported. For `push`, the concise `--user`, `--host`, `--port`, `--remote-path`, and `--remote-tmp-dir` flags also apply to the push target.
+
+```bash
+ddev-wp-ssh push --silent \
+  --user deploy \
+  --host staging.example.com \
+  --remote-path /home/staging/public_html \
+  --push-url https://staging.example.com
+```
+
+Push uploads/imports the local database with WP-CLI and rsyncs the full local WordPress app to the target. It excludes `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
+
+## Configuration
+
+Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in standalone mode.
+
+| Key | Environment Override | Purpose |
+| --- | --- | --- |
+| `user` | `WP_SSH_PULL_USER` | Remote SSH user. |
+| `host` | `WP_SSH_PULL_HOST` | Remote SSH host. |
+| `port` | `WP_SSH_PULL_PORT` | Remote SSH port. |
+| `remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Remote WordPress root containing `wp-config.php`. |
+| `remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Remote temporary directory for DB exports. Defaults to `/tmp`. |
+| `push_user` | `WP_SSH_PUSH_USER` | Push target SSH user. |
+| `push_host` | `WP_SSH_PUSH_HOST` | Push target SSH host. |
+| `push_port` | `WP_SSH_PUSH_PORT` | Push target SSH port. |
+| `push_remote_path` | `WP_SSH_PUSH_REMOTE_PATH` | Push target WordPress root. |
+| `push_remote_tmp_dir` | `WP_SSH_PUSH_REMOTE_TMP_DIR` | Push target temporary directory. Defaults to `/tmp`. |
+| `push_url` | `WP_SSH_PUSH_URL` | Public target URL used for post-push search-replace. If omitted, the CLI captures the remote URL before DB import when possible. |
+| `local_wp_path` | `WP_SSH_LOCAL_WP_PATH` or `WP_SSH_PULL_LOCAL_WP_PATH` | Local WordPress root relative to the DDEV project. |
+| `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads`. Defaults to `false`. |
+| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Editable blocked-plugin list path. |
+| `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for post-pull search-replace. |
+| `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
+
+## Provider Generation
+
+Regenerate provider files after updating the CLI:
+
+```bash
+ddev-wp-ssh provider install
+```
+
+Provider generation is DDEV-only. Standalone mode uses the same Go implementation directly and does not need provider YAML.
+
+Print generated YAML without writing files:
+
+```bash
+ddev-wp-ssh provider generate --kind all
+```
+
+## Behavior
+
+`ddev-wp-ssh` keeps feature parity with the original provider:
+
+- Verifies local SSH key authentication.
+- Exports the upstream database with remote WP-CLI and downloads `.ddev/.downloads/db.sql.gz`.
+- Rsyncs the upstream WordPress root into the local WordPress root.
+- Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.
+- Sanitizes `wp-config.php` for DDEV-managed DB settings.
+- Runs URL search-replace through `ddev wp`, including multisite `site` and `blogs` domain tables.
+- Removes blocked local-only plugins listed in `.ddev/wp-ssh-plugins.txt`.
+- Pushes the local database to a separate SSH target with remote WP-CLI import.
+- Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
+- Runs post-push URL search-replace on the remote target with WP-CLI, including multisite `site` and `blogs` domain tables.
+
+## Release Versioning
+
+Version tags are the release source of truth:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `ddev-wp-ssh version` with the tag, publishes archives, and uploads SHA-256 checksums.
 
 ## Development
 
-Install the add-on from a local checkout for testing.
-
-```bash title="Install from local checkout"
-ddev add-on get /path/to/ddev-wp-ssh
-ddev restart
-```
-
-Run local checks from the repository root.
-
-```bash title="Run checks"
-bash -n pull/wp-ssh-pull.sh
-bash -n commands/web/wp-plugins-removal
-ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path); puts "parsed #{path}" }' install.yaml config.wp-ssh.yaml providers/wp-ssh.yaml
+```bash
+go test ./...
+go build ./cmd/ddev-wp-ssh
 ```

@@ -4,3 +4,6 @@
 vendor/
 node_modules/
 *.log
+/ddev-wp-ssh
+/dist/
+/coverage.out
