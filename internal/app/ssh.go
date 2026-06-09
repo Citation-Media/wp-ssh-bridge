@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"strings"
 )
@@ -42,25 +43,43 @@ func sshCommandString(target RemoteTarget) string {
 // runSSH executes a remote command through ssh without a local shell.
 func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.Dir = projectRoot
 	stdout := a.UI.PrefixedWriter("remote", false)
 	stderr := a.UI.PrefixedWriter("remote", true)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
 	defer flushPrefixed(stdout)
 	defer flushPrefixed(stderr)
+	return a.runSSHWithWriters(ctx, projectRoot, args, stdout, stderr)
+}
+
+func (a *App) runSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
+	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	return a.runSSHWithWriters(ctx, projectRoot, args, io.Discard, io.Discard)
+}
+
+func (a *App) runSSHWithWriters(ctx context.Context, projectRoot string, args []string, stdout io.Writer, stderr io.Writer) error {
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.Dir = projectRoot
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 
 // outputSSH executes a remote command and captures stdout for URL and table probes.
 func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	stderr := a.UI.PrefixedWriter("remote", true)
+	defer flushPrefixed(stderr)
+	return a.outputSSHWithStderr(ctx, projectRoot, args, stderr)
+}
+
+func (a *App) outputSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
+	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	return a.outputSSHWithStderr(ctx, projectRoot, args, io.Discard)
+}
+
+func (a *App) outputSSHWithStderr(ctx context.Context, projectRoot string, args []string, stderr io.Writer) (string, error) {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Dir = projectRoot
-	stderr := a.UI.PrefixedWriter("remote", true)
 	cmd.Stderr = stderr
-	defer flushPrefixed(stderr)
 	output, err := cmd.Output()
 	return string(output), err
 }

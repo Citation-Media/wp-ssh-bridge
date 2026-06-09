@@ -107,6 +107,20 @@ func TestLineSetContains(t *testing.T) {
 	}
 }
 
+func TestTruthyConfigValue(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
+		if !isTruthyConfigValue(value) {
+			t.Fatalf("isTruthyConfigValue(%q) = false", value)
+		}
+	}
+	for _, value := range []string{"", "0", "false", "off", "WP_ALLOW_MULTISITE"} {
+		if isTruthyConfigValue(value) {
+			t.Fatalf("isTruthyConfigValue(%q) = true", value)
+		}
+	}
+}
+
 func TestProviderAuthValidatesMissingDDEVUserBeforeSSH(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

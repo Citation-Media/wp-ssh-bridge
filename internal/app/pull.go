@@ -339,6 +339,9 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 	if oldDomain == "" || newDomain == "" || oldDomain == newDomain {
 		return nil
 	}
+	if !a.isMultisite(ctx, projectRoot, cfg) {
+		return nil
+	}
 
 	prefix := a.wpOutput(ctx, projectRoot, cfg, "db", "prefix")
 	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
@@ -356,6 +359,15 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 		}
 	}
 	return nil
+}
+
+// isMultisite avoids network-table updates for regular WordPress installs.
+func (a *App) isMultisite(ctx context.Context, projectRoot string, cfg Config) bool {
+	if err := a.runWPSilent(ctx, projectRoot, cfg, "core", "is-installed", "--network"); err == nil {
+		return true
+	}
+	value, err := a.wpOutputSilent(ctx, projectRoot, cfg, "config", "get", "MULTISITE")
+	return err == nil && isTruthyConfigValue(value)
 }
 
 // wpTableExists checks table presence through WP-CLI.
@@ -560,6 +572,11 @@ func (a *App) runWP(ctx context.Context, projectRoot string, cfg Config, args ..
 	return a.runExternal(ctx, projectRoot, name, fullArgs...)
 }
 
+func (a *App) runWPSilent(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
+	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
+	return a.runExternalWithWriters(ctx, projectRoot, name, io.Discard, io.Discard, fullArgs...)
+}
+
 // wpOutput returns trimmed WP-CLI output and suppresses command failures.
 func (a *App) wpOutput(ctx context.Context, projectRoot string, cfg Config, args ...string) string {
 	output, err := a.wpOutputErr(ctx, projectRoot, cfg, args...)
@@ -593,23 +610,23 @@ func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []s
 
 // runExternal runs a local executable without invoking a local shell.
 func (a *App) runExternal(ctx context.Context, dir string, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
 	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
 	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
 	defer flushPrefixed(stdout)
 	defer flushPrefixed(stderr)
-	return cmd.Run()
+	return a.runExternalWithWriters(ctx, dir, name, stdout, stderr, args...)
 }
 
 // runExternalPlain preserves native interactive output for parent commands like `ddev pull`.
 func (a *App) runExternalPlain(ctx context.Context, dir string, name string, args ...string) error {
+	return a.runExternalWithWriters(ctx, dir, name, a.Stdout, a.Stderr, args...)
+}
+
+func (a *App) runExternalWithWriters(ctx context.Context, dir string, name string, stdout io.Writer, stderr io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Stdout = a.Stdout
-	cmd.Stderr = a.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Stdin = a.Stdin
 	return cmd.Run()
 }
@@ -657,6 +674,15 @@ func lineSetContains(output string, value string) bool {
 		}
 	}
 	return false
+}
+
+func isTruthyConfigValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandExists(name string) bool {

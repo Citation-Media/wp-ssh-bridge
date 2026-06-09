@@ -212,6 +212,9 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 	if oldDomain == "" || newDomain == "" || oldDomain == newDomain {
 		return nil
 	}
+	if !a.remoteIsMultisite(ctx, projectRoot, target) {
+		return nil
+	}
 
 	prefix := strings.TrimSpace(a.remoteWPOutput(ctx, projectRoot, target, "db", "prefix"))
 	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
@@ -231,6 +234,14 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 	return nil
 }
 
+func (a *App) remoteIsMultisite(ctx context.Context, projectRoot string, target RemoteTarget) bool {
+	if err := a.runRemoteWPSilent(ctx, projectRoot, target, "core", "is-installed", "--network"); err == nil {
+		return true
+	}
+	value := a.remoteWPOutputSilent(ctx, projectRoot, target, "config", "get", "MULTISITE")
+	return isTruthyConfigValue(value)
+}
+
 func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target RemoteTarget, table string) bool {
 	output := a.remoteWPOutput(ctx, projectRoot, target, "db", "tables", "--all-tables-with-prefix", "--format=csv")
 	return lineSetContains(output, table)
@@ -241,9 +252,21 @@ func (a *App) runRemoteWP(ctx context.Context, projectRoot string, target Remote
 	return a.runSSH(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
 }
 
+func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
+	return a.runSSHSilent(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+}
+
 // remoteWPOutput captures WP-CLI output from the push target and suppresses failures.
 func (a *App) remoteWPOutput(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {
 	output, err := a.outputSSH(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+	if err != nil {
+		return ""
+	}
+	return output
+}
+
+func (a *App) remoteWPOutputSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {
+	output, err := a.outputSSHSilent(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
 	if err != nil {
 		return ""
 	}
