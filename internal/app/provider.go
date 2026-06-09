@@ -111,18 +111,19 @@ func installProviderFiles(projectRoot string, cfg Config, binary string) error {
 		return err
 	}
 
-	listPath := pluginListPath(projectRoot, cfg)
-	if _, err := os.Stat(listPath); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(listPath), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(listPath, []byte(defaultPluginList), 0o644)
+	return ensureCustomPluginList(projectRoot, cfg)
 }
 
 // installStandaloneFiles writes standalone support files without DDEV provider YAML.
 func installStandaloneFiles(root string, cfg Config) error {
+	return ensureCustomPluginList(root, cfg)
+}
+
+func ensureCustomPluginList(root string, cfg Config) error {
+	if cfg.PluginRemoveFile == "" {
+		return nil
+	}
+
 	listPath := pluginListPath(root, cfg)
 	if _, err := os.Stat(listPath); err == nil {
 		return nil
@@ -140,7 +141,9 @@ func generatedFilesReport(projectRoot string, cfg Config) string {
 		filepath.Join(projectRoot, ".ddev", "providers", providerName+".yaml"),
 		filepath.Join(projectRoot, ".ddev", hookConfigName),
 		projectConfigPath(projectRoot),
-		pluginListPath(projectRoot, cfg),
+	}
+	if cfg.PluginRemoveFile != "" {
+		paths = append(paths, pluginListPath(projectRoot, cfg))
 	}
 	return strings.Join(paths, "\n")
 }

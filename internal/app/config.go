@@ -401,7 +401,7 @@ func standaloneConfigPath(root string) string {
 	return filepath.Join(root, ".wp-ssh.yaml")
 }
 
-// pluginListPath returns the editable plugin block list path.
+// pluginListPath returns the configured plugin block list override path.
 func pluginListPath(projectRoot string, cfg Config) string {
 	if cfg.PluginRemoveFile != "" {
 		if filepath.IsAbs(cfg.PluginRemoveFile) {
@@ -409,10 +409,7 @@ func pluginListPath(projectRoot string, cfg Config) string {
 		}
 		return filepath.Join(projectRoot, cfg.PluginRemoveFile)
 	}
-	if hasDDEVConfig(projectRoot) {
-		return filepath.Join(projectRoot, ".ddev", "wp-ssh-plugins.txt")
-	}
-	return filepath.Join(projectRoot, ".wp-ssh-plugins.txt")
+	return ""
 }
 
 // quoteYAML writes a conservative scalar compatible with YAML parsers.

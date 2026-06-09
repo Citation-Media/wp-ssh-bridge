@@ -430,27 +430,43 @@ func (a *App) importStandaloneDB(ctx context.Context, root string, cfg Config) e
 	return a.runWP(ctx, root, cfg, "db", "import", tempPath)
 }
 
-// readPluginList parses the editable plugin block list with validation.
+// readPluginList returns embedded default plugins plus an optional custom block list.
 func readPluginList(projectRoot string, cfg Config) ([]string, error) {
+	plugins, err := parsePluginList(strings.NewReader(defaultPluginList), "embedded default plugin list")
+	if err != nil {
+		return nil, err
+	}
+	if cfg.PluginRemoveFile == "" {
+		return plugins, nil
+	}
+
 	path := pluginListPath(projectRoot, cfg)
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return plugins, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
+	custom, err := parsePluginList(file, path)
+	if err != nil {
+		return nil, err
+	}
+	return append(plugins, custom...), nil
+}
+
+func parsePluginList(reader io.Reader, source string) ([]string, error) {
 	plugins := []string{}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		plugin := strings.TrimSpace(strings.SplitN(scanner.Text(), "#", 2)[0])
 		if plugin == "" {
 			continue
 		}
 		if strings.HasPrefix(plugin, "/") || strings.Contains(plugin, "..") || strings.ContainsAny(plugin, " \t") || !validPluginPath.MatchString(plugin) {
-			return nil, fmt.Errorf("invalid plugin entry %q in %s; use a plugin slug or basename", plugin, path)
+			return nil, fmt.Errorf("invalid plugin entry %q in %s; use a plugin slug or basename", plugin, source)
 		}
 		plugins = append(plugins, plugin)
 	}

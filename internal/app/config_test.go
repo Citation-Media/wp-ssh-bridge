@@ -173,23 +173,34 @@ func TestReadPluginListValidatesEntries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	listPath := filepath.Join(dir, ".ddev", "wp-ssh-plugins.txt")
+	listPath := filepath.Join(dir, ".ddev", "custom-plugins.txt")
 	if err := os.WriteFile(listPath, []byte("updraftplus\n# comment\nplugin/file.php\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	plugins, err := readPluginList(dir, Config{})
+	plugins, err := readPluginList(dir, Config{PluginRemoveFile: ".ddev/custom-plugins.txt"})
 	if err != nil {
 		t.Fatalf("readPluginList() error = %v", err)
 	}
-	if strings.Join(plugins, ",") != "updraftplus,plugin/file.php" {
+	joined := strings.Join(plugins, ",")
+	for _, want := range []string{"wpvivid-backuprestore", "updraftplus", "plugin/file.php"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("plugins missing %q: %#v", want, plugins)
+		}
+	}
+
+	plugins, err = readPluginList(dir, Config{})
+	if err != nil {
+		t.Fatalf("readPluginList() default error = %v", err)
+	}
+	if !strings.Contains(strings.Join(plugins, ","), "wpvivid-backuprestore") {
 		t.Fatalf("unexpected plugins: %#v", plugins)
 	}
 
 	if err := os.WriteFile(listPath, []byte("../secret\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readPluginList(dir, Config{}); err == nil {
+	if _, err := readPluginList(dir, Config{PluginRemoveFile: ".ddev/custom-plugins.txt"}); err == nil {
 		t.Fatal("readPluginList() accepted traversal entry")
 	}
 }
@@ -200,8 +211,11 @@ func TestStandalonePathsDoNotUseDDEVDirectory(t *testing.T) {
 	if got := standaloneConfigPath(dir); got != filepath.Join(dir, ".wp-ssh.yaml") {
 		t.Fatalf("standaloneConfigPath() = %q", got)
 	}
-	if got := pluginListPath(dir, Config{}); got != filepath.Join(dir, ".wp-ssh-plugins.txt") {
+	if got := pluginListPath(dir, Config{}); got != "" {
 		t.Fatalf("standalone pluginListPath() = %q", got)
+	}
+	if got := pluginListPath(dir, Config{PluginRemoveFile: "plugins.txt"}); got != filepath.Join(dir, "plugins.txt") {
+		t.Fatalf("configured pluginListPath() = %q", got)
 	}
 	if got := downloadsDir(dir); got != filepath.Join(dir, ".wp-ssh", ".downloads") {
 		t.Fatalf("standalone downloadsDir() = %q", got)

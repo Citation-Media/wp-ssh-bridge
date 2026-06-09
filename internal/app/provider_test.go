@@ -48,11 +48,13 @@ func TestInstallProviderFiles(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(dir, ".ddev", "providers", "live.yaml"),
 		filepath.Join(dir, ".ddev", hookConfigName),
-		filepath.Join(dir, ".ddev", "wp-ssh-plugins.txt"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated file %s: %v", path, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".ddev", "wp-ssh-plugins.txt")); !os.IsNotExist(err) {
+		t.Fatalf("provider install should not create default plugin list, got err: %v", err)
 	}
 }
 

@@ -69,19 +69,17 @@ This creates:
 .ddev/wp-ssh.yaml
 .ddev/providers/wp-ssh.yaml
 .ddev/config.wp-ssh.yaml
-.ddev/wp-ssh-plugins.txt
 ```
 
 Outside DDEV, this creates:
 
 ```text
 .wp-ssh.yaml
-.wp-ssh-plugins.txt
 ```
 
 The generated provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project.
 
-`.ddev/wp-ssh-plugins.txt` is the default blocked-plugin list for DDEV projects. Outside DDEV the default is `.wp-ssh-plugins.txt`. Set `plugin_remove_file` or `WP_SSH_PULL_PLUGIN_REMOVE_FILE` only when you want to store that list somewhere else, for example in a shared project config path.
+The blocked-plugin defaults are embedded in the CLI. Set `plugin_remove_file` or `WP_SSH_PULL_PLUGIN_REMOVE_FILE` only when you want to add a project-specific plugin block list.
 
 ## Pull
 
@@ -148,7 +146,7 @@ Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in s
 | `push_url` | `WP_SSH_PUSH_URL` | Public target URL used for post-push search-replace. If omitted, the CLI captures the remote URL before DB import when possible. |
 | `local_wp_path` | `WP_SSH_LOCAL_WP_PATH` or `WP_SSH_PULL_LOCAL_WP_PATH` | Local WordPress root relative to the DDEV project. |
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads`. Defaults to `false`. |
-| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Optional path to a custom blocked-plugin list. Defaults to `.ddev/wp-ssh-plugins.txt` in DDEV and `.wp-ssh-plugins.txt` outside DDEV. |
+| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Optional path to an additional project-specific blocked-plugin list. |
 | `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for post-pull search-replace. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
 
@@ -178,7 +176,7 @@ ddev-wp-ssh provider generate --kind all
 - Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
 - Runs URL search-replace through `ddev wp`, including multisite `site` and `blogs` domain tables.
-- Removes blocked local-only plugins listed in `.ddev/wp-ssh-plugins.txt`.
+- Removes blocked local-only plugins from the embedded default list and optional `plugin_remove_file`.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.
 - Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
 - Runs post-push URL search-replace on the remote target with WP-CLI, including multisite `site` and `blogs` domain tables.

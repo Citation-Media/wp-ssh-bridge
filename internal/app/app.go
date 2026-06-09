@@ -430,10 +430,13 @@ func writeConfigForRuntime(runtime runtimeContext, cfg Config) error {
 
 // standaloneFilesReport lists files owned by standalone mode.
 func standaloneFilesReport(root string, cfg Config) string {
-	return strings.Join([]string{
+	paths := []string{
 		standaloneConfigPath(root),
-		pluginListPath(root, cfg),
-	}, "\n")
+	}
+	if cfg.PluginRemoveFile != "" {
+		paths = append(paths, pluginListPath(root, cfg))
+	}
+	return strings.Join(paths, "\n")
 }
 
 // standalonePull executes the direct pull pipeline outside DDEV provider mode.

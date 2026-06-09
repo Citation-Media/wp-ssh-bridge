@@ -46,11 +46,11 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".ddev", "wp-ssh-plugins.txt"), []byte("updraftplus\nplugin-file.php\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "extra-plugins.txt"), []byte("updraftplus\nplugin-file.php\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	excludes := strings.Join(buildRsyncExcludes(dir, Config{}), "\n")
+	excludes := strings.Join(buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}), "\n")
 	for _, want := range []string{
 		"wp-content/uploads/",
 		"wp-content/plugins/updraftplus/",

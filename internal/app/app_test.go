@@ -22,8 +22,8 @@ func TestInitSilentAllowsPartialConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh.yaml")); err != nil {
 		t.Fatalf("expected standalone config file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh-plugins.txt")); err != nil {
-		t.Fatalf("expected standalone plugin list: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh-plugins.txt")); !os.IsNotExist(err) {
+		t.Fatalf("standalone init should not create default plugin list, got err: %v", err)
 	}
 }
 
