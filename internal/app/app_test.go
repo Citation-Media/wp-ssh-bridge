@@ -2,9 +2,30 @@ package app
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestInitSilentAllowsPartialConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+
+	if err := app.commandInit([]string{"--silent"}); err != nil {
+		t.Fatalf("commandInit() error = %v\nstderr:\n%s", err, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh.yaml")); err != nil {
+		t.Fatalf("expected standalone config file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh-plugins.txt")); err != nil {
+		t.Fatalf("expected standalone plugin list: %v", err)
+	}
+}
 
 func TestFillPullConfigDoesNotPromptForConfiguredRequiredValues(t *testing.T) {
 	t.Parallel()

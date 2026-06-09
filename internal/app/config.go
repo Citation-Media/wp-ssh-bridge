@@ -258,6 +258,14 @@ func (cfg Config) validateConfiguredPush() error {
 	return cfg.validatePushRequired()
 }
 
+// validateInitValues permits partial setup while rejecting unsafe provided values.
+func (cfg Config) validateInitValues() error {
+	if err := cfg.pullTarget().validateValues("pull source"); err != nil {
+		return err
+	}
+	return cfg.pushTarget().validateValues("push target")
+}
+
 // validate checks that SSH and remote path values are safe for command construction.
 func (target RemoteTarget) validate(label string, help string) error {
 	if target.User == "" {
@@ -269,22 +277,27 @@ func (target RemoteTarget) validate(label string, help string) error {
 	if target.RemotePath == "" {
 		return fmt.Errorf("missing remote WordPress path for %s; %s", label, help)
 	}
-	if !validSSHPart.MatchString(target.User) {
-		return errors.New("user must contain only letters, numbers, dots, underscores, or hyphens")
+	return target.validateValues(label)
+}
+
+// validateValues checks provided target values without requiring a complete target.
+func (target RemoteTarget) validateValues(label string) error {
+	if target.User != "" && !validSSHPart.MatchString(target.User) {
+		return fmt.Errorf("user for %s must contain only letters, numbers, dots, underscores, or hyphens", label)
 	}
-	if !validSSHPart.MatchString(target.Host) {
-		return errors.New("host must contain only letters, numbers, dots, underscores, or hyphens")
+	if target.Host != "" && !validSSHPart.MatchString(target.Host) {
+		return fmt.Errorf("host for %s must contain only letters, numbers, dots, underscores, or hyphens", label)
 	}
 	if target.Port != "" {
 		if _, err := strconv.Atoi(target.Port); err != nil {
-			return errors.New("port must be numeric")
+			return fmt.Errorf("port for %s must be numeric", label)
 		}
 	}
 	if strings.ContainsAny(target.RemotePath, "\r\n") {
-		return errors.New("remote path must not contain newlines")
+		return fmt.Errorf("remote path for %s must not contain newlines", label)
 	}
 	if strings.ContainsAny(defaultString(target.RemoteTmpDir, "/tmp"), "\r\n") {
-		return errors.New("remote tmp dir must not contain newlines")
+		return fmt.Errorf("remote tmp dir for %s must not contain newlines", label)
 	}
 	return nil
 }

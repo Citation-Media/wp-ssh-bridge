@@ -130,10 +130,7 @@ func (a *App) commandInit(args []string) error {
 			return err
 		}
 	}
-	if err := cfg.validatePullRequired(); err != nil {
-		return err
-	}
-	if err := cfg.validateConfiguredPush(); err != nil {
+	if err := cfg.validateInitValues(); err != nil {
 		return err
 	}
 
@@ -641,7 +638,7 @@ func newPrompter(in io.Reader, out io.Writer) prompter {
 // fillConfig asks only for values not already supplied by config, env, or flags.
 func (p prompter) fillConfig(cfg *Config) error {
 	var err error
-	if err := p.fillPullConfig(cfg); err != nil {
+	if err := p.fillPullConfigFields(cfg, false); err != nil {
 		return err
 	}
 	configurePush, err := p.promptBool("Configure a push target", cfg.PushHost != "" || cfg.PushRemotePath != "")
@@ -649,23 +646,27 @@ func (p prompter) fillConfig(cfg *Config) error {
 		return err
 	}
 	if configurePush {
-		return p.fillPushConfig(cfg)
+		return p.fillPushConfigFields(cfg, false)
 	}
 	return nil
 }
 
 // fillPullConfig collects source settings needed by pull and init.
 func (p prompter) fillPullConfig(cfg *Config) error {
+	return p.fillPullConfigFields(cfg, true)
+}
+
+func (p prompter) fillPullConfigFields(cfg *Config, requireTarget bool) error {
 	var err error
 	cfg.Provider, err = p.promptString("Provider name", defaultString(cfg.Provider, defaultProviderName), false)
 	if err != nil {
 		return err
 	}
-	cfg.User, err = p.promptRequiredString("SSH user", cfg.User)
+	cfg.User, err = p.promptTargetString("SSH user", cfg.User, requireTarget)
 	if err != nil {
 		return err
 	}
-	cfg.Host, err = p.promptRequiredString("SSH host", cfg.Host)
+	cfg.Host, err = p.promptTargetString("SSH host", cfg.Host, requireTarget)
 	if err != nil {
 		return err
 	}
@@ -673,7 +674,7 @@ func (p prompter) fillPullConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.RemotePath, err = p.promptRequiredString("Remote WordPress path", cfg.RemotePath)
+	cfg.RemotePath, err = p.promptTargetString("Remote WordPress path", cfg.RemotePath, requireTarget)
 	if err != nil {
 		return err
 	}
@@ -695,16 +696,20 @@ func (p prompter) fillPullConfig(cfg *Config) error {
 
 // fillPushConfig collects target settings needed by push and init.
 func (p prompter) fillPushConfig(cfg *Config) error {
+	return p.fillPushConfigFields(cfg, true)
+}
+
+func (p prompter) fillPushConfigFields(cfg *Config, requireTarget bool) error {
 	var err error
 	cfg.Provider, err = p.promptString("Provider name", defaultString(cfg.Provider, defaultProviderName), false)
 	if err != nil {
 		return err
 	}
-	cfg.PushUser, err = p.promptRequiredString("Push SSH user", cfg.PushUser)
+	cfg.PushUser, err = p.promptTargetString("Push SSH user", cfg.PushUser, requireTarget)
 	if err != nil {
 		return err
 	}
-	cfg.PushHost, err = p.promptRequiredString("Push SSH host", cfg.PushHost)
+	cfg.PushHost, err = p.promptTargetString("Push SSH host", cfg.PushHost, requireTarget)
 	if err != nil {
 		return err
 	}
@@ -712,7 +717,7 @@ func (p prompter) fillPushConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.PushRemotePath, err = p.promptRequiredString("Push WordPress path", cfg.PushRemotePath)
+	cfg.PushRemotePath, err = p.promptTargetString("Push WordPress path", cfg.PushRemotePath, requireTarget)
 	if err != nil {
 		return err
 	}
@@ -730,6 +735,13 @@ func (p prompter) fillPushConfig(cfg *Config) error {
 	}
 	cfg.SkipSearchReplace, err = p.promptBool("Skip URL search-replace", cfg.SkipSearchReplace)
 	return err
+}
+
+func (p prompter) promptTargetString(label string, current string, required bool) (string, error) {
+	if required {
+		return p.promptRequiredString(label, current)
+	}
+	return p.promptString(label, current, false)
 }
 
 // promptRequiredString accepts existing config, env, or flag values without another prompt.

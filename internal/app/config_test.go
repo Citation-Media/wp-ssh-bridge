@@ -73,6 +73,23 @@ func TestValidatePushRequiredUsesPushTarget(t *testing.T) {
 	}
 }
 
+func TestValidateInitValuesAllowsPartialConfig(t *testing.T) {
+	t.Parallel()
+	if err := (Config{}).validateInitValues(); err != nil {
+		t.Fatalf("validateInitValues() rejected empty config: %v", err)
+	}
+
+	cfg := Config{User: "deploy;", Host: "", RemotePath: ""}
+	if err := cfg.validateInitValues(); err == nil {
+		t.Fatal("validateInitValues() accepted unsafe provided user")
+	}
+
+	cfg = Config{Port: "abc"}
+	if err := cfg.validateInitValues(); err == nil {
+		t.Fatal("validateInitValues() accepted unsafe provided port")
+	}
+}
+
 func TestEnvArgsIncludePullAndPushDefaults(t *testing.T) {
 	t.Parallel()
 	cfg := Config{
