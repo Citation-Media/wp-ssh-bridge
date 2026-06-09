@@ -677,7 +677,7 @@ func (p prompter) fillPullConfigFields(cfg *Config, requireTarget bool) error {
 	if err != nil {
 		return err
 	}
-	cfg.RemotePath, err = p.promptTargetString("Remote WordPress path", cfg.RemotePath, requireTarget)
+	cfg.RemotePath, err = p.promptTargetString("Remote WordPress absolute path", cfg.RemotePath, requireTarget)
 	if err != nil {
 		return err
 	}
@@ -720,7 +720,7 @@ func (p prompter) fillPushConfigFields(cfg *Config, requireTarget bool) error {
 	if err != nil {
 		return err
 	}
-	cfg.PushRemotePath, err = p.promptTargetString("Push WordPress path", cfg.PushRemotePath, requireTarget)
+	cfg.PushRemotePath, err = p.promptTargetString("Push WordPress absolute path", cfg.PushRemotePath, requireTarget)
 	if err != nil {
 		return err
 	}

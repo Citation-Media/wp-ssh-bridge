@@ -296,8 +296,14 @@ func (target RemoteTarget) validateValues(label string) error {
 	if strings.ContainsAny(target.RemotePath, "\r\n") {
 		return fmt.Errorf("remote path for %s must not contain newlines", label)
 	}
+	if target.RemotePath != "" && !strings.HasPrefix(target.RemotePath, "/") {
+		return fmt.Errorf("remote path for %s must be an absolute path, for example /home/site/web", label)
+	}
 	if strings.ContainsAny(defaultString(target.RemoteTmpDir, "/tmp"), "\r\n") {
 		return fmt.Errorf("remote tmp dir for %s must not contain newlines", label)
+	}
+	if target.RemoteTmpDir != "" && !strings.HasPrefix(target.RemoteTmpDir, "/") {
+		return fmt.Errorf("remote tmp dir for %s must be an absolute path, for example /tmp", label)
 	}
 	return nil
 }

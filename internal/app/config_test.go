@@ -92,6 +92,16 @@ func TestValidateRequiredRejectsUnsafeSSHValues(t *testing.T) {
 	if err := cfg.validatePullRequired(); err == nil {
 		t.Fatal("validatePullRequired() accepted non-numeric port")
 	}
+
+	cfg = Config{User: "deploy", Host: "example.com", RemotePath: "web"}
+	if err := cfg.validatePullRequired(); err == nil {
+		t.Fatal("validatePullRequired() accepted relative remote path")
+	}
+
+	cfg = Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", RemoteTmpDir: "tmp"}
+	if err := cfg.validatePullRequired(); err == nil {
+		t.Fatal("validatePullRequired() accepted relative remote tmp dir")
+	}
 }
 
 func TestValidatePushRequiredUsesPushTarget(t *testing.T) {
@@ -123,6 +133,11 @@ func TestValidateInitValuesAllowsPartialConfig(t *testing.T) {
 	cfg = Config{Port: "abc"}
 	if err := cfg.validateInitValues(); err == nil {
 		t.Fatal("validateInitValues() accepted unsafe provided port")
+	}
+
+	cfg = Config{RemotePath: "web"}
+	if err := cfg.validateInitValues(); err == nil {
+		t.Fatal("validateInitValues() accepted relative provided remote path")
 	}
 }
 
