@@ -45,13 +45,13 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 	remoteDumpGZ := fmt.Sprintf("%s/ddev-%s-push-%s-%s.sql.gz", remoteTmp, projectName, time.Now().Format("20060102150405"), randomID())
 	remoteDump := strings.TrimSuffix(remoteDumpGZ, ".gz")
 
-	fmt.Fprintln(a.Stdout, "Uploading local database export...")
 	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
-	if err := a.runExternal(ctx, projectRoot, "rsync", args...); err != nil {
+	if err := a.runStep("Uploading local database export", "Database export uploaded", func() error {
+		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	}); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Importing database on push target with WP-CLI...")
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
 		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
@@ -63,7 +63,9 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 		"trap - EXIT;",
 		fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 	}, " ")
-	return a.runSSH(ctx, projectRoot, target, remoteCommand)
+	return a.runStep("Importing database on push target", "Push target database imported", func() error {
+		return a.runSSH(ctx, projectRoot, target, remoteCommand)
+	})
 }
 
 // filesPush syncs the complete local WordPress app to the push target.
@@ -82,13 +84,14 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) err
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Syncing local WordPress app to the push target...")
 	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
 	for _, exclude := range buildPushRsyncExcludes() {
 		args = append(args, "--exclude="+exclude)
 	}
 	args = append(args, "-e", sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
-	return a.runExternal(ctx, projectRoot, "rsync", args...)
+	return a.runStep("Syncing local WordPress app to the push target", "Push target files synced", func() error {
+		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	})
 }
 
 // postPush performs remote URL replacement after DDEV finishes db/files push.
@@ -136,7 +139,6 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Creating local database export with WP-CLI...")
 	if err := os.MkdirAll(filepath.Dir(dumpPath), 0o755); err != nil {
 		return err
 	}
@@ -152,8 +154,12 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = gzipWriter
-	cmd.Stderr = a.Stderr
-	runErr := cmd.Run()
+	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
+	cmd.Stderr = stderr
+	runErr := a.runStep("Creating local database export", "Local database export created", func() error {
+		return cmd.Run()
+	})
+	flushPrefixed(stderr)
 	closeErr := gzipWriter.Close()
 	fileErr := file.Close()
 	if runErr != nil {

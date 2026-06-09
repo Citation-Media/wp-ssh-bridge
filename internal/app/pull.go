@@ -31,7 +31,6 @@ func (a *App) providerInfo(cfg Config) error {
 		fmt.Fprintf(a.Stdout, "Pull: %s:%s\n", sshTarget(source), trimTrailingSlash(source.RemotePath))
 	}
 	if target.User == "" || target.Host == "" || target.RemotePath == "" {
-		fmt.Fprintf(a.Stdout, "Push: %s@%s:%s\n", firstNonEmpty(target.User, "<ssh-user>"), firstNonEmpty(target.Host, "<host>"), firstNonEmpty(target.RemotePath, "<remote-path>"))
 		return nil
 	}
 	fmt.Fprintf(a.Stdout, "Push: %s:%s\n", sshTarget(target), trimTrailingSlash(target.RemotePath))
@@ -46,7 +45,9 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		if err := cfg.validatePullRequired(); err != nil {
 			return err
 		}
-		if err := a.runSSH(ctx, projectRoot, source, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(source)))); err != nil {
+		if err := a.runStep("Authenticating to pull source", "Pull source authentication works", func() error {
+			return a.runSSH(ctx, projectRoot, source, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(source))))
+		}); err != nil {
 			return err
 		}
 		tested = true
@@ -56,7 +57,9 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		if err := cfg.validatePushRequired(); err != nil {
 			return err
 		}
-		if err := a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target)))); err != nil {
+		if err := a.runStep("Authenticating to push target", "Push target authentication works", func() error {
+			return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target))))
+		}); err != nil {
 			return err
 		}
 		tested = true
@@ -86,7 +89,6 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 	remoteDump := fmt.Sprintf("%s/ddev-%s-%s-%s.sql", remoteTmp, projectName, time.Now().Format("20060102150405"), dumpID)
 	remoteDumpGZ := remoteDump + ".gz"
 
-	fmt.Fprintln(a.Stdout, "Creating remote database export with WP-CLI...")
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
 		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
@@ -98,18 +100,22 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		"trap - EXIT",
 	}, " ")
-	if err := a.runSSH(ctx, projectRoot, target, remoteCommand); err != nil {
+	if err := a.runStep("Creating remote database export", "Remote database export created", func() error {
+		return a.runSSH(ctx, projectRoot, target, remoteCommand)
+	}); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Downloading database export...")
 	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, filepath.Join(downloadDir, "db.sql.gz"))
-	if err := a.runExternal(ctx, projectRoot, "rsync", args...); err != nil {
+	if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
+		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	}); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Deleting remote database export...")
-	return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
+	return a.runStep("Deleting remote database export", "Remote database export deleted", func() error {
+		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
+	})
 }
 
 // filesPull rsyncs the remote WordPress tree directly into the local project.
@@ -124,14 +130,15 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Syncing upstream WordPress files into the local DDEV environment...")
 	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
 	for _, exclude := range buildRsyncExcludes(projectRoot, cfg) {
 		args = append(args, "--exclude="+exclude)
 	}
 	args = append(args, "-e", sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
 
-	err := a.runExternal(ctx, projectRoot, "rsync", args...)
+	err := a.runStep("Syncing upstream WordPress files", "Files synced", func() error {
+		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	})
 	if err == nil {
 		return nil
 	}
@@ -146,7 +153,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 
 // filesImport is intentionally a no-op because filesPull syncs directly.
 func (a *App) filesImport() {
-	fmt.Fprintln(a.Stdout, "Files are already synced into the local WordPress environment.")
+	a.UI.Success("Files are already synced into the local WordPress environment")
 }
 
 // postPull applies local cleanup after DDEV imports the database.
@@ -206,9 +213,10 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Sanitizing wp-config.php for DDEV-managed database settings...")
 	updated := sanitizeWPConfigContents(string(contents))
-	return os.WriteFile(wpConfig, []byte(updated), 0o644)
+	return a.runStep("Sanitizing wp-config.php", "wp-config.php sanitized", func() error {
+		return os.WriteFile(wpConfig, []byte(updated), 0o644)
+	})
 }
 
 // sanitizeWPConfigContents is pure so config rewrite behavior is testable.
@@ -425,8 +433,9 @@ func (a *App) importStandaloneDB(ctx context.Context, root string, cfg Config) e
 		return err
 	}
 
-	fmt.Fprintln(a.Stdout, "Importing database with WP-CLI...")
-	return a.runWP(ctx, root, cfg, "db", "import", tempPath)
+	return a.runStep("Importing database with WP-CLI", "Database imported", func() error {
+		return a.runWP(ctx, root, cfg, "db", "import", tempPath)
+	})
 }
 
 // readPluginList returns embedded default plugins plus an optional custom block list.
@@ -563,8 +572,22 @@ func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []s
 func (a *App) runExternal(ctx context.Context, dir string, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
+	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	defer flushPrefixed(stdout)
+	defer flushPrefixed(stderr)
+	return cmd.Run()
+}
+
+// runExternalPlain preserves native interactive output for parent commands like `ddev pull`.
+func (a *App) runExternalPlain(ctx context.Context, dir string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	cmd.Stdout = a.Stdout
 	cmd.Stderr = a.Stderr
+	cmd.Stdin = a.Stdin
 	return cmd.Run()
 }
 
@@ -574,9 +597,30 @@ func (a *App) outputExternal(ctx context.Context, dir string, name string, args 
 	cmd.Dir = dir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = a.Stderr
+	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
+	cmd.Stderr = stderr
+	defer flushPrefixed(stderr)
 	err := cmd.Run()
 	return stdout.String(), err
+}
+
+func commandLabel(name string) string {
+	switch filepath.Base(name) {
+	case "rsync":
+		return "rsync"
+	case "ddev":
+		return "ddev"
+	case "wp":
+		return "wp"
+	default:
+		return "local"
+	}
+}
+
+func flushPrefixed(writer io.Writer) {
+	if flusher, ok := writer.(interface{ Flush() error }); ok {
+		_ = flusher.Flush()
+	}
 }
 
 func commandExists(name string) bool {

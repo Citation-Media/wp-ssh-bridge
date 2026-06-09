@@ -18,6 +18,7 @@ type App struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
 	WorkDir string
+	UI      *CLIUI
 }
 
 // newApp builds the runtime wrapper used by main and tests.
@@ -32,5 +33,6 @@ func newApp(stdin io.Reader, stdout io.Writer, stderr io.Writer) *App {
 		Stdout:  stdout,
 		Stderr:  stderr,
 		WorkDir: wd,
+		UI:      NewCLIUI(stdout, stderr),
 	}
 }

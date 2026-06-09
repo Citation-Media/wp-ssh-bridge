@@ -206,7 +206,7 @@ func (a *App) commandPull(args []string) error {
 		ddevArgs = append(ddevArgs, "--skip-import")
 	}
 
-	return a.runExternal(context.Background(), runtime.Root, "ddev", ddevArgs...)
+	return a.runExternalPlain(context.Background(), runtime.Root, "ddev", ddevArgs...)
 }
 
 // commandPush runs ddev push using saved push target config and one-shot overrides.
@@ -256,7 +256,7 @@ func (a *App) commandPush(args []string) error {
 		ddevArgs = append(ddevArgs, "--skip-files")
 	}
 
-	return a.runExternal(context.Background(), runtime.Root, "ddev", ddevArgs...)
+	return a.runExternalPlain(context.Background(), runtime.Root, "ddev", ddevArgs...)
 }
 
 // commandProvider handles both generated-file commands and DDEV runtime callbacks.

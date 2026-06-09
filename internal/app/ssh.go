@@ -44,8 +44,12 @@ func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarge
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Dir = projectRoot
-	cmd.Stdout = a.Stdout
-	cmd.Stderr = a.Stderr
+	stdout := a.UI.PrefixedWriter("remote", false)
+	stderr := a.UI.PrefixedWriter("remote", true)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	defer flushPrefixed(stdout)
+	defer flushPrefixed(stderr)
 	return cmd.Run()
 }
 
@@ -54,7 +58,9 @@ func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTa
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Dir = projectRoot
-	cmd.Stderr = a.Stderr
+	stderr := a.UI.PrefixedWriter("remote", true)
+	cmd.Stderr = stderr
+	defer flushPrefixed(stderr)
 	output, err := cmd.Output()
 	return string(output), err
 }
