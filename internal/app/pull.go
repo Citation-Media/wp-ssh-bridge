@@ -578,7 +578,7 @@ func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string,
 	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
 	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
 	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedSearchReplaceWarning, "Warning: repeated WPML_Notice unserialize warnings suppressed")
+	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
 	defer flushPrefixed(stdout)
 	defer flushPrefixed(filteredStderr)
 	return a.runExternalWithWriters(ctx, projectRoot, name, stdout, filteredStderr, fullArgs...)
@@ -697,8 +697,9 @@ func isTruthyConfigValue(value string) bool {
 	}
 }
 
-func isRepeatedSearchReplaceWarning(line string) bool {
-	return strings.Contains(line, `Warning: Skipping an uninitialized class "WPML_Notice"`)
+func isRepeatedWarningLine(line string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(line))
+	return strings.HasPrefix(normalized, "warning:") || strings.HasPrefix(normalized, "php warning:")
 }
 
 func commandExists(name string) bool {

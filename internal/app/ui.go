@@ -154,7 +154,9 @@ type duplicateSummaryWriter struct {
 	writer      io.Writer
 	match       func(string) bool
 	summaryText string
-	repeats     map[string]int
+	seen        map[string]bool
+	suppressed  int
+	buffer      bytes.Buffer
 }
 
 func newDuplicateSummaryWriter(writer io.Writer, match func(string) bool, summaryText string) *duplicateSummaryWriter {
@@ -162,39 +164,36 @@ func newDuplicateSummaryWriter(writer io.Writer, match func(string) bool, summar
 		writer:      writer,
 		match:       match,
 		summaryText: summaryText,
-		repeats:     map[string]int{},
+		seen:        map[string]bool{},
 	}
 }
 
 func (w *duplicateSummaryWriter) Write(data []byte) (int, error) {
-	lines := strings.SplitAfter(string(data), "\n")
-	for _, raw := range lines {
-		if raw == "" {
-			continue
+	total := len(data)
+	for len(data) > 0 {
+		index := bytes.IndexByte(data, '\n')
+		if index == -1 {
+			_, _ = w.buffer.Write(data)
+			return total, nil
 		}
-		line := strings.TrimRight(raw, "\r\n")
-		if line == "" || !w.match(line) {
-			if _, err := io.WriteString(w.writer, raw); err != nil {
-				return 0, err
-			}
-			continue
+
+		_, _ = w.buffer.Write(data[:index])
+		if err := w.flushLine(); err != nil {
+			return 0, err
 		}
-		w.repeats[line]++
-		if w.repeats[line] == 1 {
-			if _, err := io.WriteString(w.writer, raw); err != nil {
-				return 0, err
-			}
-		}
+		data = data[index+1:]
 	}
-	return len(data), nil
+	return total, nil
 }
 
 func (w *duplicateSummaryWriter) Flush() error {
-	for _, count := range w.repeats {
-		if count <= 1 {
-			continue
+	if w.buffer.Len() > 0 {
+		if err := w.flushLine(); err != nil {
+			return err
 		}
-		if _, err := fmt.Fprintf(w.writer, "%s (%d repeated warnings suppressed)\n", w.summaryText, count-1); err != nil {
+	}
+	if w.suppressed > 0 {
+		if _, err := fmt.Fprintf(w.writer, "%s (%d repeated warnings suppressed)\n", w.summaryText, w.suppressed); err != nil {
 			return err
 		}
 	}
@@ -202,4 +201,20 @@ func (w *duplicateSummaryWriter) Flush() error {
 		return flusher.Flush()
 	}
 	return nil
+}
+
+func (w *duplicateSummaryWriter) flushLine() error {
+	line := strings.TrimRight(w.buffer.String(), "\r")
+	w.buffer.Reset()
+	if line == "" || !w.match(line) {
+		_, err := fmt.Fprintln(w.writer, line)
+		return err
+	}
+	if w.seen[line] {
+		w.suppressed++
+		return nil
+	}
+	w.seen[line] = true
+	_, err := fmt.Fprintln(w.writer, line)
+	return err
 }

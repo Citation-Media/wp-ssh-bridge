@@ -258,7 +258,7 @@ func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot s
 	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target.RemotePath, args...))
 	stdout := a.UI.PrefixedWriter("remote", false)
 	stderr := a.UI.PrefixedWriter("remote", true)
-	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedSearchReplaceWarning, "Warning: repeated WPML_Notice unserialize warnings suppressed")
+	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
 	defer flushPrefixed(stdout)
 	defer flushPrefixed(filteredStderr)
 	return a.runSSHWithWriters(ctx, projectRoot, sshArgs, stdout, filteredStderr)
