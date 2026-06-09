@@ -219,8 +219,7 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 	}
 
 	for _, table := range []string{prefix + "site", prefix + "blogs"} {
-		exists := strings.TrimSpace(a.remoteWPOutput(ctx, projectRoot, target, "db", "query", fmt.Sprintf("SHOW TABLES LIKE %s", sqlQuote(table)), "--skip-column-names")) == table
-		if !exists {
+		if !a.remoteTableExists(ctx, projectRoot, target, table) {
 			continue
 		}
 		fmt.Fprintf(a.Stdout, "Replacing push target multisite domains in %s: %s -> %s\n", table, oldDomain, newDomain)
@@ -230,6 +229,11 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 		}
 	}
 	return nil
+}
+
+func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target RemoteTarget, table string) bool {
+	output := a.remoteWPOutput(ctx, projectRoot, target, "db", "tables", "--all-tables-with-prefix", "--format=csv")
+	return lineSetContains(output, table)
 }
 
 // runRemoteWP executes WP-CLI on the push target.

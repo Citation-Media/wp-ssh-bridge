@@ -288,17 +288,39 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 		return nil
 	}
 
-	if err := a.runSearchReplace(ctx, projectRoot, cfg, oldURL, newURL); err != nil {
-		return err
-	}
 	hostPart := strings.TrimPrefix(strings.TrimPrefix(oldBase, "http://"), "https://")
-	if err := a.runSearchReplace(ctx, projectRoot, cfg, "http://"+hostPart, newBase); err != nil {
-		return err
-	}
-	if err := a.runSearchReplace(ctx, projectRoot, cfg, "https://"+hostPart, newBase); err != nil {
-		return err
+	for _, pair := range uniqueReplacementPairs([]replacementPair{
+		{old: oldURL, new: newURL},
+		{old: "http://" + hostPart, new: newBase},
+		{old: "https://" + hostPart, new: newBase},
+	}) {
+		if err := a.runSearchReplace(ctx, projectRoot, cfg, pair.old, pair.new); err != nil {
+			return err
+		}
 	}
 	return a.replaceMultisiteDomains(ctx, projectRoot, cfg, oldBase, newBase)
+}
+
+type replacementPair struct {
+	old string
+	new string
+}
+
+func uniqueReplacementPairs(pairs []replacementPair) []replacementPair {
+	seen := map[string]bool{}
+	unique := []replacementPair{}
+	for _, pair := range pairs {
+		if pair.old == "" || pair.new == "" || pair.old == pair.new {
+			continue
+		}
+		key := pair.old + "\x00" + pair.new
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, pair)
+	}
+	return unique
 }
 
 // runSearchReplace delegates serialized WordPress updates to WP-CLI inside DDEV.
@@ -324,11 +346,7 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 	}
 
 	for _, table := range []string{prefix + "site", prefix + "blogs"} {
-		exists, err := a.wpTableExists(ctx, projectRoot, cfg, table)
-		if err != nil {
-			return err
-		}
-		if !exists {
+		if !a.wpTableExists(ctx, projectRoot, cfg, table) {
 			continue
 		}
 		fmt.Fprintf(a.Stdout, "Replacing WordPress multisite domains in %s: %s -> %s\n", table, oldDomain, newDomain)
@@ -341,13 +359,12 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 }
 
 // wpTableExists checks table presence through WP-CLI.
-func (a *App) wpTableExists(ctx context.Context, projectRoot string, cfg Config, table string) (bool, error) {
-	query := fmt.Sprintf("SHOW TABLES LIKE %s", sqlQuote(table))
-	output, err := a.wpOutputErr(ctx, projectRoot, cfg, "db", "query", query, "--skip-column-names")
+func (a *App) wpTableExists(ctx context.Context, projectRoot string, cfg Config, table string) bool {
+	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "tables", "--all-tables-with-prefix", "--format=csv")
 	if err != nil {
-		return false, nil
+		return false
 	}
-	return strings.TrimSpace(output) == table, nil
+	return lineSetContains(output, table)
 }
 
 // removeBlockedPlugins deactivates and deletes plugins listed in the editable block list.
@@ -558,6 +575,12 @@ func (a *App) wpOutputErr(ctx context.Context, projectRoot string, cfg Config, a
 	return a.outputExternal(ctx, projectRoot, name, fullArgs...)
 }
 
+// wpOutputSilent captures expected probe output without surfacing non-fatal stderr noise.
+func (a *App) wpOutputSilent(ctx context.Context, projectRoot string, cfg Config, args ...string) (string, error) {
+	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
+	return a.outputExternalWithStderr(ctx, projectRoot, name, io.Discard, fullArgs...)
+}
+
 // localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds.
 func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []string) {
 	if _, ok := ddevDescribe(projectRoot); ok {
@@ -593,13 +616,17 @@ func (a *App) runExternalPlain(ctx context.Context, dir string, name string, arg
 
 // outputExternal captures command output while preserving stderr for diagnostics.
 func (a *App) outputExternal(ctx context.Context, dir string, name string, args ...string) (string, error) {
+	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
+	defer flushPrefixed(stderr)
+	return a.outputExternalWithStderr(ctx, dir, name, stderr, args...)
+}
+
+func (a *App) outputExternalWithStderr(ctx context.Context, dir string, name string, stderr io.Writer, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
 	cmd.Stderr = stderr
-	defer flushPrefixed(stderr)
 	err := cmd.Run()
 	return stdout.String(), err
 }
@@ -621,6 +648,15 @@ func flushPrefixed(writer io.Writer) {
 	if flusher, ok := writer.(interface{ Flush() error }); ok {
 		_ = flusher.Flush()
 	}
+}
+
+func lineSetContains(output string, value string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == value {
+			return true
+		}
+	}
+	return false
 }
 
 func commandExists(name string) bool {

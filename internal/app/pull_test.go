@@ -78,6 +78,35 @@ func TestRsyncArchiveArgsSupportMacOSRsync(t *testing.T) {
 	}
 }
 
+func TestUniqueReplacementPairsRemovesDuplicatesAndNoops(t *testing.T) {
+	t.Parallel()
+	pairs := uniqueReplacementPairs([]replacementPair{
+		{old: "https://example.com", new: "https://local.test"},
+		{old: "http://example.com", new: "https://local.test"},
+		{old: "https://example.com", new: "https://local.test"},
+		{old: "https://local.test", new: "https://local.test"},
+		{old: "", new: "https://local.test"},
+	})
+
+	if len(pairs) != 2 {
+		t.Fatalf("uniqueReplacementPairs() length = %d, pairs = %#v", len(pairs), pairs)
+	}
+	if pairs[0].old != "https://example.com" || pairs[1].old != "http://example.com" {
+		t.Fatalf("uniqueReplacementPairs() kept unexpected order: %#v", pairs)
+	}
+}
+
+func TestLineSetContains(t *testing.T) {
+	t.Parallel()
+	output := "wp_options\nwp_site\nwp_blogs\n"
+	if !lineSetContains(output, "wp_site") {
+		t.Fatal("lineSetContains() missed existing table")
+	}
+	if lineSetContains(output, "wp_site_meta") {
+		t.Fatal("lineSetContains() matched partial table name")
+	}
+}
+
 func TestProviderAuthValidatesMissingDDEVUserBeforeSSH(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
