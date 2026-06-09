@@ -661,11 +661,11 @@ func (p prompter) fillPullConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.User, err = p.promptString("SSH user", cfg.User, true)
+	cfg.User, err = p.promptRequiredString("SSH user", cfg.User)
 	if err != nil {
 		return err
 	}
-	cfg.Host, err = p.promptString("SSH host", cfg.Host, true)
+	cfg.Host, err = p.promptRequiredString("SSH host", cfg.Host)
 	if err != nil {
 		return err
 	}
@@ -673,7 +673,7 @@ func (p prompter) fillPullConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.RemotePath, err = p.promptString("Remote WordPress path", cfg.RemotePath, true)
+	cfg.RemotePath, err = p.promptRequiredString("Remote WordPress path", cfg.RemotePath)
 	if err != nil {
 		return err
 	}
@@ -700,11 +700,11 @@ func (p prompter) fillPushConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.PushUser, err = p.promptString("Push SSH user", cfg.PushUser, true)
+	cfg.PushUser, err = p.promptRequiredString("Push SSH user", cfg.PushUser)
 	if err != nil {
 		return err
 	}
-	cfg.PushHost, err = p.promptString("Push SSH host", cfg.PushHost, true)
+	cfg.PushHost, err = p.promptRequiredString("Push SSH host", cfg.PushHost)
 	if err != nil {
 		return err
 	}
@@ -712,7 +712,7 @@ func (p prompter) fillPushConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.PushRemotePath, err = p.promptString("Push WordPress path", cfg.PushRemotePath, true)
+	cfg.PushRemotePath, err = p.promptRequiredString("Push WordPress path", cfg.PushRemotePath)
 	if err != nil {
 		return err
 	}
@@ -730,6 +730,14 @@ func (p prompter) fillPushConfig(cfg *Config) error {
 	}
 	cfg.SkipSearchReplace, err = p.promptBool("Skip URL search-replace", cfg.SkipSearchReplace)
 	return err
+}
+
+// promptRequiredString accepts existing config, env, or flag values without another prompt.
+func (p prompter) promptRequiredString(label string, current string) (string, error) {
+	if current != "" {
+		return current, nil
+	}
+	return p.promptString(label, current, true)
 }
 
 // promptString returns a trimmed answer or the provided default.

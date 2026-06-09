@@ -14,10 +14,21 @@ const defaultPluginList = `# One plugin slug or plugin basename per line.
 # Backup, migration, and restore plugins.
 wpvivid-backuprestore
 updraftplus
+updraftplus-premium
 duplicator
+duplicator-pro
 all-in-one-wp-migration
+all-in-one-wp-migration-unlimited-extension
 backwpup
 backupwordpress
+backup-backup
+blogvault-real-time-backup
+boldgrid-backup
+migrate-guru
+wp-db-backup
+wp-migrate-db
+wp-staging
+xcloner-backup-and-restore
 
 # SMTP and mail delivery plugins.
 wp-mail-smtp
@@ -28,8 +39,13 @@ smtp-mailer
 wp-smtp
 gmail-smtp
 mailgun
+mailjet-for-wordpress
+postmark-approved-wordpress-plugin
+sendinblue
 sendgrid-email-delivery-simplified
 mailersend-official-smtp-integration
+smtp2go
+wp-offload-ses-lite
 `
 
 // providerYAML renders the DDEV provider that delegates to this host CLI.

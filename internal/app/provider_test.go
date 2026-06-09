@@ -55,3 +55,26 @@ func TestInstallProviderFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultPluginListIncludesBackupMigrationAndSMTPPlugins(t *testing.T) {
+	t.Parallel()
+	for _, want := range []string{
+		"updraftplus",
+		"duplicator",
+		"all-in-one-wp-migration",
+		"migrate-guru",
+		"wp-migrate-db",
+		"wp-staging",
+		"wp-mail-smtp",
+		"post-smtp",
+		"easy-wp-smtp",
+		"fluent-smtp",
+		"mailgun",
+		"sendgrid-email-delivery-simplified",
+		"wp-offload-ses-lite",
+	} {
+		if !strings.Contains(defaultPluginList, "\n"+want+"\n") {
+			t.Fatalf("default plugin list missing %q:\n%s", want, defaultPluginList)
+		}
+	}
+}
