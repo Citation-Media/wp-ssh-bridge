@@ -40,13 +40,13 @@ func (a *App) providerInfo(cfg Config) error {
 
 // providerAuth verifies local SSH agent state and upstream key authentication.
 func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) error {
-	if err := a.requireSSHAgent(ctx, projectRoot); err != nil {
-		return err
-	}
 	tested := false
 	source := cfg.pullTarget()
 	if source.configured() {
 		if err := cfg.validatePullRequired(); err != nil {
+			return err
+		}
+		if err := a.requireSSHAgent(ctx, projectRoot); err != nil {
 			return err
 		}
 		if err := a.runSSH(ctx, projectRoot, source, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(source)))); err != nil {
@@ -57,6 +57,9 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 	target := cfg.pushTarget()
 	if target.configured() {
 		if err := cfg.validatePushRequired(); err != nil {
+			return err
+		}
+		if err := a.requireSSHAgent(ctx, projectRoot); err != nil {
 			return err
 		}
 		if err := a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target)))); err != nil {

@@ -135,11 +135,11 @@ Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in s
 
 | Key | Environment Override | Purpose |
 | --- | --- | --- |
-| `user` | `WP_SSH_PULL_USER` | Remote SSH user. |
-| `host` | `WP_SSH_PULL_HOST` | Remote SSH host. |
-| `port` | `WP_SSH_PULL_PORT` | Remote SSH port. |
-| `remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Remote WordPress root containing `wp-config.php`. |
-| `remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Remote temporary directory for DB exports. Defaults to `/tmp`. |
+| `pull_user` | `WP_SSH_PULL_USER` | Pull source SSH user. |
+| `pull_host` | `WP_SSH_PULL_HOST` | Pull source SSH host. |
+| `pull_port` | `WP_SSH_PULL_PORT` | Pull source SSH port. |
+| `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Pull source WordPress root containing `wp-config.php`. |
+| `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Pull source temporary directory for DB exports. Defaults to `/tmp`. |
 | `push_user` | `WP_SSH_PUSH_USER` | Push target SSH user. |
 | `push_host` | `WP_SSH_PUSH_HOST` | Push target SSH host. |
 | `push_port` | `WP_SSH_PUSH_PORT` | Push target SSH port. |

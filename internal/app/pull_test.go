@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +64,29 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	excludes = strings.Join(buildRsyncExcludes(dir, Config{CloneImages: true}), "\n")
 	if strings.Contains(excludes, "wp-content/uploads/") {
 		t.Fatalf("clone images should not exclude uploads:\n%s", excludes)
+	}
+}
+
+func TestProviderAuthValidatesMissingDDEVUserBeforeSSHAgent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	err := app.providerAuth(context.Background(), dir, Config{Host: "example.com", RemotePath: "/var/www/html"})
+	if err == nil {
+		t.Fatal("providerAuth() accepted missing SSH user")
+	}
+	if !strings.Contains(err.Error(), "missing SSH user") {
+		t.Fatalf("expected missing SSH user error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "ssh-add") || strings.Contains(err.Error(), "ddev auth ssh") {
+		t.Fatalf("validated SSH agent before missing config: %v", err)
 	}
 }
 

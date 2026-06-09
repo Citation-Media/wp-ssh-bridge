@@ -34,6 +34,27 @@ func TestWriteReadConfigFile(t *testing.T) {
 	if err := writeConfigFile(path, cfg); err != nil {
 		t.Fatalf("writeConfigFile() error = %v", err)
 	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"pull_user: \"deploy\"",
+		"pull_host: \"example.com\"",
+		"pull_port: \"2222\"",
+		"pull_remote_path: \"/home/site/public_html\"",
+		"pull_remote_tmp_dir: \"/var/tmp\"",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("written config missing %q:\n%s", want, text)
+		}
+	}
+	for _, legacy := range []string{"\nuser:", "\nhost:", "\nport:", "\nremote_path:", "\nremote_tmp_dir:"} {
+		if strings.Contains(text, legacy) {
+			t.Fatalf("written config contains legacy pull key %q:\n%s", legacy, text)
+		}
+	}
 
 	got, err := readConfigFile(path)
 	if err != nil {
@@ -42,6 +63,29 @@ func TestWriteReadConfigFile(t *testing.T) {
 
 	if got != cfg {
 		t.Fatalf("read config mismatch\nwant: %#v\n got: %#v", cfg, got)
+	}
+}
+
+func TestReadConfigFileSupportsLegacyPullKeys(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wp-ssh.yaml")
+	if err := os.WriteFile(path, []byte(`provider: "legacy"
+user: "deploy"
+host: "example.com"
+port: "2222"
+remote_path: "/srv/www"
+remote_tmp_dir: "/var/tmp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readConfigFile(path)
+	if err != nil {
+		t.Fatalf("readConfigFile() error = %v", err)
+	}
+	if got.User != "deploy" || got.Host != "example.com" || got.Port != "2222" || got.RemotePath != "/srv/www" || got.RemoteTmpDir != "/var/tmp" {
+		t.Fatalf("legacy pull keys were not read correctly: %#v", got)
 	}
 }
 
