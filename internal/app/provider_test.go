@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestProviderYAMLUsesWebServiceAndBinary(t *testing.T) {
+func TestProviderYAMLUsesHostServiceAndBinary(t *testing.T) {
 	t.Parallel()
 	body := providerYAML("live", "custom-bin")
 	for _, want := range []string{
-		"service: web",
+		"service: host",
 		"custom-bin provider auth",
 		"custom-bin provider db-pull",
 		"custom-bin provider files-pull",
@@ -24,7 +24,7 @@ func TestProviderYAMLUsesWebServiceAndBinary(t *testing.T) {
 		}
 	}
 	hook := hookYAML("custom-bin")
-	for _, want := range []string{"post-pull:", "post-push:", "exec: custom-bin provider post-push"} {
+	for _, want := range []string{"post-pull:", "post-push:", "exec-host: custom-bin provider post-push"} {
 		if !strings.Contains(hook, want) {
 			t.Fatalf("hook YAML missing %q:\n%s", want, hook)
 		}
@@ -40,20 +40,8 @@ func TestInstallProviderFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hostBinary := filepath.Join(dir, ".ddev", "bin", binaryName)
-	containerBinary := filepath.Join(dir, ".ddev", "bin", binaryName+"-container")
-	if err := os.MkdirAll(filepath.Dir(hostBinary), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(hostBinary, []byte("host"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(containerBinary, []byte("container"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := Config{Provider: "live"}
-	if err := installProviderFiles(dir, cfg, hostBinary); err != nil {
+	if err := installProviderFiles(dir, cfg, "ddev-wp-ssh"); err != nil {
 		t.Fatalf("installProviderFiles() error = %v", err)
 	}
 
@@ -67,28 +55,6 @@ func TestInstallProviderFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".ddev", "wp-ssh-plugins.txt")); !os.IsNotExist(err) {
 		t.Fatalf("provider install should not create default plugin list, got err: %v", err)
-	}
-	provider, err := os.ReadFile(filepath.Join(dir, ".ddev", "providers", "live.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(provider), "/var/www/html/.ddev/bin/ddev-wp-ssh-container provider db-pull") {
-		t.Fatalf("provider did not use container companion binary:\n%s", string(provider))
-	}
-}
-
-func TestDDEVProviderBinaryPathRequiresCompanionForHostBinary(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	hostBinary := filepath.Join(dir, ".ddev", "bin", binaryName)
-	if err := os.MkdirAll(filepath.Dir(hostBinary), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(hostBinary, []byte("host"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ddevProviderBinaryPath(dir, hostBinary); err == nil {
-		t.Fatal("ddevProviderBinaryPath accepted host binary without container companion")
 	}
 }
 

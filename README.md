@@ -20,13 +20,6 @@ rm .ddev/bin/ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz
 ./.ddev/bin/ddev-wp-ssh init
 ```
 
-Release archives include two binaries:
-
-```text
-ddev-wp-ssh            # host binary used for init/pull/push wrappers
-ddev-wp-ssh-container  # Linux binary used by the generated DDEV provider
-```
-
 Global installation is optional convenience, not required:
 
 ```bash
@@ -84,13 +77,7 @@ Outside DDEV, this creates:
 .wp-ssh.yaml
 ```
 
-The generated provider runs inside the DDEV web container with `service: web`, so SSH, rsync, WP-CLI, and cleanup run in the same environment you get with `ddev ssh`.
-
-Make SSH keys available to DDEV before pulling or pushing:
-
-```bash
-ddev auth ssh
-```
+The generated provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project. SSH uses the same OpenSSH behavior as your terminal, including `~/.ssh/config`, keychain-loaded identities, and direct identity files.
 
 The blocked-plugin defaults are embedded in the CLI. Set `plugin_remove_file` or `WP_SSH_PULL_PLUGIN_REMOVE_FILE` only when you want to add a project-specific plugin block list.
 

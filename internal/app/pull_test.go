@@ -67,7 +67,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	}
 }
 
-func TestProviderAuthValidatesMissingDDEVUserBeforeSSHAgent(t *testing.T) {
+func TestProviderAuthValidatesMissingDDEVUserBeforeSSH(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
@@ -84,27 +84,6 @@ func TestProviderAuthValidatesMissingDDEVUserBeforeSSHAgent(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing SSH user") {
 		t.Fatalf("expected missing SSH user error, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "ssh-add") || strings.Contains(err.Error(), "ddev auth ssh") {
-		t.Fatalf("validated SSH agent before missing config: %v", err)
-	}
-}
-
-func TestLocalWPCommandUsesWPInsideDDEVContainer(t *testing.T) {
-	t.Setenv("DDEV_PROJECT", "site")
-	t.Setenv("DDEV_DOCROOT", "web")
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "web"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	name, args := localWPCommand(dir, Config{LocalWPPath: "web"}, "option", "get", "home")
-	if name != "wp" {
-		t.Fatalf("localWPCommand() name = %q, want wp", name)
-	}
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--path=/var/www/html/web") {
-		t.Fatalf("localWPCommand() args missing container path: %#v", args)
 	}
 }
 

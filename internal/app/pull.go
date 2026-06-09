@@ -38,15 +38,12 @@ func (a *App) providerInfo(cfg Config) error {
 	return nil
 }
 
-// providerAuth verifies local SSH agent state and upstream key authentication.
+// providerAuth verifies upstream key authentication with the actual SSH command.
 func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) error {
 	tested := false
 	source := cfg.pullTarget()
 	if source.configured() {
 		if err := cfg.validatePullRequired(); err != nil {
-			return err
-		}
-		if err := a.requireSSHAgent(ctx, projectRoot); err != nil {
 			return err
 		}
 		if err := a.runSSH(ctx, projectRoot, source, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(source)))); err != nil {
@@ -57,9 +54,6 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 	target := cfg.pushTarget()
 	if target.configured() {
 		if err := cfg.validatePushRequired(); err != nil {
-			return err
-		}
-		if err := a.requireSSHAgent(ctx, projectRoot); err != nil {
 			return err
 		}
 		if err := a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target)))); err != nil {
@@ -258,7 +252,7 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 	if cfg.SkipSearchReplace {
 		return nil
 	}
-	if !inDDEVContainer() && !commandExists("ddev") {
+	if !commandExists("ddev") {
 		return nil
 	}
 
@@ -552,10 +546,6 @@ func (a *App) wpOutputErr(ctx context.Context, projectRoot string, cfg Config, a
 
 // localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds.
 func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []string) {
-	if inDDEVContainer() {
-		fullArgs := append([]string{"--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
-		return "wp", fullArgs
-	}
 	if _, ok := ddevDescribe(projectRoot); ok {
 		fullArgs := append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
 		return "ddev", fullArgs
