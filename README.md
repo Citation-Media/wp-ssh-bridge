@@ -81,6 +81,8 @@ Outside DDEV, this creates:
 
 The generated provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project.
 
+`.ddev/wp-ssh-plugins.txt` is the default blocked-plugin list for DDEV projects. Outside DDEV the default is `.wp-ssh-plugins.txt`. Set `plugin_remove_file` or `WP_SSH_PULL_PLUGIN_REMOVE_FILE` only when you want to store that list somewhere else, for example in a shared project config path.
+
 ## Pull
 
 Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs `ddev pull`; outside DDEV it runs the pull directly with SSH, rsync, and local WP-CLI.
@@ -146,7 +148,7 @@ Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in s
 | `push_url` | `WP_SSH_PUSH_URL` | Public target URL used for post-push search-replace. If omitted, the CLI captures the remote URL before DB import when possible. |
 | `local_wp_path` | `WP_SSH_LOCAL_WP_PATH` or `WP_SSH_PULL_LOCAL_WP_PATH` | Local WordPress root relative to the DDEV project. |
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads`. Defaults to `false`. |
-| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Editable blocked-plugin list path. |
+| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Optional path to a custom blocked-plugin list. Defaults to `.ddev/wp-ssh-plugins.txt` in DDEV and `.wp-ssh-plugins.txt` outside DDEV. |
 | `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for post-pull search-replace. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
 
