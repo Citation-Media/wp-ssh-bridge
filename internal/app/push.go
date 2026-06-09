@@ -46,7 +46,7 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 	remoteDump := strings.TrimSuffix(remoteDumpGZ, ".gz")
 
 	fmt.Fprintln(a.Stdout, "Uploading local database export...")
-	args := []string{"-azs", "-e", sshCommandString(target), localDump, sshTarget(target) + ":" + remoteDumpGZ}
+	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
 	if err := a.runExternal(ctx, projectRoot, "rsync", args...); err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) err
 	}
 
 	fmt.Fprintln(a.Stdout, "Syncing local WordPress app to the push target...")
-	args := []string{"-azs", "--delete", "--safe-links"}
+	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
 	for _, exclude := range buildPushRsyncExcludes() {
 		args = append(args, "--exclude="+exclude)
 	}

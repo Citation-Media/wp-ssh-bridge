@@ -67,6 +67,17 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	}
 }
 
+func TestRsyncArchiveArgsSupportMacOSRsync(t *testing.T) {
+	t.Parallel()
+	args := strings.Join(rsyncArchiveArgs(), " ")
+	if strings.Contains(args, "s") || strings.Contains(args, "--protect-args") {
+		t.Fatalf("rsync archive args must support macOS bundled rsync, got: %q", args)
+	}
+	if args != "-az" {
+		t.Fatalf("rsync archive args = %q", args)
+	}
+}
+
 func TestProviderAuthValidatesMissingDDEVUserBeforeSSH(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

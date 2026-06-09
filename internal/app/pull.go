@@ -103,7 +103,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 	}
 
 	fmt.Fprintln(a.Stdout, "Downloading database export...")
-	args := []string{"-azs", "-e", sshCommandString(target), sshTarget(target) + ":" + remoteDumpGZ, filepath.Join(downloadDir, "db.sql.gz")}
+	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, filepath.Join(downloadDir, "db.sql.gz"))
 	if err := a.runExternal(ctx, projectRoot, "rsync", args...); err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 	}
 
 	fmt.Fprintln(a.Stdout, "Syncing upstream WordPress files into the local DDEV environment...")
-	args := []string{"-azs", "--delete", "--safe-links"}
+	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
 	for _, exclude := range buildRsyncExcludes(projectRoot, cfg) {
 		args = append(args, "--exclude="+exclude)
 	}
@@ -188,6 +188,11 @@ func buildRsyncExcludes(projectRoot string, cfg Config) []string {
 	}
 
 	return excludes
+}
+
+// rsyncArchiveArgs stays compatible with macOS' bundled rsync, which lacks -s/--protect-args.
+func rsyncArchiveArgs() []string {
+	return []string{"-az"}
 }
 
 // sanitizeWPConfig removes production DB constants and adds DDEV-safe settings.
