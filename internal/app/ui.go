@@ -148,3 +148,58 @@ func (w *prefixWriter) flushLine() error {
 	_, err := fmt.Fprintln(w.writer, w.prefix+line)
 	return err
 }
+
+// duplicateSummaryWriter prints the first matching line and summarizes repeats on flush.
+type duplicateSummaryWriter struct {
+	writer      io.Writer
+	match       func(string) bool
+	summaryText string
+	repeats     map[string]int
+}
+
+func newDuplicateSummaryWriter(writer io.Writer, match func(string) bool, summaryText string) *duplicateSummaryWriter {
+	return &duplicateSummaryWriter{
+		writer:      writer,
+		match:       match,
+		summaryText: summaryText,
+		repeats:     map[string]int{},
+	}
+}
+
+func (w *duplicateSummaryWriter) Write(data []byte) (int, error) {
+	lines := strings.SplitAfter(string(data), "\n")
+	for _, raw := range lines {
+		if raw == "" {
+			continue
+		}
+		line := strings.TrimRight(raw, "\r\n")
+		if line == "" || !w.match(line) {
+			if _, err := io.WriteString(w.writer, raw); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		w.repeats[line]++
+		if w.repeats[line] == 1 {
+			if _, err := io.WriteString(w.writer, raw); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return len(data), nil
+}
+
+func (w *duplicateSummaryWriter) Flush() error {
+	for _, count := range w.repeats {
+		if count <= 1 {
+			continue
+		}
+		if _, err := fmt.Fprintf(w.writer, "%s (%d repeated warnings suppressed)\n", w.summaryText, count-1); err != nil {
+			return err
+		}
+	}
+	if flusher, ok := w.writer.(interface{ Flush() error }); ok {
+		return flusher.Flush()
+	}
+	return nil
+}

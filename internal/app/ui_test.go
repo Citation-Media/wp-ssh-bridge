@@ -43,3 +43,37 @@ func TestRunStepPrintsStartAndSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestDuplicateSummaryWriterSuppressesRepeatedWarnings(t *testing.T) {
+	t.Parallel()
+	output := bytes.Buffer{}
+	writer := newDuplicateSummaryWriter(&output, func(line string) bool {
+		return strings.Contains(line, "WPML_Notice")
+	}, "Warning: repeated WPML_Notice warnings suppressed")
+
+	if _, err := writer.Write([]byte("Warning: Skipping an uninitialized class \"WPML_Notice\"\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if _, err := writer.Write([]byte("Warning: Skipping an uninitialized class \"WPML_Notice\"\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if _, err := writer.Write([]byte("Success: Made 1 replacements.\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+
+	text := output.String()
+	if count := strings.Count(text, "Skipping an uninitialized class"); count != 1 {
+		t.Fatalf("expected one original warning, got %d:\n%s", count, text)
+	}
+	for _, want := range []string{
+		"Success: Made 1 replacements.",
+		"Warning: repeated WPML_Notice warnings suppressed (1 repeated warnings suppressed)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}

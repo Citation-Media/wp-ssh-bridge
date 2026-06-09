@@ -153,7 +153,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 
 // filesImport is intentionally a no-op because filesPull syncs directly.
 func (a *App) filesImport() {
-	a.UI.Success("Files are already synced into the local WordPress environment")
+	a.UI.Success("Files already synced; no DDEV file import needed")
 }
 
 // postPull applies local cleanup after DDEV imports the database.
@@ -328,8 +328,10 @@ func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Conf
 	if oldValue == "" || newValue == "" || oldValue == newValue {
 		return nil
 	}
-	fmt.Fprintf(a.Stdout, "Replacing WordPress URLs: %s -> %s\n", oldValue, newValue)
-	return a.runWP(ctx, projectRoot, cfg, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+	title := fmt.Sprintf("Replacing WordPress URLs: %s -> %s", oldValue, newValue)
+	return a.runStep(title, "WordPress URL replacement finished", func() error {
+		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+	})
 }
 
 // replaceMultisiteDomains updates wp_site and wp_blogs domain columns when present.
@@ -572,6 +574,16 @@ func (a *App) runWP(ctx context.Context, projectRoot string, cfg Config, args ..
 	return a.runExternal(ctx, projectRoot, name, fullArgs...)
 }
 
+func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
+	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
+	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
+	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
+	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedSearchReplaceWarning, "Warning: repeated WPML_Notice unserialize warnings suppressed")
+	defer flushPrefixed(stdout)
+	defer flushPrefixed(filteredStderr)
+	return a.runExternalWithWriters(ctx, projectRoot, name, stdout, filteredStderr, fullArgs...)
+}
+
 func (a *App) runWPSilent(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
 	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
 	return a.runExternalWithWriters(ctx, projectRoot, name, io.Discard, io.Discard, fullArgs...)
@@ -683,6 +695,10 @@ func isTruthyConfigValue(value string) bool {
 	default:
 		return false
 	}
+}
+
+func isRepeatedSearchReplaceWarning(line string) bool {
+	return strings.Contains(line, `Warning: Skipping an uninitialized class "WPML_Notice"`)
 }
 
 func commandExists(name string) bool {

@@ -201,8 +201,10 @@ func (a *App) runRemoteSearchReplace(ctx context.Context, projectRoot string, ta
 	if oldValue == "" || newValue == "" || oldValue == newValue {
 		return nil
 	}
-	fmt.Fprintf(a.Stdout, "Replacing push target URLs: %s -> %s\n", oldValue, newValue)
-	return a.runRemoteWP(ctx, projectRoot, target, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+	title := fmt.Sprintf("Replacing push target URLs: %s -> %s", oldValue, newValue)
+	return a.runStep(title, "Push target URL replacement finished", func() error {
+		return a.runRemoteWPWithFilteredWarnings(ctx, projectRoot, target, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+	})
 }
 
 // replaceRemoteMultisiteDomains updates wp_site and wp_blogs domain columns remotely.
@@ -250,6 +252,16 @@ func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target 
 // runRemoteWP executes WP-CLI on the push target.
 func (a *App) runRemoteWP(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
 	return a.runSSH(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+}
+
+func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
+	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target.RemotePath, args...))
+	stdout := a.UI.PrefixedWriter("remote", false)
+	stderr := a.UI.PrefixedWriter("remote", true)
+	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedSearchReplaceWarning, "Warning: repeated WPML_Notice unserialize warnings suppressed")
+	defer flushPrefixed(stdout)
+	defer flushPrefixed(filteredStderr)
+	return a.runSSHWithWriters(ctx, projectRoot, sshArgs, stdout, filteredStderr)
 }
 
 func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
