@@ -258,7 +258,7 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 	if cfg.SkipSearchReplace {
 		return nil
 	}
-	if !commandExists("ddev") {
+	if !inDDEVContainer() && !commandExists("ddev") {
 		return nil
 	}
 
@@ -552,6 +552,10 @@ func (a *App) wpOutputErr(ctx context.Context, projectRoot string, cfg Config, a
 
 // localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds.
 func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []string) {
+	if inDDEVContainer() {
+		fullArgs := append([]string{"--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
+		return "wp", fullArgs
+	}
 	if _, ok := ddevDescribe(projectRoot); ok {
 		fullArgs := append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
 		return "ddev", fullArgs

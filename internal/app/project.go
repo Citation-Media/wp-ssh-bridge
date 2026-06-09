@@ -40,6 +40,22 @@ func detectRuntime(start string) runtimeContext {
 		abs = start
 	}
 
+	if inDDEVContainer() {
+		root := abs
+		if found, err := findProjectRoot(abs); err == nil {
+			root = found
+		}
+		if !hasDDEVConfig(root) {
+			return runtimeContext{Mode: modeStandalone, Root: abs}
+		}
+		return runtimeContext{Mode: modeDDEV, Root: root, DDEV: DDEVDescription{
+			Name:       os.Getenv("DDEV_PROJECT"),
+			Type:       ddevProjectTypeFromConfig(root),
+			PrimaryURL: firstNonEmpty(os.Getenv("DDEV_PRIMARY_URL"), os.Getenv("DDEV_PRIMARY_URL_WITHOUT_PORT")),
+			AppRoot:    root,
+		}}
+	}
+
 	if desc, ok := ddevDescribe(abs); ok {
 		root := firstNonEmpty(desc.AppRoot, desc.Approot)
 		if root == "" {
@@ -109,6 +125,10 @@ func ddevProjectType(projectRoot string) string {
 		return desc.Type
 	}
 
+	return ddevProjectTypeFromConfig(projectRoot)
+}
+
+func ddevProjectTypeFromConfig(projectRoot string) string {
 	value, err := readSimpleYAMLValue(filepath.Join(projectRoot, ".ddev", "config.yaml"), "type")
 	if err != nil {
 		return ""
@@ -202,6 +222,10 @@ func containerWPPath(projectRoot string, cfg Config) string {
 		return "/var/www/html"
 	}
 	return "/var/www/html/" + filepath.ToSlash(rel)
+}
+
+func inDDEVContainer() bool {
+	return os.Getenv("DDEV_PROJECT") != "" && os.Getenv("DDEV_DOCROOT") != ""
 }
 
 // localSiteURL detects the local DDEV URL for post-pull search replacement.

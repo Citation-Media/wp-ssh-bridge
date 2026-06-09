@@ -77,13 +77,20 @@ jobs:
           set -eu
           mkdir -p dist
           archive="${APP_NAME}_${VERSION}_${GOOS}_${GOARCH}"
-          go build \
-            -trimpath \
-            -ldflags "-s -w -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Version=${VERSION} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Commit=${GITHUB_SHA} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          build_flags="-trimpath"
+          ldflags="-s -w -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Version=${VERSION} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Commit=${GITHUB_SHA} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          GOOS="${GOOS}" GOARCH="${GOARCH}" go build \
+            ${build_flags} \
+            -ldflags "${ldflags}" \
             -o "dist/${APP_NAME}" \
             ./cmd/ddev-wp-ssh
-          tar -C dist -czf "dist/${archive}.tar.gz" "${APP_NAME}"
-          rm "dist/${APP_NAME}"
+          GOOS=linux GOARCH="${GOARCH}" go build \
+            -trimpath \
+            -ldflags "${ldflags}" \
+            -o "dist/${APP_NAME}-container" \
+            ./cmd/ddev-wp-ssh
+          tar -C dist -czf "dist/${archive}.tar.gz" "${APP_NAME}" "${APP_NAME}-container"
+          rm "dist/${APP_NAME}" "dist/${APP_NAME}-container"
 
       - name: Upload archive
         uses: actions/upload-artifact@v4

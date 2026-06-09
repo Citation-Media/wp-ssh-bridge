@@ -68,11 +68,14 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-// requireSSHAgent checks local key availability for host-side provider commands.
+// requireSSHAgent checks key availability in the process that runs SSH.
 func (a *App) requireSSHAgent(ctx context.Context, projectRoot string) error {
 	cmd := exec.CommandContext(ctx, "ssh-add", "-l")
 	cmd.Dir = projectRoot
 	if err := cmd.Run(); err != nil {
+		if inDDEVContainer() {
+			return errors.New("no SSH key is available inside DDEV; run `ddev auth ssh` from the host before pulling from upstream")
+		}
 		message := "no local SSH key is loaded; run `ssh-add` before pulling from upstream"
 		if hasDDEVConfig(projectRoot) {
 			message += "; this is a DDEV project, so also make the key available to DDEV with `ddev auth ssh`"

@@ -90,6 +90,24 @@ func TestProviderAuthValidatesMissingDDEVUserBeforeSSHAgent(t *testing.T) {
 	}
 }
 
+func TestLocalWPCommandUsesWPInsideDDEVContainer(t *testing.T) {
+	t.Setenv("DDEV_PROJECT", "site")
+	t.Setenv("DDEV_DOCROOT", "web")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	name, args := localWPCommand(dir, Config{LocalWPPath: "web"}, "option", "get", "home")
+	if name != "wp" {
+		t.Fatalf("localWPCommand() name = %q, want wp", name)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--path=/var/www/html/web") {
+		t.Fatalf("localWPCommand() args missing container path: %#v", args)
+	}
+}
+
 func TestURLHelpers(t *testing.T) {
 	t.Parallel()
 	if got := urlBase("https://example.com:8443/path"); got != "https://example.com:8443" {
