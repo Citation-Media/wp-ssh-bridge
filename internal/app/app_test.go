@@ -27,6 +27,42 @@ func TestInitSilentAllowsPartialConfig(t *testing.T) {
 	}
 }
 
+func TestInitSilentSupportsCustomConfigFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+
+	if err := app.commandInit([]string{"--silent", "--config-file", "config/wp-ssh.yaml", "--user", "deploy"}); err != nil {
+		t.Fatalf("commandInit() error = %v\nstderr:\n%s", err, stderr.String())
+	}
+	customPath := filepath.Join(dir, "config", "wp-ssh.yaml")
+	if _, err := os.Stat(customPath); err != nil {
+		t.Fatalf("expected custom config file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".wp-ssh.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("default standalone config should not be written, got err: %v", err)
+	}
+}
+
+func TestInitSilentSupportsConfigFileEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WP_SSH_CONFIG_FILE", "config/env-wp-ssh.yaml")
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+
+	if err := app.commandInit([]string{"--silent", "--user", "deploy"}); err != nil {
+		t.Fatalf("commandInit() error = %v\nstderr:\n%s", err, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config", "env-wp-ssh.yaml")); err != nil {
+		t.Fatalf("expected env config file: %v", err)
+	}
+}
+
 func TestFillPullConfigDoesNotPromptForConfiguredRequiredValues(t *testing.T) {
 	t.Parallel()
 	cfg := Config{

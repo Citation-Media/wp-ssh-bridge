@@ -31,7 +31,7 @@ func TestWriteReadConfigFile(t *testing.T) {
 		SkipSearchReplace: true,
 	}
 
-	if err := writeConfigFile(path, cfg); err != nil {
+	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
 		t.Fatalf("writeConfigFile() error = %v", err)
 	}
 	body, err := os.ReadFile(path)
@@ -63,6 +63,45 @@ func TestWriteReadConfigFile(t *testing.T) {
 
 	if got != cfg {
 		t.Fatalf("read config mismatch\nwant: %#v\n got: %#v", cfg, got)
+	}
+}
+
+func TestWriteConfigFileOmitsDefaultValues(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wp-ssh.yaml")
+	cfg := defaultConfig()
+	cfg.User = "deploy"
+	cfg.Host = "example.com"
+	cfg.RemotePath = "/home/site/web"
+
+	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
+		t.Fatalf("writeConfigFile() error = %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, omitted := range []string{
+		"provider:",
+		"pull_remote_tmp_dir:",
+		"push_remote_tmp_dir:",
+		"clone_images:",
+		"skip_search_replace:",
+	} {
+		if strings.Contains(text, omitted) {
+			t.Fatalf("default key %q should be omitted:\n%s", omitted, text)
+		}
+	}
+	for _, want := range []string{
+		"pull_user: \"deploy\"",
+		"pull_host: \"example.com\"",
+		"pull_remote_path: \"/home/site/web\"",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("written config missing %q:\n%s", want, text)
+		}
 	}
 }
 

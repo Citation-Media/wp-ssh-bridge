@@ -131,8 +131,32 @@ Push uploads/imports the local database with WP-CLI and rsyncs the full local Wo
 
 Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in standalone mode.
 
+Configuration can come from three places, in this order:
+
+1. YAML config file.
+2. Environment variables.
+3. Direct CLI flags.
+
+Direct flags are intended for one-shot usage:
+
+```bash
+ddev-wp-ssh pull --silent \
+  --user deploy \
+  --host example.com \
+  --remote-path /home/example/public_html
+```
+
+Use `--config-file` or `WP_SSH_CONFIG_FILE` to select another YAML file. Relative paths are resolved from the detected project root.
+
+```bash
+ddev-wp-ssh pull --silent --config-file .ddev/wp-ssh.production.yaml
+```
+
+Generated config files only persist values that differ from the CLI/runtime defaults. For example, default values such as `provider: "wp-ssh"`, `pull_remote_tmp_dir: "/tmp"`, `push_remote_tmp_dir: "/tmp"`, `clone_images: false`, and `skip_search_replace: false` are omitted.
+
 | Key | Environment Override | Purpose |
 | --- | --- | --- |
+| Config path | `WP_SSH_CONFIG_FILE` | Optional YAML config file path. Relative paths resolve from the project root. |
 | `pull_user` | `WP_SSH_PULL_USER` | Pull source SSH user. |
 | `pull_host` | `WP_SSH_PULL_HOST` | Pull source SSH host. |
 | `pull_port` | `WP_SSH_PULL_PORT` | Pull source SSH port. |

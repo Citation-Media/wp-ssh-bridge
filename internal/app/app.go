@@ -70,6 +70,7 @@ Common flags:
   --host string              Upstream SSH host
   --port string              Upstream SSH port
   --user string              Upstream SSH user
+  --config-file string       YAML config file path
   --remote-path string       Upstream WordPress root
   --push-host string         Push target SSH host
   --push-remote-path string  Push target WordPress root
@@ -115,7 +116,7 @@ func (a *App) commandInit(args []string) error {
 		}
 	}
 
-	cfg, err := loadConfigForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -134,7 +135,7 @@ func (a *App) commandInit(args []string) error {
 		return err
 	}
 
-	if err := writeConfigForRuntime(runtime, cfg); err != nil {
+	if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 		return err
 	}
 	if runtime.Mode == modeDDEV {
@@ -152,7 +153,7 @@ func (a *App) commandInit(args []string) error {
 	if runtime.Mode == modeDDEV {
 		fmt.Fprintln(a.Stdout, generatedFilesReport(runtime.Root, cfg))
 	} else {
-		fmt.Fprintln(a.Stdout, standaloneFilesReport(runtime.Root, cfg))
+		fmt.Fprintln(a.Stdout, standaloneFilesReport(runtime.Root, opts.ConfigFile, cfg))
 	}
 	return nil
 }
@@ -165,7 +166,7 @@ func (a *App) commandPull(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
-	cfg, err := loadConfigForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -183,7 +184,7 @@ func (a *App) commandPull(args []string) error {
 		return err
 	}
 	if runtime.Mode == modeStandalone {
-		if err := writeConfigForRuntime(runtime, cfg); err != nil {
+		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
 		return a.standalonePull(context.Background(), runtime.Root, cfg)
@@ -217,7 +218,7 @@ func (a *App) commandPush(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
-	cfg, err := loadConfigForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -236,7 +237,7 @@ func (a *App) commandPush(args []string) error {
 		return err
 	}
 	if runtime.Mode == modeStandalone {
-		if err := writeConfigForRuntime(runtime, cfg); err != nil {
+		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
 		return a.standalonePush(context.Background(), runtime.Root, cfg)
@@ -288,7 +289,7 @@ func (a *App) commandProviderInstall(args []string) error {
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider install requires DDEV mode; `ddev describe -j` did not succeed")
 	}
-	cfg, err := loadConfigForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -338,7 +339,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider runtime commands require DDEV mode; `ddev describe -j` did not succeed")
 	}
-	cfg, err := loadConfigForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -388,7 +389,7 @@ func (a *App) commandPlugins(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := loadConfig(projectRoot)
+	cfg, err := loadConfigFromRoot(projectRoot, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -413,25 +414,46 @@ func (a *App) resolveRuntime(explicit string) runtimeContext {
 }
 
 // loadConfigForRuntime reads the correct config source for DDEV or standalone mode.
-func loadConfigForRuntime(runtime runtimeContext) (Config, error) {
-	if runtime.Mode == modeDDEV {
-		return loadConfig(runtime.Root)
-	}
-	return loadStandaloneConfig(runtime.Root)
+func loadConfigForRuntime(runtime runtimeContext, explicitPath string) (Config, error) {
+	return loadConfigPath(configPathForRuntime(runtime, explicitPath))
 }
 
 // writeConfigForRuntime persists config without creating DDEV files in standalone mode.
-func writeConfigForRuntime(runtime runtimeContext, cfg Config) error {
+func writeConfigForRuntime(runtime runtimeContext, explicitPath string, cfg Config) error {
+	return writeConfigFile(configPathForRuntime(runtime, explicitPath), cfg, defaultConfigForRuntime(runtime))
+}
+
+func loadConfigFromRoot(root string, explicitPath string) (Config, error) {
+	runtime := detectRuntime(root)
+	return loadConfigForRuntime(runtime, explicitPath)
+}
+
+func defaultConfigForRuntime(runtime runtimeContext) Config {
+	defaults := defaultConfig()
 	if runtime.Mode == modeDDEV {
-		return writeConfigFile(projectConfigPath(runtime.Root), cfg)
+		applyDDEVDefaults(runtime.Root, &defaults)
 	}
-	return writeConfigFile(standaloneConfigPath(runtime.Root), cfg)
+	return defaults
+}
+
+func configPathForRuntime(runtime runtimeContext, explicitPath string) string {
+	path := firstNonEmpty(explicitPath, os.Getenv("WP_SSH_CONFIG_FILE"))
+	if path != "" {
+		if filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(runtime.Root, path)
+	}
+	if runtime.Mode == modeDDEV {
+		return projectConfigPath(runtime.Root)
+	}
+	return standaloneConfigPath(runtime.Root)
 }
 
 // standaloneFilesReport lists files owned by standalone mode.
-func standaloneFilesReport(root string, cfg Config) string {
+func standaloneFilesReport(root string, explicitPath string, cfg Config) string {
 	paths := []string{
-		standaloneConfigPath(root),
+		configPathForRuntime(runtimeContext{Mode: modeStandalone, Root: root}, explicitPath),
 	}
 	if cfg.PluginRemoveFile != "" {
 		paths = append(paths, pluginListPath(root, cfg))
@@ -467,6 +489,7 @@ func (a *App) standalonePush(ctx context.Context, root string, cfg Config) error
 // configOptions tracks flags shared by init, pull, and provider install.
 type configOptions struct {
 	ProjectRoot       string
+	ConfigFile        string
 	Binary            string
 	Silent            bool
 	Yes               bool
@@ -498,6 +521,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt")
 	fs.BoolVar(&opts.Yes, "yes", false, "skip DDEV confirmation")
@@ -607,6 +631,7 @@ func (opts configOptions) applyGenericAsPush(cfg Config) Config {
 // runtimeOptions tracks provider callback flags.
 type runtimeOptions struct {
 	ProjectRoot   string
+	ConfigFile    string
 	WordPressRoot string
 }
 
@@ -616,6 +641,7 @@ func parseRuntimeCommand(name string, args []string, stderr io.Writer) (runtimeO
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
