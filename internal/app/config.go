@@ -106,15 +106,15 @@ func readConfigFile(path string) (Config, error) {
 		switch key {
 		case "provider":
 			cfg.Provider = value
-		case "pull_user", "user":
+		case "pull_user":
 			cfg.User = value
-		case "pull_host", "host":
+		case "pull_host":
 			cfg.Host = value
-		case "pull_port", "port":
+		case "pull_port":
 			cfg.Port = value
-		case "pull_remote_path", "remote_path":
+		case "pull_remote_path":
 			cfg.RemotePath = value
-		case "pull_remote_tmp_dir", "remote_tmp_dir":
+		case "pull_remote_tmp_dir":
 			cfg.RemoteTmpDir = value
 		case "push_user":
 			cfg.PushUser = value

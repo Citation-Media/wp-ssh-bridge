@@ -66,26 +66,18 @@ func TestWriteReadConfigFile(t *testing.T) {
 	}
 }
 
-func TestReadConfigFileSupportsLegacyPullKeys(t *testing.T) {
+func TestReadConfigFileRejectsLegacyPullKeys(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wp-ssh.yaml")
-	if err := os.WriteFile(path, []byte(`provider: "legacy"
+	if err := os.WriteFile(path, []byte(`provider: "invalid"
 user: "deploy"
-host: "example.com"
-port: "2222"
-remote_path: "/srv/www"
-remote_tmp_dir: "/var/tmp"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := readConfigFile(path)
-	if err != nil {
-		t.Fatalf("readConfigFile() error = %v", err)
-	}
-	if got.User != "deploy" || got.Host != "example.com" || got.Port != "2222" || got.RemotePath != "/srv/www" || got.RemoteTmpDir != "/var/tmp" {
-		t.Fatalf("legacy pull keys were not read correctly: %#v", got)
+	if _, err := readConfigFile(path); err == nil {
+		t.Fatal("readConfigFile() accepted legacy pull key")
 	}
 }
 
