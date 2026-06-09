@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -308,7 +309,7 @@ func (a *App) commandProviderGenerate(args []string) error {
 	fs := flag.NewFlagSet("provider generate", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	provider := fs.String("provider", defaultProviderName, "provider name")
-	binary := fs.String("binary", binaryName, "binary name used by generated YAML")
+	binary := fs.String("binary", binaryName, "binary path used by generated YAML")
 	kind := fs.String("kind", "provider", "provider, hook, or all")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -493,11 +494,11 @@ type configOptions struct {
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
 func parseConfigCommand(name string, args []string, stderr io.Writer) (configOptions, error) {
-	opts := configOptions{Binary: binaryName}
+	opts := configOptions{Binary: defaultBinaryPath()}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
-	fs.StringVar(&opts.Binary, "binary", binaryName, "binary name used by generated provider files")
+	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt")
 	fs.BoolVar(&opts.Yes, "yes", false, "skip DDEV confirmation")
 	fs.BoolVar(&opts.Yes, "y", false, "skip DDEV confirmation")
@@ -787,4 +788,13 @@ func ensureExecutablePath(name string) error {
 		return fmt.Errorf("%s is not on PATH", name)
 	}
 	return nil
+}
+
+// defaultBinaryPath makes project-local binaries work without requiring a global install.
+func defaultBinaryPath() string {
+	path, err := os.Executable()
+	if err != nil || path == "" {
+		return binaryName
+	}
+	return path
 }

@@ -4,23 +4,37 @@
 
 The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` route through `ddev pull` and `ddev push` with generated provider files. If it fails, the same commands run in standalone mode with interactive input and local WP-CLI.
 
-## Install
+## Use Per Project
 
-Download a release artifact from the private repository:
+Download the release artifact into each project and run it from there. This keeps the CLI scoped to the project and lets generated DDEV provider files point at that project-local binary.
 
 ```bash
-gh release download v0.2.0 \
+mkdir -p .ddev/bin
+gh release download v0.2.1 \
   --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.0_darwin_arm64.tar.gz'
-tar -xzf ddev-wp-ssh_v0.2.0_darwin_arm64.tar.gz
+  --pattern 'ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz' \
+  --dir .ddev/bin
+tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz
+rm .ddev/bin/ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz
+
+./.ddev/bin/ddev-wp-ssh init
+```
+
+Global installation is optional convenience, not required:
+
+```bash
+gh release download v0.2.1 \
+  --repo Citation-Media/ddev-wp-ssh \
+  --pattern 'ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz'
+tar -xzf ddev-wp-ssh_v0.2.1_darwin_arm64.tar.gz
 install ddev-wp-ssh /usr/local/bin/ddev-wp-ssh
 ```
 
-Or build directly from the private GitHub repository with Go:
+You can also build directly from the private GitHub repository with Go:
 
 ```bash
 git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.0
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.1
 ```
 
 ## Configure A Project
@@ -172,8 +186,8 @@ ddev-wp-ssh provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `ddev-wp-ssh version` with the tag, publishes archives, and uploads SHA-256 checksums.
