@@ -10,12 +10,12 @@ Download the release artifact into each project and run it from there. This keep
 
 ```bash
 mkdir -p .ddev/bin
-gh release download v0.2.20 \
+gh release download v0.2.21 \
   --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz' \
+  --pattern 'ddev-wp-ssh_v0.2.21_darwin_arm64.tar.gz' \
   --dir .ddev/bin
-tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
-rm .ddev/bin/ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
+tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.21_darwin_arm64.tar.gz
+rm .ddev/bin/ddev-wp-ssh_v0.2.21_darwin_arm64.tar.gz
 
 ./.ddev/bin/ddev-wp-ssh init
 ```
@@ -23,10 +23,10 @@ rm .ddev/bin/ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
 Global installation is optional convenience, not required:
 
 ```bash
-gh release download v0.2.20 \
+gh release download v0.2.21 \
   --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz'
-tar -xzf ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
+  --pattern 'ddev-wp-ssh_v0.2.21_darwin_arm64.tar.gz'
+tar -xzf ddev-wp-ssh_v0.2.21_darwin_arm64.tar.gz
 install ddev-wp-ssh /usr/local/bin/ddev-wp-ssh
 ```
 
@@ -34,7 +34,7 @@ You can also build directly from the private GitHub repository with Go:
 
 ```bash
 git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.20
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.21
 ```
 
 ## Configure A Project
@@ -211,7 +211,7 @@ ddev-wp-ssh provider generate --kind all
 - Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
 - Runs URL search-replace through `ddev wp`, including multisite `site` and `blogs` domain tables.
-- Removes blocked local-only plugins from the embedded default list and optional `plugin_remove_file`.
+- Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.
 - Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
 - Runs post-push URL search-replace on the remote target with WP-CLI, including multisite `site` and `blogs` domain tables.
@@ -221,8 +221,8 @@ ddev-wp-ssh provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.2.20
-git push origin v0.2.20
+git tag v0.2.21
+git push origin v0.2.21
 ```
 
 The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `ddev-wp-ssh version` with the tag, publishes archives, and uploads SHA-256 checksums.

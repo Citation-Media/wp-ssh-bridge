@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to stamp into manual builds, for example v0.2.20"
+        description: "Version to stamp into manual builds, for example v0.2.21"
         required: true
-        default: "v0.2.20"
+        default: "v0.2.21"
 
 permissions:
   contents: write

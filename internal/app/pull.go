@@ -371,7 +371,7 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 		query := fmt.Sprintf("UPDATE `%s` SET domain = %s WHERE domain = %s", table, sqlQuote(newDomain), sqlQuote(oldDomain))
 		title := fmt.Sprintf("Replacing WordPress multisite domains in %s", table)
 		if err := a.runStep(title, "WordPress multisite domains replaced in "+table, func() error {
-			return a.runWP(ctx, projectRoot, cfg, "db", "query", query)
+			return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "db", "query", query)
 		}); err != nil {
 			return err
 		}
@@ -397,59 +397,40 @@ func (a *App) wpTableExists(ctx context.Context, projectRoot string, cfg Config,
 	return lineSetContains(output, table)
 }
 
-// removeBlockedPlugins deactivates and deletes plugins listed in the editable block list.
+// removeBlockedPlugins removes listed local-only plugins through WP-CLI when WordPress knows them.
 func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg Config, overrideRoot string) error {
-	wpRoot := localWPRoot(projectRoot, cfg)
 	if overrideRoot != "" {
+		cfg.LocalWPPath = overrideRoot
 		if filepath.IsAbs(overrideRoot) {
-			wpRoot = overrideRoot
-		} else {
-			wpRoot = filepath.Join(projectRoot, overrideRoot)
+			if rel, ok := projectRelativePath(projectRoot, overrideRoot); ok {
+				cfg.LocalWPPath = rel
+			}
 		}
-	}
-
-	pluginsRoot := filepath.Join(wpRoot, "wp-content", "plugins")
-	if _, err := os.Stat(pluginsRoot); err != nil {
-		return nil
 	}
 
 	plugins, err := readPluginList(projectRoot, cfg)
 	if err != nil {
 		return err
 	}
-	removalSlugs := map[string]bool{}
-	for _, plugin := range plugins {
-		slug := normalizePluginSlug(plugin)
-		if slug != "" {
-			removalSlugs[slug] = true
-		}
+
+	statuses, err := a.listedPluginStatuses(ctx, projectRoot, cfg)
+	if err != nil {
+		return err
 	}
-	if len(removalSlugs) == 0 {
+	if len(statuses) == 0 {
 		return nil
 	}
 
-	installed := a.installedPluginSlugs(ctx, projectRoot, cfg)
-	slugs := make([]string, 0, len(removalSlugs))
-	for slug := range removalSlugs {
-		slugs = append(slugs, slug)
+	targets := blockedPluginRemovalTargets(plugins, statuses)
+	if len(targets) == 0 {
+		a.UI.Success("No local-only blocked plugins found")
+		return nil
 	}
-	sort.Strings(slugs)
 
-	for _, slug := range slugs {
-		title := fmt.Sprintf("Removing local-only blocked plugin %s", slug)
-		if err := a.runStep(title, "Removed local-only blocked plugin "+slug, func() error {
-			if installed[slug] {
-				_ = a.runWP(ctx, projectRoot, cfg, "plugin", "deactivate", slug)
-			}
-			if err := removePluginPath(filepath.Join(pluginsRoot, slug)); err != nil {
-				return err
-			}
-			return removePluginPath(filepath.Join(pluginsRoot, slug+".php"))
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	done := fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets)))
+	return a.runStep("Removing local-only blocked plugins", done, func() error {
+		return a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses)
+	})
 }
 
 // importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime.
@@ -489,7 +470,7 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error 
 		}
 	}
 	return a.runStep("Importing database with WP-CLI", "Database imported", func() error {
-		return a.runWP(ctx, root, cfg, "db", "import", importPath)
+		return a.runWPWithFilteredWarnings(ctx, root, cfg, "db", "import", importPath)
 	})
 }
 
@@ -543,60 +524,94 @@ func normalizePluginSlug(plugin string) string {
 	return plugin
 }
 
-// installedPluginSlugs gets active local plugin names without failing cleanup.
-func (a *App) installedPluginSlugs(ctx context.Context, projectRoot string, cfg Config) map[string]bool {
-	installed := map[string]bool{}
+// listedPluginStatuses returns the plugin state reported by `wp plugin list`.
+func (a *App) listedPluginStatuses(ctx context.Context, projectRoot string, cfg Config) (map[string]string, error) {
+	statuses := map[string]string{}
 	if _, err := os.Stat(filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")); err != nil {
-		return installed
+		return statuses, nil
 	}
 
-	output, err := a.wpOutputErr(ctx, projectRoot, cfg, "plugin", "list", "--format=json", "--fields=name")
+	output, err := a.wpOutputErr(ctx, projectRoot, cfg, "plugin", "list", "--format=json", "--fields=name,status")
 	if err != nil {
-		return installed
+		return statuses, fmt.Errorf("list local plugins with WP-CLI: %w", err)
 	}
 	var plugins []struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(output), &plugins); err != nil {
-		return installed
+		return statuses, err
 	}
 	for _, plugin := range plugins {
 		if plugin.Name != "" {
-			installed[plugin.Name] = true
+			statuses[plugin.Name] = plugin.Status
 		}
 	}
-	return installed
+	return statuses, nil
 }
 
-// removePluginPath deletes blocked plugin files while avoiding symlinked package paths.
-func removePluginPath(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+func blockedPluginRemovalTargets(plugins []string, statuses map[string]string) []string {
+	seen := map[string]bool{}
+	targets := []string{}
+	for _, plugin := range plugins {
+		slug := normalizePluginSlug(plugin)
+		if slug == "" || seen[slug] {
+			continue
+		}
+		if _, ok := statuses[slug]; !ok {
+			continue
+		}
+		seen[slug] = true
+		targets = append(targets, slug)
 	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil
-	}
-	return os.RemoveAll(path)
+	sort.Strings(targets)
+	return targets
 }
 
-// runWP executes WP-CLI through DDEV when available, or local WP-CLI otherwise.
-func (a *App) runWP(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
-	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
-	return a.runExternal(ctx, projectRoot, name, fullArgs...)
+func (a *App) deleteBlockedPluginsWithWPCLI(ctx context.Context, projectRoot string, cfg Config, plugins []string, statuses map[string]string) error {
+	if active := pluginsWithStatus(plugins, statuses, "active"); len(active) > 0 {
+		args := append([]string{"plugin", "deactivate"}, active...)
+		args = append(args, "--quiet")
+		if err := a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, args...); err != nil {
+			return err
+		}
+	}
+	if networkActive := pluginsWithStatus(plugins, statuses, "active-network"); len(networkActive) > 0 {
+		args := append([]string{"plugin", "deactivate"}, networkActive...)
+		args = append(args, "--network", "--quiet")
+		if err := a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, args...); err != nil {
+			return err
+		}
+	}
+
+	args := append([]string{"plugin", "delete"}, plugins...)
+	args = append(args, "--quiet")
+	return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, args...)
+}
+
+func pluginsWithStatus(plugins []string, statuses map[string]string, status string) []string {
+	matching := []string{}
+	for _, plugin := range plugins {
+		if statuses[plugin] == status {
+			matching = append(matching, plugin)
+		}
+	}
+	return matching
+}
+
+func pluginNoun(count int) string {
+	if count == 1 {
+		return "plugin"
+	}
+	return "plugins"
 }
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
 	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
-	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
 	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
 	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
-	defer flushPrefixed(stdout)
 	defer flushPrefixed(filteredStderr)
-	return a.runExternalWithWriters(ctx, projectRoot, name, stdout, filteredStderr, fullArgs...)
+	return a.runExternalWithWriters(ctx, projectRoot, name, io.Discard, filteredStderr, fullArgs...)
 }
 
 func (a *App) runWPSilent(ctx context.Context, projectRoot string, cfg Config, args ...string) error {

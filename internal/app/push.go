@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -230,7 +231,7 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 		query := fmt.Sprintf("UPDATE `%s` SET domain = %s WHERE domain = %s", table, sqlQuote(newDomain), sqlQuote(oldDomain))
 		title := fmt.Sprintf("Replacing push target multisite domains in %s", table)
 		if err := a.runStep(title, "Push target multisite domains replaced in "+table, func() error {
-			return a.runRemoteWP(ctx, projectRoot, target, "db", "query", query)
+			return a.runRemoteWPWithFilteredWarnings(ctx, projectRoot, target, "db", "query", query)
 		}); err != nil {
 			return err
 		}
@@ -251,19 +252,12 @@ func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target 
 	return lineSetContains(output, table)
 }
 
-// runRemoteWP executes WP-CLI on the push target.
-func (a *App) runRemoteWP(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
-	return a.runSSH(ctx, projectRoot, target, remoteWPCommand(target, args...))
-}
-
 func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
 	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target, args...))
-	stdout := a.UI.PrefixedWriter("remote", false)
 	stderr := a.UI.PrefixedWriter("remote", true)
 	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
-	defer flushPrefixed(stdout)
 	defer flushPrefixed(filteredStderr)
-	return a.runSSHWithWriters(ctx, projectRoot, sshArgs, stdout, filteredStderr)
+	return a.runSSHWithWriters(ctx, projectRoot, sshArgs, io.Discard, filteredStderr)
 }
 
 func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {

@@ -122,6 +122,43 @@ func TestLineSetContains(t *testing.T) {
 	}
 }
 
+func TestBlockedPluginRemovalTargetsOnlyUsesListedPlugins(t *testing.T) {
+	t.Parallel()
+	targets := blockedPluginRemovalTargets([]string{
+		"updraftplus",
+		"missing-plugin",
+		"wp-mail-smtp.php",
+		"wp-mail-smtp",
+		"nested-plugin/plugin.php",
+	}, map[string]string{
+		"updraftplus":   "active",
+		"wp-mail-smtp":  "inactive",
+		"nested-plugin": "active-network",
+	})
+
+	want := []string{"nested-plugin", "updraftplus", "wp-mail-smtp"}
+	if strings.Join(targets, ",") != strings.Join(want, ",") {
+		t.Fatalf("blockedPluginRemovalTargets() = %#v, want %#v", targets, want)
+	}
+}
+
+func TestPluginsWithStatus(t *testing.T) {
+	t.Parallel()
+	plugins := []string{"network-plugin", "regular-plugin", "inactive-plugin"}
+	statuses := map[string]string{
+		"network-plugin":  "active-network",
+		"regular-plugin":  "active",
+		"inactive-plugin": "inactive",
+	}
+
+	if got := strings.Join(pluginsWithStatus(plugins, statuses, "active"), ","); got != "regular-plugin" {
+		t.Fatalf("active plugins = %q", got)
+	}
+	if got := strings.Join(pluginsWithStatus(plugins, statuses, "active-network"), ","); got != "network-plugin" {
+		t.Fatalf("network-active plugins = %q", got)
+	}
+}
+
 func TestTruthyConfigValue(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
