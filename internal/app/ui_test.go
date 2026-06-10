@@ -26,7 +26,7 @@ func TestUIPrefixWriterLabelsEveryLine(t *testing.T) {
 	}
 }
 
-func TestRunStepPrintsStartAndSuccess(t *testing.T) {
+func TestRunStepPrintsOnlySuccess(t *testing.T) {
 	t.Parallel()
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
@@ -37,10 +37,11 @@ func TestRunStepPrintsStartAndSuccess(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"• Doing work", "✓ Work done"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("step output missing %q:\n%s", want, output)
-		}
+	if strings.Contains(output, "• Doing work") {
+		t.Fatalf("step start output should stay hidden:\n%s", output)
+	}
+	if !strings.Contains(output, "✓ Work done") {
+		t.Fatalf("step success output missing:\n%s", output)
 	}
 }
 
@@ -58,10 +59,11 @@ func TestRunStepResultUsesReturnedSuccessText(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"• Checking things", "✓ Nothing to change"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("step output missing %q:\n%s", want, output)
-		}
+	if strings.Contains(output, "• Checking things") {
+		t.Fatalf("step start output should stay hidden:\n%s", output)
+	}
+	if !strings.Contains(output, "✓ Nothing to change") {
+		t.Fatalf("step success output missing:\n%s", output)
 	}
 }
 

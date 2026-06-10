@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +42,29 @@ func TestPushURLCacheIsTargetSpecific(t *testing.T) {
 	other := RemoteTarget{User: "deploy", Host: "prod.example.com", RemotePath: "/var/www/html"}
 	if got := readPushURLCache(dir, other); got != "" {
 		t.Fatalf("readPushURLCache() for other target = %q", got)
+	}
+}
+
+func TestPostPushWarnsWhenPushURLMissing(t *testing.T) {
+	dir := t.TempDir()
+	installFakeCommand(t, dir, "wp", `#!/bin/sh
+exit 1
+`)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	err := app.postPush(context.Background(), dir, Config{
+		PushUser:       "deploy",
+		PushHost:       "staging.example.com",
+		PushRemotePath: "/var/www/html",
+		LocalURL:       "https://local.test",
+	})
+	if err != nil {
+		t.Fatalf("postPush() error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Skipping push URL replacement because the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.") {
+		t.Fatalf("missing push URL replacement warning:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }
 

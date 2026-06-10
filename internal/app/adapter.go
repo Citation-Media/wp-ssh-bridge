@@ -10,7 +10,6 @@ type runtimeAdapter interface {
 	Root() string
 	ApplyConfigDefaults(*Config)
 	InstallProjectFiles(Config, string) error
-	ManagedFilesReport(string, Config) string
 	PreparePull(*App, Config, configOptions) error
 	PreparePush(*App, Config, configOptions) error
 	PostPullHooks() []operationHook
@@ -39,10 +38,6 @@ func (adapter standaloneAdapter) ApplyConfigDefaults(*Config) {}
 
 func (adapter standaloneAdapter) InstallProjectFiles(cfg Config, binary string) error {
 	return installStandaloneFiles(adapter.runtime.Root, cfg)
-}
-
-func (adapter standaloneAdapter) ManagedFilesReport(configFile string, cfg Config) string {
-	return standaloneFilesReport(adapter.runtime.Root, configFile, cfg)
 }
 
 func (adapter standaloneAdapter) PreparePull(app *App, cfg Config, opts configOptions) error {
@@ -75,10 +70,6 @@ func (adapter ddevAdapter) ApplyConfigDefaults(cfg *Config) {
 
 func (adapter ddevAdapter) InstallProjectFiles(cfg Config, binary string) error {
 	return installProviderFiles(adapter.runtime.Root, cfg, binary)
-}
-
-func (adapter ddevAdapter) ManagedFilesReport(configFile string, cfg Config) string {
-	return generatedFilesReport(adapter.runtime.Root, cfg)
 }
 
 func (adapter ddevAdapter) PreparePull(app *App, cfg Config, opts configOptions) error {

@@ -44,11 +44,15 @@ func sshCommandString(target RemoteTarget) string {
 // runSSH executes a remote command through ssh without a local shell.
 func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
-	stdout := a.UI.PrefixedWriter("remote", false)
-	stderr := a.UI.PrefixedWriter("remote", true)
-	defer flushPrefixed(stdout)
-	defer flushPrefixed(stderr)
-	return a.runSSHWithWriters(ctx, projectRoot, args, stdout, stderr)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
+	if err == nil {
+		return nil
+	}
+	a.writeCapturedOutput("remote", stdout.String(), false)
+	a.writeCapturedOutput("remote", stderr.String(), true)
+	return err
 }
 
 func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
@@ -59,8 +63,8 @@ func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target
 	if err == nil {
 		return nil
 	}
-	a.writeCapturedSSHOutput(stdout.String(), false)
-	a.writeCapturedSSHOutput(stderr.String(), true)
+	a.writeCapturedOutput("remote", stdout.String(), false)
+	a.writeCapturedOutput("remote", stderr.String(), true)
 	return err
 }
 
@@ -71,12 +75,13 @@ func (a *App) runSSHWithFilteredWarnings(ctx context.Context, projectRoot string
 
 func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot string, args []string) error {
 	stdout := bytes.Buffer{}
-	stderr := a.UI.PrefixedWriter("remote", true)
-	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
+	stderr := bytes.Buffer{}
+	filteredStderr := newDuplicateSummaryWriter(&stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
 	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, filteredStderr)
 	flushPrefixed(filteredStderr)
 	if err != nil {
-		a.writeCapturedSSHOutput(stdout.String(), false)
+		a.writeCapturedOutput("remote", stdout.String(), false)
+		a.writeCapturedOutput("remote", stderr.String(), true)
 	}
 	return err
 }
@@ -94,11 +99,11 @@ func (a *App) runSSHWithWriters(ctx context.Context, projectRoot string, args []
 	return cmd.Run()
 }
 
-func (a *App) writeCapturedSSHOutput(output string, stderr bool) {
+func (a *App) writeCapturedOutput(label string, output string, stderr bool) {
 	if strings.TrimSpace(output) == "" {
 		return
 	}
-	writer := a.UI.PrefixedWriter("remote", stderr)
+	writer := a.UI.PrefixedWriter(label, stderr)
 	_, _ = io.WriteString(writer, output)
 	flushPrefixed(writer)
 }
@@ -106,9 +111,12 @@ func (a *App) writeCapturedSSHOutput(output string, stderr bool) {
 // outputSSH executes a remote command and captures stdout for URL and table probes.
 func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
-	stderr := a.UI.PrefixedWriter("remote", true)
-	defer flushPrefixed(stderr)
-	return a.outputSSHWithStderr(ctx, projectRoot, args, stderr)
+	stderr := bytes.Buffer{}
+	output, err := a.outputSSHWithStderr(ctx, projectRoot, args, &stderr)
+	if err != nil {
+		return output, commandOutputError{err: err, stderr: stderr.String()}
+	}
+	return output, nil
 }
 
 func (a *App) outputSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {

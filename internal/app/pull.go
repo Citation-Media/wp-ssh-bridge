@@ -21,19 +21,8 @@ import (
 	"time"
 )
 
-// providerInfo prints the upstream targets shown by the generated DDEV provider before confirmation.
+// providerInfo stays quiet so DDEV provider runs only show completed steps and errors.
 func (a *App) providerInfo(cfg Config) error {
-	source := cfg.pullTarget()
-	target := cfg.pushTarget()
-	if source.User == "" || source.Host == "" || source.RemotePath == "" {
-		fmt.Fprintf(a.Stdout, "Pull: %s@%s:%s\n", firstNonEmpty(source.User, "<ssh-user>"), firstNonEmpty(source.Host, "<host>"), firstNonEmpty(source.RemotePath, "<remote-path>"))
-	} else {
-		fmt.Fprintf(a.Stdout, "Pull: %s:%s\n", sshTarget(source), trimTrailingSlash(source.RemotePath))
-	}
-	if target.User == "" || target.Host == "" || target.RemotePath == "" {
-		return nil
-	}
-	fmt.Fprintf(a.Stdout, "Push: %s:%s\n", sshTarget(target), trimTrailingSlash(target.RemotePath))
 	return nil
 }
 
@@ -149,19 +138,31 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 	}
 	args = append(args, "-e", sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
 
-	err = a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
-		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	return a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
+		return a.runExternalAllowRsyncVanished(ctx, projectRoot, args...)
 	})
-	if err == nil {
+}
+
+func (a *App) runExternalAllowRsyncVanished(ctx context.Context, projectRoot string, args ...string) error {
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	err := a.runExternalWithWriters(ctx, projectRoot, "rsync", &stdout, &stderr, args...)
+	if isRsyncVanishedError(err) {
+		a.writeCapturedOutput("rsync", stdout.String(), false)
+		a.writeCapturedOutput("rsync", stderr.String(), true)
+		a.UI.Warning("Continuing after rsync warning: remote files vanished during transfer.")
 		return nil
 	}
-
-	var exitError *exec.ExitError
-	if errors.As(err, &exitError) && exitError.ExitCode() == 24 {
-		fmt.Fprintln(a.Stderr, "Continuing after rsync warning: remote files vanished during transfer.")
-		return nil
+	if err != nil {
+		a.writeCapturedOutput("rsync", stdout.String(), false)
+		a.writeCapturedOutput("rsync", stderr.String(), true)
 	}
 	return err
+}
+
+func isRsyncVanishedError(err error) bool {
+	var exitError *exec.ExitError
+	return errors.As(err, &exitError) && exitError.ExitCode() == 24
 }
 
 // filesImport is intentionally a no-op because filesPull syncs directly.
@@ -249,6 +250,7 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 func sanitizeWPConfigContents(contents string) string {
 	dbDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]DB_[A-Z0-9_]+['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
 	contents = dbDefine.ReplaceAllString(contents, "")
+	contents = ensureDDEVConfigIncludeAtTop(contents)
 
 	cookieDomain := regexp.MustCompile(`define\(\s*['"]COOKIE_DOMAIN['"]\s*,\s*\$_SERVER\s*\[\s*['"]HTTP_HOST['"]\s*\]\s*\);`)
 	contents = cookieDomain.ReplaceAllLiteralString(contents, "define('COOKIE_DOMAIN', $_SERVER['HTTP_HOST'] ?? '');")
@@ -266,25 +268,36 @@ func sanitizeWPConfigContents(contents string) string {
 		}
 	}
 
-	if !strings.Contains(contents, "wp-config-ddev.php") {
-		snippet := `
+	return contents
+}
 
-// Include for DDEV-managed settings in wp-config-ddev.php.
+func ensureDDEVConfigIncludeAtTop(contents string) string {
+	contents = removeManagedDDEVConfigInclude(contents)
+
+	openingTag := regexp.MustCompile(`(?s)\A(\s*<\?php[^\r\n]*(?:\r?\n)?)`)
+	if loc := openingTag.FindStringSubmatchIndex(contents); loc != nil {
+		prefix := contents[:loc[3]]
+		if !strings.HasSuffix(prefix, "\n") {
+			prefix += "\n"
+		}
+		return prefix + ddevConfigIncludeSnippet + strings.TrimLeft(contents[loc[3]:], "\r\n")
+	}
+
+	return ddevConfigIncludeSnippet + strings.TrimLeft(contents, "\r\n")
+}
+
+func removeManagedDDEVConfigInclude(contents string) string {
+	block := regexp.MustCompile(`(?s)\n*// Include for DDEV-managed settings in wp-config-ddev\.php\.\r?\n\$ddev_settings = __DIR__ \. '/wp-config-ddev\.php';\r?\nif \(is_readable\(\$ddev_settings\) && !defined\('DB_USER'\)\) \{\r?\n[ \t]*require_once\(\$ddev_settings\);\r?\n\}\r?\n*`)
+	return block.ReplaceAllString(contents, "\n")
+}
+
+const ddevConfigIncludeSnippet = `// Include for DDEV-managed settings in wp-config-ddev.php.
 $ddev_settings = __DIR__ . '/wp-config-ddev.php';
 if (is_readable($ddev_settings) && !defined('DB_USER')) {
     require_once($ddev_settings);
 }
-`
-		wpSettings := regexp.MustCompile(`\n\s*(?:require_once|require)\s+ABSPATH\s*\.\s*['"]wp-settings\.php['"]\s*;`)
-		if loc := wpSettings.FindStringIndex(contents); loc != nil {
-			contents = contents[:loc[0]] + snippet + contents[loc[0]:]
-		} else {
-			contents = strings.TrimRight(contents, "\r\n") + snippet + "\n"
-		}
-	}
 
-	return contents
-}
+`
 
 // replaceSiteURLs updates single-site and multisite URLs after database import.
 func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Config) error {
@@ -300,14 +313,14 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"))
 	newURL := localSiteURL(projectRoot, cfg)
 	if oldURL == "" || newURL == "" {
-		fmt.Fprintln(a.Stderr, "Skipping WordPress URL replacement because the old or new URL could not be detected.")
+		a.UI.Warning("Skipping WordPress URL replacement because the old or new URL could not be detected.")
 		return nil
 	}
 
 	oldBase := urlBase(oldURL)
 	newBase := urlBase(newURL)
 	if oldBase == "" || newBase == "" {
-		fmt.Fprintln(a.Stderr, "Skipping WordPress URL replacement because the old or new URL is invalid.")
+		a.UI.Warning("Skipping WordPress URL replacement because the old or new URL is invalid.")
 		return nil
 	}
 
@@ -618,10 +631,17 @@ func pluginNoun(count int) string {
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
 	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
-	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
-	defer flushPrefixed(filteredStderr)
-	return a.runExternalWithWriters(ctx, projectRoot, name, io.Discard, filteredStderr, fullArgs...)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	filteredStderr := newDuplicateSummaryWriter(&stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
+	err := a.runExternalWithWriters(ctx, projectRoot, name, &stdout, filteredStderr, fullArgs...)
+	flushPrefixed(filteredStderr)
+	if err != nil {
+		label := commandLabel(name)
+		a.writeCapturedOutput(label, stdout.String(), false)
+		a.writeCapturedOutput(label, stderr.String(), true)
+	}
+	return err
 }
 
 func (a *App) runWPSilent(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
@@ -664,11 +684,15 @@ func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []s
 
 // runExternal runs a local executable without invoking a local shell.
 func (a *App) runExternal(ctx context.Context, dir string, name string, args ...string) error {
-	stdout := a.UI.PrefixedWriter(commandLabel(name), false)
-	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	defer flushPrefixed(stdout)
-	defer flushPrefixed(stderr)
-	return a.runExternalWithWriters(ctx, dir, name, stdout, stderr, args...)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	err := a.runExternalWithWriters(ctx, dir, name, &stdout, &stderr, args...)
+	if err != nil {
+		label := commandLabel(name)
+		a.writeCapturedOutput(label, stdout.String(), false)
+		a.writeCapturedOutput(label, stderr.String(), true)
+	}
+	return err
 }
 
 func (a *App) runExternalWithWriters(ctx context.Context, dir string, name string, stdout io.Writer, stderr io.Writer, args ...string) error {
@@ -682,9 +706,12 @@ func (a *App) runExternalWithWriters(ctx context.Context, dir string, name strin
 
 // outputExternal captures command output while preserving stderr for diagnostics.
 func (a *App) outputExternal(ctx context.Context, dir string, name string, args ...string) (string, error) {
-	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	defer flushPrefixed(stderr)
-	return a.outputExternalWithStderr(ctx, dir, name, stderr, args...)
+	stderr := bytes.Buffer{}
+	output, err := a.outputExternalWithStderr(ctx, dir, name, &stderr, args...)
+	if err != nil {
+		return output, commandOutputError{err: err, stderr: stderr.String()}
+	}
+	return output, nil
 }
 
 func (a *App) outputExternalWithStderr(ctx context.Context, dir string, name string, stderr io.Writer, args ...string) (string, error) {

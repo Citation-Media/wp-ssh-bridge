@@ -49,7 +49,6 @@ func (ui *CLIUI) Error(format string, args ...any) {
 }
 
 func (ui *CLIUI) Step(message string) *UIStep {
-	ui.Info("%s", message)
 	return &UIStep{ui: ui, message: message}
 }
 
@@ -104,6 +103,27 @@ func (step *UIStep) Done(message string) {
 
 func (step *UIStep) Failed(err error) {
 	step.ui.Error("%s failed: %s", step.message, err)
+}
+
+type commandOutputError struct {
+	err    error
+	stderr string
+}
+
+func (err commandOutputError) Error() string {
+	details := strings.TrimSpace(err.stderr)
+	if details == "" {
+		return err.err.Error()
+	}
+	return err.err.Error() + ": " + compactWhitespace(details)
+}
+
+func (err commandOutputError) Unwrap() error {
+	return err.err
+}
+
+func compactWhitespace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 // prefixWriter prefixes every complete subprocess output line with its source.

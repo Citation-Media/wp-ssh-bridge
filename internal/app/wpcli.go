@@ -28,9 +28,7 @@ func (a *App) ensureLocalWPCLI(ctx context.Context, projectRoot string, cfg Conf
 
 func (a *App) ensureLocalWPCLIAvailable(ctx context.Context, projectRoot string, cfg Config) error {
 	if _, ok := ddevDescribe(projectRoot); ok {
-		stderr := a.UI.PrefixedWriter("ddev", true)
-		defer flushPrefixed(stderr)
-		return a.runExternalWithWriters(ctx, projectRoot, "ddev", io.Discard, stderr, "wp", "--allow-root", "cli", "version")
+		return a.runExternal(ctx, projectRoot, "ddev", "wp", "--allow-root", "cli", "version")
 	}
 
 	phar := localWPCLIPharPath(projectRoot)

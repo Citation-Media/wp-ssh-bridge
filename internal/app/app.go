@@ -147,9 +147,8 @@ func (a *App) commandInit(args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(a.Stdout, "Configured %s pull source for %s:%s\n", cfg.Provider, sshTarget(cfg.pullTarget()), trimTrailingSlash(cfg.RemotePath))
-	fmt.Fprintln(a.Stdout, "Managed files:")
-	fmt.Fprintln(a.Stdout, adapter.ManagedFilesReport(opts.ConfigFile, cfg))
+	a.UI.Success("Configured %s pull source for %s:%s", cfg.Provider, sshTarget(cfg.pullTarget()), trimTrailingSlash(cfg.RemotePath))
+	a.UI.Success("Project files updated")
 	return nil
 }
 
@@ -263,7 +262,7 @@ func (a *App) commandProviderInstall(args []string) error {
 	if err := adapter.InstallProjectFiles(cfg, opts.Binary); err != nil {
 		return err
 	}
-	fmt.Fprintln(a.Stdout, adapter.ManagedFilesReport(opts.ConfigFile, cfg))
+	a.UI.Success("Provider files installed")
 	return nil
 }
 
@@ -466,17 +465,6 @@ func operationTargetLabel(action string) string {
 		return "Push target"
 	}
 	return "Pull source"
-}
-
-// standaloneFilesReport lists files owned by standalone mode.
-func standaloneFilesReport(root string, explicitPath string, cfg Config) string {
-	paths := []string{
-		configPathForRuntime(runtimeContext{Mode: modeStandalone, Root: root}, explicitPath),
-	}
-	if cfg.PluginRemoveFile != "" {
-		paths = append(paths, pluginListPath(root, cfg))
-	}
-	return strings.Join(paths, "\n")
 }
 
 // runPullPipeline executes the host-side pull pipeline without DDEV lifecycle headings.

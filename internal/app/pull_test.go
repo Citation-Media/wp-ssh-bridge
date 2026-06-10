@@ -36,6 +36,29 @@ require_once ABSPATH . 'wp-settings.php';
 			t.Fatalf("sanitized config missing %q:\n%s", want, got)
 		}
 	}
+	if !strings.HasPrefix(got, "<?php\n"+ddevConfigIncludeSnippet) {
+		t.Fatalf("DDEV config include should be first PHP command:\n%s", got)
+	}
+	if count := strings.Count(got, "$ddev_settings = __DIR__ . '/wp-config-ddev.php';"); count != 1 {
+		t.Fatalf("DDEV config include count = %d, want 1:\n%s", count, got)
+	}
+}
+
+func TestSanitizeWPConfigContentsMovesManagedDDEVIncludeToTop(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+// Custom bootstrap.
+
+` + ddevConfigIncludeSnippet + `require_once ABSPATH . 'wp-settings.php';
+`
+
+	got := sanitizeWPConfigContents(input)
+	if !strings.HasPrefix(got, "<?php\n"+ddevConfigIncludeSnippet+"// Custom bootstrap.") {
+		t.Fatalf("DDEV config include should be moved to the top:\n%s", got)
+	}
+	if count := strings.Count(got, "$ddev_settings = __DIR__ . '/wp-config-ddev.php';"); count != 1 {
+		t.Fatalf("DDEV config include count = %d, want 1:\n%s", count, got)
+	}
 }
 
 func TestSanitizeWPConfigForRuntimeSkipsStandalone(t *testing.T) {
@@ -172,6 +195,40 @@ func TestBuildRsyncExcludesPreservesStandaloneWPConfig(t *testing.T) {
 	}
 }
 
+func TestFilesPullContinuesAfterRsyncVanishedWarning(t *testing.T) {
+	dir := t.TempDir()
+	installFakeCommand(t, dir, "rsync", `#!/bin/sh
+printf 'file vanished during transfer\n' >&2
+exit 24
+`)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	err := app.filesPull(context.Background(), dir, Config{
+		User:       "deploy",
+		Host:       "example.com",
+		RemotePath: "/var/www/html",
+	}, false)
+	if err != nil {
+		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	output := stdout.String() + stderr.String()
+	if strings.Contains(output, "✗ Syncing WordPress files from pull source failed") {
+		t.Fatalf("tolerated rsync warning printed a failed step:\n%s", output)
+	}
+	for _, want := range []string{
+		"✓ WordPress files synced",
+		"rsync  │ file vanished during transfer",
+		"! Continuing after rsync warning: remote files vanished during transfer.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRsyncArchiveArgsSupportMacOSRsync(t *testing.T) {
 	t.Parallel()
 	args := strings.Join(rsyncArchiveArgs(), " ")
@@ -209,6 +266,26 @@ func TestLineSetContains(t *testing.T) {
 	}
 	if lineSetContains(output, "wp_site_meta") {
 		t.Fatal("lineSetContains() matched partial table name")
+	}
+}
+
+func TestReplaceSiteURLsWarnsWhenURLDetectionFails(t *testing.T) {
+	dir := t.TempDir()
+	installFakeCommand(t, dir, "wp", `#!/bin/sh
+exit 1
+`)
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte("<?php\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	if err := app.replaceSiteURLs(context.Background(), dir, Config{LocalURL: "https://local.test"}); err != nil {
+		t.Fatalf("replaceSiteURLs() error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Skipping WordPress URL replacement because the old or new URL could not be detected.") {
+		t.Fatalf("missing URL replacement warning:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }
 

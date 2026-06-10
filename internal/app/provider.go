@@ -199,17 +199,3 @@ func ensureCustomPluginList(root string, cfg Config) error {
 	}
 	return os.WriteFile(listPath, []byte(defaultPluginList), 0o644)
 }
-
-// generatedFilesReport describes files managed by provider install.
-func generatedFilesReport(projectRoot string, cfg Config) string {
-	providerName := defaultString(cfg.Provider, defaultProviderName)
-	paths := []string{
-		filepath.Join(projectRoot, ".ddev", "providers", providerName+".yaml"),
-		filepath.Join(projectRoot, ".ddev", hookConfigName),
-		projectConfigPath(projectRoot),
-	}
-	if cfg.PluginRemoveFile != "" {
-		paths = append(paths, pluginListPath(projectRoot, cfg))
-	}
-	return strings.Join(paths, "\n")
-}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -107,14 +108,14 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"), localSiteURL(projectRoot, cfg))
 	newURL := firstNonEmpty(cfg.PushURL, readPushURLCache(projectRoot, target))
 	if oldURL == "" || newURL == "" {
-		fmt.Fprintln(a.Stderr, "Skipping push URL replacement because the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.")
+		a.UI.Warning("Skipping push URL replacement because the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.")
 		return nil
 	}
 
 	oldBase := urlBase(oldURL)
 	newBase := urlBase(newURL)
 	if oldBase == "" || newBase == "" {
-		fmt.Fprintln(a.Stderr, "Skipping push URL replacement because the local or push target URL is invalid.")
+		a.UI.Warning("Skipping push URL replacement because the local or push target URL is invalid.")
 		return nil
 	}
 
@@ -154,15 +155,15 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = gzipWriter
-	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
-	cmd.Stderr = stderr
+	stderr := bytes.Buffer{}
+	cmd.Stderr = &stderr
 	runErr := a.runStep("Exporting local database", "Local database exported", func() error {
 		return cmd.Run()
 	})
-	flushPrefixed(stderr)
 	closeErr := gzipWriter.Close()
 	fileErr := file.Close()
 	if runErr != nil {
+		a.writeCapturedOutput(commandLabel(name), stderr.String(), true)
 		_ = os.Remove(dumpPath)
 		return runErr
 	}
