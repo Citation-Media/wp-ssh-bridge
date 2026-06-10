@@ -47,7 +47,7 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 	remoteDump := strings.TrimSuffix(remoteDumpGZ, ".gz")
 
 	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
-	if err := a.runStep("Uploading local database export", "Database export uploaded", func() error {
+	if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
 	}); err != nil {
 		return err
@@ -90,7 +90,7 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) err
 		args = append(args, "--exclude="+exclude)
 	}
 	args = append(args, "-e", sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
-	return a.runStep("Syncing local WordPress app to the push target", "Push target files synced", func() error {
+	return a.runStep("Syncing WordPress files to push target", "Push target files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
 	})
 }
@@ -157,7 +157,7 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 	cmd.Stdout = gzipWriter
 	stderr := a.UI.PrefixedWriter(commandLabel(name), true)
 	cmd.Stderr = stderr
-	runErr := a.runStep("Creating local database export", "Local database export created", func() error {
+	runErr := a.runStep("Exporting local database", "Local database exported", func() error {
 		return cmd.Run()
 	})
 	flushPrefixed(stderr)

@@ -17,11 +17,11 @@ var wpCLIPharURL = "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/pha
 
 // ensureLocalWPCLI verifies the host-side WP-CLI command used by local operations.
 func (a *App) ensureLocalWPCLI(ctx context.Context, projectRoot string, cfg Config) error {
-	err := a.runStep("Checking host WP-CLI compatibility", "Host WP-CLI compatibility verified", func() error {
+	err := a.runStep("Checking local WP-CLI compatibility", "Local WP-CLI compatibility verified", func() error {
 		return a.ensureLocalWPCLIAvailable(ctx, projectRoot, cfg)
 	})
 	if err != nil {
-		return fmt.Errorf("fatal: host WP-CLI is not available or cannot run: %w", err)
+		return fmt.Errorf("fatal: local WP-CLI is not available or cannot run: %w", err)
 	}
 	return nil
 }

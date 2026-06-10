@@ -44,6 +44,27 @@ func TestRunStepPrintsStartAndSuccess(t *testing.T) {
 	}
 }
 
+func TestRunStepResultUsesReturnedSuccessText(t *testing.T) {
+	t.Parallel()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	err := app.runStepResult("Checking things", func() (string, error) {
+		return "Nothing to change", nil
+	})
+	if err != nil {
+		t.Fatalf("runStepResult() error = %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{"• Checking things", "✓ Nothing to change"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("step output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestDuplicateSummaryWriterSuppressesRepeatedWarnings(t *testing.T) {
 	t.Parallel()
 	output := bytes.Buffer{}

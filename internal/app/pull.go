@@ -74,7 +74,7 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 
 // authenticateTarget verifies SSH authentication before destructive sync steps run.
 func (a *App) authenticateTarget(ctx context.Context, projectRoot string, target RemoteTarget, label string) error {
-	return a.runStep("Authenticating to "+label, sentenceCase(label)+" authentication works", func() error {
+	return a.runStep("Checking "+label+" SSH access", sentenceCase(label)+" SSH access verified", func() error {
 		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target))))
 	})
 }
@@ -109,7 +109,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		"trap - EXIT",
 	}, " ")
-	if err := a.runStep("Creating remote database export", "Remote database export created", func() error {
+	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
 		return a.runSSH(ctx, projectRoot, target, remoteCommand)
 	}); err != nil {
 		return err
@@ -122,7 +122,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		return err
 	}
 
-	return a.runStep("Deleting remote database export", "Remote database export deleted", func() error {
+	return a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
 		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
 	})
 }
@@ -149,7 +149,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 	}
 	args = append(args, "-e", sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
 
-	err = a.runStep("Syncing upstream WordPress files", "Files synced", func() error {
+	err = a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
 	})
 	if err == nil {
@@ -166,7 +166,9 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 
 // filesImport is intentionally a no-op because filesPull syncs directly.
 func (a *App) filesImport() {
-	a.UI.Success("Files already synced; no DDEV file import needed")
+	_ = a.runStep("Checking file import", "File import skipped; files already synced", func() error {
+		return nil
+	})
 }
 
 // postPull applies local cleanup after a database or file pull.
@@ -231,7 +233,7 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 	}
 
 	updated := sanitizeWPConfigContents(string(contents))
-	return a.runStep("Sanitizing wp-config.php", "wp-config.php sanitized", func() error {
+	return a.runStep("Sanitizing local wp-config.php", "Local wp-config.php sanitized", func() error {
 		return os.WriteFile(wpConfig, []byte(updated), 0o644)
 	})
 }
@@ -408,28 +410,29 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		}
 	}
 
-	plugins, err := readPluginList(projectRoot, cfg)
-	if err != nil {
-		return err
-	}
+	return a.runStepResult("Cleaning up local-only blocked plugins", func() (string, error) {
+		plugins, err := readPluginList(projectRoot, cfg)
+		if err != nil {
+			return "", err
+		}
 
-	statuses, err := a.listedPluginStatuses(ctx, projectRoot, cfg)
-	if err != nil {
-		return err
-	}
-	if len(statuses) == 0 {
-		return nil
-	}
+		statuses, err := a.listedPluginStatuses(ctx, projectRoot, cfg)
+		if err != nil {
+			return "", err
+		}
+		if len(statuses) == 0 {
+			return "No local WordPress plugins found", nil
+		}
 
-	targets := blockedPluginRemovalTargets(plugins, statuses)
-	if len(targets) == 0 {
-		a.UI.Success("No local-only blocked plugins found")
-		return nil
-	}
+		targets := blockedPluginRemovalTargets(plugins, statuses)
+		if len(targets) == 0 {
+			return "No local-only blocked plugins found", nil
+		}
 
-	done := fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets)))
-	return a.runStep("Removing local-only blocked plugins", done, func() error {
-		return a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses)
+		if err := a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets))), nil
 	})
 }
 
@@ -469,7 +472,7 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error 
 			importPath = containerPath
 		}
 	}
-	return a.runStep("Importing database with WP-CLI", "Database imported", func() error {
+	return a.runStep("Importing database into local WordPress", "Local database imported", func() error {
 		return a.runWPWithFilteredWarnings(ctx, root, cfg, "db", "import", importPath)
 	})
 }
