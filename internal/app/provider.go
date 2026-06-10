@@ -145,6 +145,7 @@ func installProviderFiles(projectRoot string, cfg Config, binary string) error {
 	if err := validateProviderName(providerName); err != nil {
 		return err
 	}
+	binary = portableProviderBinary(projectRoot, binary)
 	if err := os.MkdirAll(filepath.Join(projectRoot, ".ddev", "providers"), 0o755); err != nil {
 		return err
 	}
@@ -160,6 +161,23 @@ func installProviderFiles(projectRoot string, cfg Config, binary string) error {
 	}
 
 	return ensureCustomPluginList(projectRoot, cfg)
+}
+
+// portableProviderBinary keeps generated DDEV YAML free of project-local absolute paths.
+func portableProviderBinary(projectRoot string, binary string) string {
+	if binary == "" {
+		return binaryName
+	}
+	if !filepath.IsAbs(binary) {
+		return filepath.ToSlash(binary)
+	}
+	if rel, ok := projectRelativePath(projectRoot, binary); ok {
+		return "./" + rel
+	}
+	if filepath.Base(binary) == binaryName {
+		return binaryName
+	}
+	return binary
 }
 
 // installStandaloneFiles writes standalone support files without DDEV provider YAML.

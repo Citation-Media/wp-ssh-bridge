@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-// providerInfo prints the upstream target shown by ddev pull before confirmation.
+// providerInfo prints the upstream targets shown by the generated DDEV provider before confirmation.
 func (a *App) providerInfo(cfg Config) error {
 	source := cfg.pullTarget()
 	target := cfg.pushTarget()
@@ -45,9 +45,7 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		if err := cfg.validatePullRequired(); err != nil {
 			return err
 		}
-		if err := a.runStep("Authenticating to pull source", "Pull source authentication works", func() error {
-			return a.runSSH(ctx, projectRoot, source, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(source))))
-		}); err != nil {
+		if err := a.authenticateTarget(ctx, projectRoot, source, "pull source"); err != nil {
 			return err
 		}
 		if err := a.ensureRemoteWPCLI(ctx, projectRoot, source, "pull source"); err != nil {
@@ -60,9 +58,7 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		if err := cfg.validatePushRequired(); err != nil {
 			return err
 		}
-		if err := a.runStep("Authenticating to push target", "Push target authentication works", func() error {
-			return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target))))
-		}); err != nil {
+		if err := a.authenticateTarget(ctx, projectRoot, target, "push target"); err != nil {
 			return err
 		}
 		if err := a.ensureRemoteWPCLI(ctx, projectRoot, target, "push target"); err != nil {
@@ -74,6 +70,13 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		return a.ensureLocalWPCLI(ctx, projectRoot, cfg)
 	}
 	return cfg.validatePullRequired()
+}
+
+// authenticateTarget verifies SSH authentication before destructive sync steps run.
+func (a *App) authenticateTarget(ctx context.Context, projectRoot string, target RemoteTarget, label string) error {
+	return a.runStep("Authenticating to "+label, sentenceCase(label)+" authentication works", func() error {
+		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target))))
+	})
 }
 
 // dbPull exports the upstream database and downloads it to the runtime scratch path.
@@ -365,9 +368,11 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 		if !a.wpTableExists(ctx, projectRoot, cfg, table) {
 			continue
 		}
-		fmt.Fprintf(a.Stdout, "Replacing WordPress multisite domains in %s: %s -> %s\n", table, oldDomain, newDomain)
 		query := fmt.Sprintf("UPDATE `%s` SET domain = %s WHERE domain = %s", table, sqlQuote(newDomain), sqlQuote(oldDomain))
-		if err := a.runWP(ctx, projectRoot, cfg, "db", "query", query); err != nil {
+		title := fmt.Sprintf("Replacing WordPress multisite domains in %s", table)
+		if err := a.runStep(title, "WordPress multisite domains replaced in "+table, func() error {
+			return a.runWP(ctx, projectRoot, cfg, "db", "query", query)
+		}); err != nil {
 			return err
 		}
 	}
@@ -431,22 +436,24 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 	sort.Strings(slugs)
 
 	for _, slug := range slugs {
-		if installed[slug] {
-			fmt.Fprintf(a.Stdout, "Removing local-only blocked plugin %s...\n", slug)
-			_ = a.runWP(ctx, projectRoot, cfg, "plugin", "deactivate", slug)
-		}
-		if err := removePluginPath(filepath.Join(pluginsRoot, slug)); err != nil {
-			return err
-		}
-		if err := removePluginPath(filepath.Join(pluginsRoot, slug+".php")); err != nil {
+		title := fmt.Sprintf("Removing local-only blocked plugin %s", slug)
+		if err := a.runStep(title, "Removed local-only blocked plugin "+slug, func() error {
+			if installed[slug] {
+				_ = a.runWP(ctx, projectRoot, cfg, "plugin", "deactivate", slug)
+			}
+			if err := removePluginPath(filepath.Join(pluginsRoot, slug)); err != nil {
+				return err
+			}
+			return removePluginPath(filepath.Join(pluginsRoot, slug+".php"))
+		}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// importStandaloneDB imports the downloaded gzip dump when DDEV is not orchestrating imports.
-func (a *App) importStandaloneDB(ctx context.Context, root string, cfg Config) error {
+// importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime.
+func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error {
 	dumpPath := filepath.Join(downloadsDir(root), "db.sql.gz")
 	file, err := os.Open(dumpPath)
 	if err != nil {
@@ -475,8 +482,14 @@ func (a *App) importStandaloneDB(ctx context.Context, root string, cfg Config) e
 		return err
 	}
 
+	importPath := tempPath
+	if _, ok := ddevDescribe(root); ok {
+		if containerPath, ok := containerProjectPath(root, tempPath); ok {
+			importPath = containerPath
+		}
+	}
 	return a.runStep("Importing database with WP-CLI", "Database imported", func() error {
-		return a.runWP(ctx, root, cfg, "db", "import", tempPath)
+		return a.runWP(ctx, root, cfg, "db", "import", importPath)
 	})
 }
 
@@ -631,11 +644,6 @@ func (a *App) runExternal(ctx context.Context, dir string, name string, args ...
 	defer flushPrefixed(stdout)
 	defer flushPrefixed(stderr)
 	return a.runExternalWithWriters(ctx, dir, name, stdout, stderr, args...)
-}
-
-// runExternalPlain preserves native interactive output for parent commands like `ddev pull`.
-func (a *App) runExternalPlain(ctx context.Context, dir string, name string, args ...string) error {
-	return a.runExternalWithWriters(ctx, dir, name, a.Stdout, a.Stderr, args...)
 }
 
 func (a *App) runExternalWithWriters(ctx context.Context, dir string, name string, stdout io.Writer, stderr io.Writer, args ...string) error {

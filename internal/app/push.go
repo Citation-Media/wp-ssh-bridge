@@ -227,9 +227,11 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 		if !a.remoteTableExists(ctx, projectRoot, target, table) {
 			continue
 		}
-		fmt.Fprintf(a.Stdout, "Replacing push target multisite domains in %s: %s -> %s\n", table, oldDomain, newDomain)
 		query := fmt.Sprintf("UPDATE `%s` SET domain = %s WHERE domain = %s", table, sqlQuote(newDomain), sqlQuote(oldDomain))
-		if err := a.runRemoteWP(ctx, projectRoot, target, "db", "query", query); err != nil {
+		title := fmt.Sprintf("Replacing push target multisite domains in %s", table)
+		if err := a.runStep(title, "Push target multisite domains replaced in "+table, func() error {
+			return a.runRemoteWP(ctx, projectRoot, target, "db", "query", query)
+		}); err != nil {
 			return err
 		}
 	}

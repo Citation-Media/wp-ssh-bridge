@@ -164,7 +164,7 @@ func (a *App) commandInit(args []string) error {
 	return nil
 }
 
-// commandPull runs ddev pull using saved config and optional one-shot overrides.
+// commandPull runs the direct pull pipeline using saved config and optional one-shot overrides.
 func (a *App) commandPull(args []string) error {
 	opts, err := parseConfigCommand("pull", args, a.Stderr)
 	if err != nil {
@@ -193,30 +193,19 @@ func (a *App) commandPull(args []string) error {
 		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
-		return a.standalonePull(context.Background(), runtime.Root, cfg, opts)
+	} else {
+		if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
+			return err
+		}
+		if err := a.confirmDirectOperation("pull", cfg.pullTarget(), opts); err != nil {
+			return err
+		}
 	}
 
-	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
-		return err
-	}
-	ddevArgs := []string{"pull", defaultString(cfg.Provider, defaultProviderName), "--environment=" + cfg.envArgs()}
-	if opts.Silent || opts.Yes {
-		ddevArgs = append(ddevArgs, "-y")
-	}
-	if opts.SkipDB {
-		ddevArgs = append(ddevArgs, "--skip-db")
-	}
-	if opts.SkipFiles {
-		ddevArgs = append(ddevArgs, "--skip-files")
-	}
-	if opts.SkipImport {
-		ddevArgs = append(ddevArgs, "--skip-import")
-	}
-
-	return a.runExternalPlain(context.Background(), runtime.Root, "ddev", ddevArgs...)
+	return a.runPullPipeline(context.Background(), runtime.Root, cfg, opts)
 }
 
-// commandPush runs ddev push using saved push target config and one-shot overrides.
+// commandPush runs the direct push pipeline using saved push target config and one-shot overrides.
 func (a *App) commandPush(args []string) error {
 	opts, err := parseConfigCommand("push", args, a.Stderr)
 	if err != nil {
@@ -249,24 +238,16 @@ func (a *App) commandPush(args []string) error {
 		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
-		return a.standalonePush(context.Background(), runtime.Root, cfg, opts)
+	} else {
+		if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
+			return err
+		}
+		if err := a.confirmDirectOperation("push", cfg.pushTarget(), opts); err != nil {
+			return err
+		}
 	}
 
-	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
-		return err
-	}
-	ddevArgs := []string{"push", defaultString(cfg.Provider, defaultProviderName), "--environment=" + cfg.envArgs()}
-	if opts.Silent || opts.Yes {
-		ddevArgs = append(ddevArgs, "-y")
-	}
-	if opts.SkipDB {
-		ddevArgs = append(ddevArgs, "--skip-db")
-	}
-	if opts.SkipFiles {
-		ddevArgs = append(ddevArgs, "--skip-files")
-	}
-
-	return a.runExternalPlain(context.Background(), runtime.Root, "ddev", ddevArgs...)
+	return a.runPushPipeline(context.Background(), runtime.Root, cfg, opts)
 }
 
 // commandProvider handles both generated-file commands and DDEV runtime callbacks.
@@ -439,7 +420,12 @@ func loadConfigForRuntime(runtime runtimeContext, explicitPath string) (Config, 
 
 // writeConfigForRuntime persists config without creating DDEV files in standalone mode.
 func writeConfigForRuntime(runtime runtimeContext, explicitPath string, cfg Config) error {
-	return writeConfigFile(configPathForRuntime(runtime, explicitPath), cfg, defaultConfigForRuntime(runtime))
+	defaults := defaultConfigForRuntime(runtime)
+	if runtime.Mode == modeDDEV {
+		cfg = normalizeDDEVConfigPaths(runtime.Root, cfg)
+		defaults = normalizeDDEVConfigPaths(runtime.Root, defaults)
+	}
+	return writeConfigFile(configPathForRuntime(runtime, explicitPath), cfg, defaults)
 }
 
 func loadConfigFromRoot(root string, explicitPath string) (Config, error) {
@@ -469,6 +455,48 @@ func configPathForRuntime(runtime runtimeContext, explicitPath string) string {
 	return standaloneConfigPath(runtime.Root)
 }
 
+func normalizeDDEVConfigPaths(projectRoot string, cfg Config) Config {
+	cfg.LocalWPPath = projectRelativeConfigPath(projectRoot, cfg.LocalWPPath)
+	cfg.PluginRemoveFile = projectRelativeConfigPath(projectRoot, cfg.PluginRemoveFile)
+	return cfg
+}
+
+func projectRelativeConfigPath(projectRoot string, path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.ToSlash(path)
+	}
+	if rel, ok := projectRelativePath(projectRoot, path); ok {
+		return rel
+	}
+	return path
+}
+
+// confirmDirectOperation replaces DDEV's parent confirmation when the wrapper runs directly.
+func (a *App) confirmDirectOperation(action string, target RemoteTarget, opts configOptions) error {
+	if opts.Silent || opts.Yes {
+		return nil
+	}
+	fmt.Fprintf(a.Stdout, "%s: %s:%s\n", operationTargetLabel(action), sshTarget(target), trimTrailingSlash(target.RemotePath))
+	confirmed, err := newPrompter(a.Stdin, a.Stdout).promptBool("Continue", false)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errors.New(action + " cancelled")
+	}
+	return nil
+}
+
+func operationTargetLabel(action string) string {
+	if action == "push" {
+		return "Push target"
+	}
+	return "Pull source"
+}
+
 // standaloneFilesReport lists files owned by standalone mode.
 func standaloneFilesReport(root string, explicitPath string, cfg Config) string {
 	paths := []string{
@@ -480,12 +508,15 @@ func standaloneFilesReport(root string, explicitPath string, cfg Config) string 
 	return strings.Join(paths, "\n")
 }
 
-// standalonePull executes the direct pull pipeline outside DDEV provider mode.
-func (a *App) standalonePull(ctx context.Context, root string, cfg Config, opts configOptions) error {
+// runPullPipeline executes the host-side pull pipeline without DDEV lifecycle headings.
+func (a *App) runPullPipeline(ctx context.Context, root string, cfg Config, opts configOptions) error {
 	if opts.SkipDB && opts.SkipFiles {
 		return nil
 	}
 
+	if err := a.authenticateTarget(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
+		return err
+	}
 	if !opts.SkipDB {
 		if err := a.ensureRemoteWPCLI(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
 			return err
@@ -505,7 +536,7 @@ func (a *App) standalonePull(ctx context.Context, root string, cfg Config, opts 
 		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
 			return err
 		}
-		if err := a.importStandaloneDB(ctx, root, cfg); err != nil {
+		if err := a.importLocalDB(ctx, root, cfg); err != nil {
 			return err
 		}
 	}
@@ -515,12 +546,15 @@ func (a *App) standalonePull(ctx context.Context, root string, cfg Config, opts 
 	return a.postPull(ctx, root, cfg)
 }
 
-// standalonePush executes the direct push pipeline outside DDEV provider mode.
-func (a *App) standalonePush(ctx context.Context, root string, cfg Config, opts configOptions) error {
+// runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
+func (a *App) runPushPipeline(ctx context.Context, root string, cfg Config, opts configOptions) error {
 	if opts.SkipDB && opts.SkipFiles {
 		return nil
 	}
 
+	if err := a.authenticateTarget(ctx, root, cfg.pushTarget(), "push target"); err != nil {
+		return err
+	}
 	if !opts.SkipDB {
 		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
 			return err
@@ -581,8 +615,8 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt; use saved config, environment, and flags")
-	fs.BoolVar(&opts.Yes, "yes", false, "pass -y to DDEV pull/push")
-	fs.BoolVar(&opts.Yes, "y", false, "pass -y to DDEV pull/push")
+	fs.BoolVar(&opts.Yes, "yes", false, "confirm without prompting")
+	fs.BoolVar(&opts.Yes, "y", false, "confirm without prompting")
 	fs.BoolVar(&opts.SkipDB, "skip-db", false, "pull/push files only")
 	fs.BoolVar(&opts.SkipFiles, "skip-files", false, "pull/push database only")
 	fs.BoolVar(&opts.SkipImport, "skip-import", false, "pull only; download the database without importing it")

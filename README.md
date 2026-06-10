@@ -2,7 +2,7 @@
 
 `ddev-wp-ssh` is a Go CLI for pulling and pushing WordPress databases and full application files through SSH-only environments. It runs as a standalone host-side binary and uses a generated DDEV provider layer only when it detects a DDEV project.
 
-The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` route through `ddev pull` and `ddev push` with generated provider files. If it fails, the same commands run in standalone mode with interactive input and local WP-CLI.
+The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` refresh generated provider files and run the same direct Go pipeline used by standalone mode, using `ddev wp` only for local WP-CLI operations. The generated provider remains available for explicit `ddev pull` and `ddev push` usage.
 
 ## Use Per Project
 
@@ -10,12 +10,12 @@ Download the release artifact into each project and run it from there. This keep
 
 ```bash
 mkdir -p .ddev/bin
-gh release download v0.2.19 \
+gh release download v0.2.20 \
   --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz' \
+  --pattern 'ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz' \
   --dir .ddev/bin
-tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz
-rm .ddev/bin/ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz
+tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
+rm .ddev/bin/ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
 
 ./.ddev/bin/ddev-wp-ssh init
 ```
@@ -23,10 +23,10 @@ rm .ddev/bin/ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz
 Global installation is optional convenience, not required:
 
 ```bash
-gh release download v0.2.19 \
+gh release download v0.2.20 \
   --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz'
-tar -xzf ddev-wp-ssh_v0.2.19_darwin_arm64.tar.gz
+  --pattern 'ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz'
+tar -xzf ddev-wp-ssh_v0.2.20_darwin_arm64.tar.gz
 install ddev-wp-ssh /usr/local/bin/ddev-wp-ssh
 ```
 
@@ -34,7 +34,7 @@ You can also build directly from the private GitHub repository with Go:
 
 ```bash
 git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.19
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.20
 ```
 
 ## Configure A Project
@@ -48,6 +48,8 @@ ddev-wp-ssh init
 The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
 
 When it runs inside a DDEV project, it reads `ddev describe -j` and `.ddev/config.yaml` to default the provider name, local URL, docroot, and temp directories before writing config.
+
+Generated DDEV files avoid machine-local absolute paths for versioned project files. Project-local binary paths are written as relative `./...` commands, and local project paths such as `local_wp_path` and `plugin_remove_file` are stored relative to the project root when possible.
 
 Silent setup is available for repeatable project bootstrap:
 
@@ -83,13 +85,13 @@ The blocked-plugin defaults are embedded in the CLI. Set `plugin_remove_file` or
 
 ## Pull
 
-Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs `ddev pull`; outside DDEV it runs the pull directly with SSH, rsync, and local WP-CLI.
+Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs the pull directly with SSH, rsync, and `ddev wp` for local WP-CLI work. Outside DDEV it uses local WP-CLI.
 
 ```bash
 ddev-wp-ssh pull --silent
 ```
 
-Or use DDEV after initialization:
+Or use DDEV after initialization when you specifically want DDEV's native pull lifecycle output:
 
 ```bash
 ddev pull wp-ssh -y
@@ -103,13 +105,13 @@ ddev-wp-ssh pull --silent --user deploy --host example.com --remote-path /home/e
 
 ## Push
 
-Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs `ddev push`; outside DDEV it runs the push directly with SSH, rsync, and local WP-CLI.
+Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs the push directly with SSH, rsync, and `ddev wp` for local WP-CLI work. Outside DDEV it uses local WP-CLI.
 
 ```bash
 ddev-wp-ssh push --silent
 ```
 
-Or use DDEV after initialization:
+Or use DDEV after initialization when you specifically want DDEV's native push lifecycle output:
 
 ```bash
 ddev push wp-ssh -y
@@ -219,8 +221,8 @@ ddev-wp-ssh provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.2.19
-git push origin v0.2.19
+git tag v0.2.20
+git push origin v0.2.20
 ```
 
 The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `ddev-wp-ssh version` with the tag, publishes archives, and uploads SHA-256 checksums.

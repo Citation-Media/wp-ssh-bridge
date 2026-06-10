@@ -297,3 +297,55 @@ func TestStandalonePathsDoNotUseDDEVDirectory(t *testing.T) {
 		t.Fatalf("standalone downloadsDir() = %q", got)
 	}
 }
+
+func TestContainerProjectPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	got, ok := containerProjectPath(dir, filepath.Join(dir, ".ddev", ".downloads", "db.sql"))
+	if !ok {
+		t.Fatal("containerProjectPath() rejected a project path")
+	}
+	if want := "/var/www/html/.ddev/.downloads/db.sql"; got != want {
+		t.Fatalf("containerProjectPath() = %q, want %q", got, want)
+	}
+
+	got, ok = containerProjectPath(dir, dir)
+	if !ok || got != "/var/www/html" {
+		t.Fatalf("containerProjectPath(project root) = %q, %v", got, ok)
+	}
+
+	if got, ok := containerProjectPath(dir, filepath.Dir(dir)); ok {
+		t.Fatalf("containerProjectPath() accepted path outside project: %q", got)
+	}
+}
+
+func TestWriteDDEVConfigUsesRelativeProjectPaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	runtime := runtimeContext{Mode: modeDDEV, Root: dir}
+	cfg := Config{
+		LocalWPPath:      filepath.Join(dir, "web"),
+		PluginRemoveFile: filepath.Join(dir, ".ddev", "blocked-plugins.txt"),
+	}
+
+	if err := writeConfigForRuntime(runtime, "", cfg); err != nil {
+		t.Fatalf("writeConfigForRuntime() error = %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".ddev", configFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, dir) {
+		t.Fatalf("DDEV config contains absolute project path %q:\n%s", dir, text)
+	}
+	for _, want := range []string{
+		`local_wp_path: "web"`,
+		`plugin_remove_file: ".ddev/blocked-plugins.txt"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("DDEV config missing %q:\n%s", want, text)
+		}
+	}
+}

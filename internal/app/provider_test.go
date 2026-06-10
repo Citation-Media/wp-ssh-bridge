@@ -67,6 +67,51 @@ func TestInstallProviderFiles(t *testing.T) {
 	}
 }
 
+func TestInstallProviderFilesUsesRelativeProjectBinary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	binary := filepath.Join(dir, ".ddev", "bin", "ddev-wp-ssh")
+	cfg := Config{Provider: "live"}
+
+	if err := installProviderFiles(dir, cfg, binary); err != nil {
+		t.Fatalf("installProviderFiles() error = %v", err)
+	}
+
+	provider, err := os.ReadFile(filepath.Join(dir, ".ddev", "providers", "live.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook, err := os.ReadFile(filepath.Join(dir, ".ddev", hookConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := string(provider) + string(hook)
+	if strings.Contains(generated, dir) {
+		t.Fatalf("generated DDEV YAML contains absolute project path %q:\n%s", dir, generated)
+	}
+	if !strings.Contains(generated, "./.ddev/bin/ddev-wp-ssh provider auth") {
+		t.Fatalf("generated provider YAML missing relative binary path:\n%s", generated)
+	}
+	if !strings.Contains(generated, "./.ddev/bin/ddev-wp-ssh provider post-pull") {
+		t.Fatalf("generated hook YAML missing relative binary path:\n%s", generated)
+	}
+}
+
+func TestPortableProviderBinary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if got := portableProviderBinary(dir, filepath.Join(dir, ".ddev", "bin", "ddev-wp-ssh")); got != "./.ddev/bin/ddev-wp-ssh" {
+		t.Fatalf("portableProviderBinary(project binary) = %q", got)
+	}
+	if got := portableProviderBinary(dir, "/usr/local/bin/ddev-wp-ssh"); got != "ddev-wp-ssh" {
+		t.Fatalf("portableProviderBinary(global binary) = %q", got)
+	}
+	if got := portableProviderBinary(dir, "tools/ddev-wp-ssh"); got != "tools/ddev-wp-ssh" {
+		t.Fatalf("portableProviderBinary(relative binary) = %q", got)
+	}
+}
+
 func TestDefaultPluginListIncludesBackupMigrationAndSMTPPlugins(t *testing.T) {
 	t.Parallel()
 	for _, want := range []string{

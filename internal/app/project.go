@@ -230,12 +230,42 @@ func localWPRoot(projectRoot string, cfg Config) string {
 
 // containerWPPath returns the container-side WordPress root path used with ddev wp.
 func containerWPPath(projectRoot string, cfg Config) string {
-	root := localWPRoot(projectRoot, cfg)
-	rel, err := filepath.Rel(projectRoot, root)
-	if err != nil || rel == "." {
-		return "/var/www/html"
+	if path, ok := containerProjectPath(projectRoot, localWPRoot(projectRoot, cfg)); ok {
+		return path
 	}
-	return "/var/www/html/" + filepath.ToSlash(rel)
+	return "/var/www/html"
+}
+
+// containerProjectPath maps a host project path to DDEV's container mount path.
+func containerProjectPath(projectRoot string, hostPath string) (string, bool) {
+	rel, ok := projectRelativePath(projectRoot, hostPath)
+	if !ok {
+		return "", false
+	}
+	if rel == "." {
+		return "/var/www/html", true
+	}
+	return "/var/www/html/" + rel, true
+}
+
+// projectRelativePath returns a slash-separated path only when hostPath is inside projectRoot.
+func projectRelativePath(projectRoot string, hostPath string) (string, bool) {
+	root, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", false
+	}
+	path, err := filepath.Abs(hostPath)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if rel == "." {
+		return ".", true
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // localSiteURL detects the local DDEV URL for post-pull search replacement.
