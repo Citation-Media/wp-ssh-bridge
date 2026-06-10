@@ -9,7 +9,7 @@ const (
 	defaultProviderName = "wp-ssh"
 	configFileName      = "wp-ssh.yaml"
 	hookConfigName      = "config.wp-ssh.yaml"
-	binaryName          = "ddev-wp-ssh"
+	binaryName          = "wp-ssh-bridge"
 )
 
 // App carries process dependencies so command handlers can share IO and cwd state.

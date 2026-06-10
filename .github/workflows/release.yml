@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to stamp into manual builds, for example v0.2.22"
+        description: "Version to stamp into manual builds, for example v0.3.0"
         required: true
-        default: "v0.2.22"
+        default: "v0.3.0"
 
 permissions:
   contents: write
 
 env:
-  APP_NAME: ddev-wp-ssh
+  APP_NAME: wp-ssh-bridge
   GO_VERSION: "1.24.x"
 
 jobs:
@@ -79,9 +79,9 @@ jobs:
           archive="${APP_NAME}_${VERSION}_${GOOS}_${GOARCH}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Version=${VERSION} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Commit=${GITHUB_SHA} -X github.com/Citation-Media/ddev-wp-ssh/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -ldflags "-s -w -X github.com/Citation-Media/wp-ssh-bridge/internal/version.Version=${VERSION} -X github.com/Citation-Media/wp-ssh-bridge/internal/version.Commit=${GITHUB_SHA} -X github.com/Citation-Media/wp-ssh-bridge/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o "dist/${APP_NAME}" \
-            ./cmd/ddev-wp-ssh
+            ./cmd/wp-ssh-bridge
           tar -C dist -czf "dist/${archive}.tar.gz" "${APP_NAME}"
           rm "dist/${APP_NAME}"
 

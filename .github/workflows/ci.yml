@@ -22,4 +22,4 @@ jobs:
         run: go test ./...
 
       - name: Build
-        run: go build ./cmd/ddev-wp-ssh
+        run: go build ./cmd/wp-ssh-bridge

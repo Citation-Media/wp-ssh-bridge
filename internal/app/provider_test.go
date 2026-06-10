@@ -33,8 +33,8 @@ func TestProviderYAMLUsesHostServiceAndBinary(t *testing.T) {
 
 func TestProviderYAMLQuotesBinaryPathWithSpaces(t *testing.T) {
 	t.Parallel()
-	body := providerYAML("live", "/Users/me/My Tools/ddev-wp-ssh")
-	want := `command: "'/Users/me/My Tools/ddev-wp-ssh' provider auth"`
+	body := providerYAML("live", "/Users/me/My Tools/wp-ssh-bridge")
+	want := `command: "'/Users/me/My Tools/wp-ssh-bridge' provider auth"`
 	if !strings.Contains(body, want) {
 		t.Fatalf("provider YAML did not quote binary path with spaces; missing %q:\n%s", want, body)
 	}
@@ -50,7 +50,7 @@ func TestInstallProviderFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{Provider: "live"}
-	if err := installProviderFiles(dir, cfg, "ddev-wp-ssh"); err != nil {
+	if err := installProviderFiles(dir, cfg, "wp-ssh-bridge"); err != nil {
 		t.Fatalf("installProviderFiles() error = %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestInstallProviderFiles(t *testing.T) {
 func TestInstallProviderFilesUsesRelativeProjectBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	binary := filepath.Join(dir, ".ddev", "bin", "ddev-wp-ssh")
+	binary := filepath.Join(dir, ".ddev", "bin", "wp-ssh-bridge")
 	cfg := Config{Provider: "live"}
 
 	if err := installProviderFiles(dir, cfg, binary); err != nil {
@@ -89,10 +89,10 @@ func TestInstallProviderFilesUsesRelativeProjectBinary(t *testing.T) {
 	if strings.Contains(generated, dir) {
 		t.Fatalf("generated DDEV YAML contains absolute project path %q:\n%s", dir, generated)
 	}
-	if !strings.Contains(generated, "./.ddev/bin/ddev-wp-ssh provider auth") {
+	if !strings.Contains(generated, "./.ddev/bin/wp-ssh-bridge provider auth") {
 		t.Fatalf("generated provider YAML missing relative binary path:\n%s", generated)
 	}
-	if !strings.Contains(generated, "./.ddev/bin/ddev-wp-ssh provider post-pull") {
+	if !strings.Contains(generated, "./.ddev/bin/wp-ssh-bridge provider post-pull") {
 		t.Fatalf("generated hook YAML missing relative binary path:\n%s", generated)
 	}
 }
@@ -101,13 +101,13 @@ func TestPortableProviderBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	if got := portableProviderBinary(dir, filepath.Join(dir, ".ddev", "bin", "ddev-wp-ssh")); got != "./.ddev/bin/ddev-wp-ssh" {
+	if got := portableProviderBinary(dir, filepath.Join(dir, ".ddev", "bin", "wp-ssh-bridge")); got != "./.ddev/bin/wp-ssh-bridge" {
 		t.Fatalf("portableProviderBinary(project binary) = %q", got)
 	}
-	if got := portableProviderBinary(dir, "/usr/local/bin/ddev-wp-ssh"); got != "ddev-wp-ssh" {
+	if got := portableProviderBinary(dir, "/usr/local/bin/wp-ssh-bridge"); got != "wp-ssh-bridge" {
 		t.Fatalf("portableProviderBinary(global binary) = %q", got)
 	}
-	if got := portableProviderBinary(dir, "tools/ddev-wp-ssh"); got != "tools/ddev-wp-ssh" {
+	if got := portableProviderBinary(dir, "tools/wp-ssh-bridge"); got != "tools/wp-ssh-bridge" {
 		t.Fatalf("portableProviderBinary(relative binary) = %q", got)
 	}
 }

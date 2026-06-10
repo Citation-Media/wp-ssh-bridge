@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const wpCLIPharName = "ddev-wp-ssh-wp-cli.phar"
+const wpCLIPharName = "wp-ssh-bridge-wp-cli.phar"
 
 var wpCLIPharURL = "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
 

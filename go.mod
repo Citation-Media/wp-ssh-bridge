@@ -1,4 +1,4 @@
-module github.com/Citation-Media/ddev-wp-ssh
+module github.com/Citation-Media/wp-ssh-bridge
 
 go 1.24.0
 

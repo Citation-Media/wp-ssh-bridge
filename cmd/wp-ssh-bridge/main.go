@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/Citation-Media/ddev-wp-ssh/internal/app"
+	"github.com/Citation-Media/wp-ssh-bridge/internal/app"
 )
 
 func main() {

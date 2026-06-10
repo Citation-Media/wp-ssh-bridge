@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Citation-Media/ddev-wp-ssh/internal/version"
+	"github.com/Citation-Media/wp-ssh-bridge/internal/version"
 )
 
 // Run executes the CLI and returns a process exit code.
@@ -55,16 +55,16 @@ func (a *App) run(args []string) error {
 
 // printHelp shows the user-facing command surface.
 func (a *App) printHelp() {
-	fmt.Fprint(a.Stdout, `ddev-wp-ssh syncs WordPress databases and files through SSH-only WordPress hosts.
+	fmt.Fprint(a.Stdout, `wp-ssh-bridge syncs WordPress databases and files through SSH-only WordPress hosts.
 
 Usage:
-  ddev-wp-ssh init [flags]                  Configure this project
-  ddev-wp-ssh pull [flags]                  Pull database and files from the source host
-  ddev-wp-ssh push [flags]                  Push database and files to the target host
-  ddev-wp-ssh provider install [flags]      Regenerate DDEV provider files
-  ddev-wp-ssh provider generate [flags]     Print generated DDEV YAML
-  ddev-wp-ssh plugins remove [wordpress-root]
-  ddev-wp-ssh version [--short]
+  wp-ssh-bridge init [flags]                  Configure this project
+  wp-ssh-bridge pull [flags]                  Pull database and files from the source host
+  wp-ssh-bridge push [flags]                  Push database and files to the target host
+  wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
+  wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
+  wp-ssh-bridge plugins remove [wordpress-root]
+  wp-ssh-bridge version [--short]
 
 Common flags:
   --host string              Pull source SSH host; push alias for --push-host
@@ -81,7 +81,7 @@ Common flags:
   --skip-import              Pull only; download the database without importing it
   --silent                   Do not prompt; use saved config, environment, and flags
 
-Run "ddev-wp-ssh init" to configure DDEV provider mode or standalone mode.
+Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
 `)
 }
 
@@ -114,11 +114,11 @@ func (a *App) commandInit(args []string) error {
 	runtime := a.resolveRuntime(opts.ProjectRoot)
 
 	if runtime.Mode == modeDDEV && runtime.DDEV.Type != "" && runtime.DDEV.Type != "wordpress" {
-		return fmt.Errorf("ddev-wp-ssh only supports DDEV WordPress projects; detected %q", runtime.DDEV.Type)
+		return fmt.Errorf("wp-ssh-bridge only supports DDEV WordPress projects; detected %q", runtime.DDEV.Type)
 	}
 	if runtime.Mode == modeDDEV && runtime.DDEV.Type == "" {
 		if projectType := ddevProjectType(runtime.Root); projectType != "" && projectType != "wordpress" {
-			return fmt.Errorf("ddev-wp-ssh only supports DDEV WordPress projects; detected %q", projectType)
+			return fmt.Errorf("wp-ssh-bridge only supports DDEV WordPress projects; detected %q", projectType)
 		}
 	}
 
@@ -253,7 +253,7 @@ func (a *App) commandPush(args []string) error {
 // commandProvider handles both generated-file commands and DDEV runtime callbacks.
 func (a *App) commandProvider(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ddev-wp-ssh provider {install|generate|info|auth|db-pull|files-pull|files-import|post-pull|db-push|files-push|post-push|sanitize-config|remove-blocked-plugins}")
+		return errors.New("usage: wp-ssh-bridge provider {install|generate|info|auth|db-pull|files-pull|files-import|post-pull|db-push|files-push|post-push|sanitize-config|remove-blocked-plugins}")
 	}
 
 	switch args[0] {
@@ -378,7 +378,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 // commandPlugins exposes plugin cleanup without DDEV custom command shell files.
 func (a *App) commandPlugins(args []string) error {
 	if len(args) == 0 || args[0] != "remove" {
-		return errors.New("usage: ddev-wp-ssh plugins remove [wordpress-root]")
+		return errors.New("usage: wp-ssh-bridge plugins remove [wordpress-root]")
 	}
 	opts, err := parseRuntimeCommand("plugins remove", args[1:], a.Stderr)
 	if err != nil {

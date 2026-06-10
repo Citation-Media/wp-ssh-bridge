@@ -1,6 +1,6 @@
-# DDEV WP SSH
+# WP SSH Bridge
 
-`ddev-wp-ssh` is a Go CLI for pulling and pushing WordPress databases and full application files through SSH-only environments. It runs as a standalone host-side binary and uses a generated DDEV provider layer only when it detects a DDEV project.
+`wp-ssh-bridge` is a Go CLI for pulling and pushing WordPress databases and full application files through SSH-only environments. It runs as a standalone host-side binary and uses a generated DDEV provider layer only when it detects a DDEV project.
 
 The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` refresh generated provider files and run the same direct Go pipeline used by standalone mode, using `ddev wp` only for local WP-CLI operations. The generated provider remains available for explicit `ddev pull` and `ddev push` usage.
 
@@ -10,31 +10,31 @@ Download the release artifact into each project and run it from there. This keep
 
 ```bash
 mkdir -p .ddev/bin
-gh release download v0.2.23 \
-  --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.23_darwin_arm64.tar.gz' \
+gh release download v0.3.0 \
+  --repo Citation-Media/wp-ssh-bridge \
+  --pattern 'wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz' \
   --dir .ddev/bin
-tar -C .ddev/bin -xzf .ddev/bin/ddev-wp-ssh_v0.2.23_darwin_arm64.tar.gz
-rm .ddev/bin/ddev-wp-ssh_v0.2.23_darwin_arm64.tar.gz
+tar -C .ddev/bin -xzf .ddev/bin/wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz
+rm .ddev/bin/wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz
 
-./.ddev/bin/ddev-wp-ssh init
+./.ddev/bin/wp-ssh-bridge init
 ```
 
 Global installation is optional convenience, not required:
 
 ```bash
-gh release download v0.2.23 \
-  --repo Citation-Media/ddev-wp-ssh \
-  --pattern 'ddev-wp-ssh_v0.2.23_darwin_arm64.tar.gz'
-tar -xzf ddev-wp-ssh_v0.2.23_darwin_arm64.tar.gz
-install ddev-wp-ssh /usr/local/bin/ddev-wp-ssh
+gh release download v0.3.0 \
+  --repo Citation-Media/wp-ssh-bridge \
+  --pattern 'wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz'
+tar -xzf wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz
+install wp-ssh-bridge /usr/local/bin/wp-ssh-bridge
 ```
 
 You can also build directly from the private GitHub repository with Go:
 
 ```bash
 git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp-ssh/cmd/ddev-wp-ssh@v0.2.23
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@v0.3.0
 ```
 
 ## Configure A Project
@@ -42,7 +42,7 @@ GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/ddev-wp
 Run this from a DDEV WordPress project to create provider files:
 
 ```bash
-ddev-wp-ssh init
+wp-ssh-bridge init
 ```
 
 The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
@@ -54,7 +54,7 @@ Generated DDEV files avoid machine-local absolute paths for versioned project fi
 Silent setup is available for repeatable project bootstrap:
 
 ```bash
-ddev-wp-ssh init --silent \
+wp-ssh-bridge init --silent \
   --user deploy \
   --host example.com \
   --port 22 \
@@ -88,7 +88,7 @@ The blocked-plugin defaults are embedded in the CLI. Set `plugin_remove_file` or
 Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs the pull directly with SSH, rsync, and `ddev wp` for local WP-CLI work. Outside DDEV it uses local WP-CLI.
 
 ```bash
-ddev-wp-ssh pull --silent
+wp-ssh-bridge pull --silent
 ```
 
 Or use DDEV after initialization when you specifically want DDEV's native pull lifecycle output:
@@ -97,10 +97,26 @@ Or use DDEV after initialization when you specifically want DDEV's native pull l
 ddev pull wp-ssh -y
 ```
 
+For per-developer SSH users with native DDEV pull, pass the user inline:
+
+```bash
+ddev pull wp-ssh --environment=WP_SSH_PULL_USER=your-ssh-user -y
+```
+
+For teams, keep `pull_user` out of the versioned `.ddev/wp-ssh.yaml` when each developer has a different SSH user, and let each developer provide it inline.
+
+You can also override the full pull source inline:
+
+```bash
+ddev pull wp-ssh \
+  --environment=WP_SSH_PULL_USER=your-ssh-user,WP_SSH_PULL_HOST=example.com,WP_SSH_PULL_REMOTE_PATH=/home/example/public_html \
+  -y
+```
+
 One-shot overrides are supported:
 
 ```bash
-ddev-wp-ssh pull --silent --user deploy --host example.com --remote-path /home/example/public_html
+wp-ssh-bridge pull --silent --user deploy --host example.com --remote-path /home/example/public_html
 ```
 
 ## Push
@@ -108,7 +124,7 @@ ddev-wp-ssh pull --silent --user deploy --host example.com --remote-path /home/e
 Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs the push directly with SSH, rsync, and `ddev wp` for local WP-CLI work. Outside DDEV it uses local WP-CLI.
 
 ```bash
-ddev-wp-ssh push --silent
+wp-ssh-bridge push --silent
 ```
 
 Or use DDEV after initialization when you specifically want DDEV's native push lifecycle output:
@@ -120,7 +136,7 @@ ddev push wp-ssh -y
 One-shot push target overrides are supported. For `push`, the concise `--user`, `--host`, `--port`, `--remote-path`, and `--remote-tmp-dir` flags also apply to the push target.
 
 ```bash
-ddev-wp-ssh push --silent \
+wp-ssh-bridge push --silent \
   --user deploy \
   --host staging.example.com \
   --remote-path /home/staging/public_html \
@@ -133,7 +149,7 @@ Push uploads/imports the local database with WP-CLI and rsyncs the full local Wo
 
 Pull and push preflight checks verify WP-CLI before database or file changes start. The CLI checks the local host in standalone mode, the DDEV web container in DDEV mode, the pull source, and the push target when configured.
 
-If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` to the target's configured temporary directory as `ddev-wp-ssh-wp-cli.phar`, marks it executable, and tests it. If the fallback still cannot run directly or through `php`, the operation exits with a fatal error.
+If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` to the target's configured temporary directory as `wp-ssh-bridge-wp-cli.phar`, marks it executable, and tests it. If the fallback still cannot run directly or through `php`, the operation exits with a fatal error.
 
 In standalone mode, a missing or unusable local `wp` is handled the same way by downloading a managed fallback phar into the project downloads directory.
 
@@ -150,7 +166,7 @@ Configuration can come from three places, in this order:
 Direct flags are intended for one-shot usage:
 
 ```bash
-ddev-wp-ssh pull --silent \
+wp-ssh-bridge pull --silent \
   --user deploy \
   --host example.com \
   --remote-path /home/example/public_html
@@ -159,7 +175,7 @@ ddev-wp-ssh pull --silent \
 Use `--config-file` or `WP_SSH_CONFIG_FILE` to select another YAML file. Relative paths are resolved from the detected project root.
 
 ```bash
-ddev-wp-ssh pull --silent --config-file .ddev/wp-ssh.production.yaml
+wp-ssh-bridge pull --silent --config-file .ddev/wp-ssh.production.yaml
 ```
 
 Generated config files only persist values that differ from the CLI/runtime defaults. For example, default values such as `provider: "wp-ssh"`, `pull_remote_tmp_dir: "/tmp"`, `push_remote_tmp_dir: "/tmp"`, `clone_images: false`, and `skip_search_replace: false` are omitted.
@@ -189,7 +205,7 @@ Generated config files only persist values that differ from the CLI/runtime defa
 Regenerate provider files after updating the CLI:
 
 ```bash
-ddev-wp-ssh provider install
+wp-ssh-bridge provider install
 ```
 
 Provider generation is DDEV-only. Standalone mode uses the same Go implementation directly and does not need provider YAML.
@@ -197,12 +213,12 @@ Provider generation is DDEV-only. Standalone mode uses the same Go implementatio
 Print generated YAML without writing files:
 
 ```bash
-ddev-wp-ssh provider generate --kind all
+wp-ssh-bridge provider generate --kind all
 ```
 
 ## Behavior
 
-`ddev-wp-ssh` keeps feature parity with the original provider:
+`wp-ssh-bridge` keeps feature parity with the original provider:
 
 - Verifies local SSH key authentication.
 - Verifies WP-CLI compatibility locally and on configured pull/push remotes before relying on WP-CLI operations.
@@ -221,15 +237,15 @@ ddev-wp-ssh provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.2.23
-git push origin v0.2.23
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `ddev-wp-ssh version` with the tag, publishes archives, and uploads SHA-256 checksums.
+The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `wp-ssh-bridge version` with the tag, publishes archives, and uploads SHA-256 checksums.
 
 ## Development
 
 ```bash
 go test ./...
-go build ./cmd/ddev-wp-ssh
+go build ./cmd/wp-ssh-bridge
 ```

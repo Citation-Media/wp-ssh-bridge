@@ -4,6 +4,6 @@
 vendor/
 node_modules/
 *.log
-/ddev-wp-ssh
+/wp-ssh-bridge
 /dist/
 /coverage.out

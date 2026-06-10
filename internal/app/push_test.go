@@ -49,7 +49,7 @@ func TestRemoteWPCommandQuotesArguments(t *testing.T) {
 	command := remoteWPCommand(target, "search-replace", "https://local.test", "https://example.com")
 	for _, want := range []string{
 		"cd '/home/site/public html';",
-		"WP_SSH_WP_CLI_PHAR='/var/tmp/ddev-wp-ssh-wp-cli.phar';",
+		"WP_SSH_WP_CLI_PHAR='/var/tmp/wp-ssh-bridge-wp-cli.phar';",
 		"curl -fsSL -o \"$WP_SSH_WP_CLI_PHAR\"",
 		"wget -q -O \"$WP_SSH_WP_CLI_PHAR\"",
 		"wp_ssh_wp",
