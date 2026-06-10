@@ -48,17 +48,19 @@ func TestDuplicateSummaryWriterSuppressesRepeatedWarnings(t *testing.T) {
 	t.Parallel()
 	output := bytes.Buffer{}
 	writer := newDuplicateSummaryWriter(&output, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
+	warningLine := "Warning: repeated diagnostic from command"
+	phpWarningLine := "PHP Warning: repeated diagnostic from runtime"
 
-	if _, err := writer.Write([]byte("Warning: Skipping an uninitialized class \"WPML_Notice\"\n")); err != nil {
+	if _, err := writer.Write([]byte(warningLine + "\n")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	if _, err := writer.Write([]byte("Warning: Skipping an uninitialized class \"WPML_Notice\"\n")); err != nil {
+	if _, err := writer.Write([]byte(warningLine + "\n")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	if _, err := writer.Write([]byte("PHP Warning:  Module \"imagick\" is already loaded")); err != nil {
+	if _, err := writer.Write([]byte(phpWarningLine)); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	if _, err := writer.Write([]byte("\nPHP Warning:  Module \"imagick\" is already loaded\n")); err != nil {
+	if _, err := writer.Write([]byte("\n" + phpWarningLine + "\n")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	if _, err := writer.Write([]byte("Success: Made 1 replacements.\n")); err != nil {
@@ -69,10 +71,10 @@ func TestDuplicateSummaryWriterSuppressesRepeatedWarnings(t *testing.T) {
 	}
 
 	text := output.String()
-	if count := strings.Count(text, "Skipping an uninitialized class"); count != 1 {
+	if count := strings.Count(text, warningLine); count != 1 {
 		t.Fatalf("expected one original warning, got %d:\n%s", count, text)
 	}
-	if count := strings.Count(text, "Module \"imagick\" is already loaded"); count != 1 {
+	if count := strings.Count(text, phpWarningLine); count != 1 {
 		t.Fatalf("expected one original PHP warning, got %d:\n%s", count, text)
 	}
 	for _, want := range []string{
