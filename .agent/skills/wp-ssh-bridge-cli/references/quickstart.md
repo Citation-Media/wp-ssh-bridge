@@ -11,19 +11,13 @@ Use this reference when the user is installing or configuring `wp-ssh-bridge` fo
 
 ## Per-Project Install
 
-Prefer installing the binary into the project so generated DDEV YAML can point at a project-local relative path.
+Prefer installing the binary into the project so generated DDEV YAML can point at a project-local relative path. Use the skill script when `.ddev/bin/wp-ssh-bridge` is missing or when updating the local binary.
 
 ```bash
-mkdir -p .ddev/bin
-gh release download v0.3.0 \
-  --repo Citation-Media/wp-ssh-bridge \
-  --pattern 'wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz' \
-  --dir .ddev/bin
-tar -C .ddev/bin -xzf .ddev/bin/wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz
-rm .ddev/bin/wp-ssh-bridge_v0.3.0_darwin_arm64.tar.gz
+.agent/skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default
 ```
 
-Use the current release version from `VERSION` or the GitHub releases page when these examples age.
+The first argument is the DDEV project folder. The script downloads the latest release by default. Pass a release tag as the second argument, or set `WP_SSH_BRIDGE_VERSION`, when a project needs a pinned binary.
 
 ## First DDEV Setup
 

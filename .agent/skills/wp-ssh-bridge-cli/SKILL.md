@@ -26,6 +26,20 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
 
 Do not ask the user to choose DDEV mode versus standalone mode unless they are explicitly asking about mode behavior. The CLI detects that automatically. When working inside this repository, prefer checking the current `README.md`, `VERSION`, and `wp-ssh-bridge --help` output before giving version-specific commands.
 
+## Install Or Update wp-ssh-bridge
+
+Run the skill script from the repository root when `.ddev/bin/wp-ssh-bridge` is missing or when updating the local binary.
+
+```bash title="Install the latest wp-ssh-bridge release"
+.agent/skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default
+```
+
+The first argument is the DDEV project folder. By default the script installs the latest GitHub release for the current OS and CPU architecture. To install a fixed version, pass the release tag as the second argument or set `WP_SSH_BRIDGE_VERSION`.
+
+```bash title="Install a specific wp-ssh-bridge release"
+.agent/skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default v0.3.1
+```
+
 ## Router
 
 Read only the relevant reference files:
