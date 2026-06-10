@@ -10,12 +10,14 @@ Download the release artifact into each project and run it from there. This keep
 
 ```bash
 mkdir -p .ddev/bin
-gh release download v0.3.1 \
+rm -f .ddev/bin/wp-ssh-bridge_*_darwin_arm64.tar.gz
+gh release download \
   --repo Citation-Media/wp-ssh-bridge \
-  --pattern 'wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz' \
-  --dir .ddev/bin
-tar -C .ddev/bin -xzf .ddev/bin/wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz
-rm .ddev/bin/wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz
+  --pattern 'wp-ssh-bridge_*_darwin_arm64.tar.gz' \
+  --dir .ddev/bin \
+  --clobber
+tar -C .ddev/bin -xzf .ddev/bin/wp-ssh-bridge_*_darwin_arm64.tar.gz
+rm .ddev/bin/wp-ssh-bridge_*_darwin_arm64.tar.gz
 
 ./.ddev/bin/wp-ssh-bridge init
 ```
@@ -23,10 +25,12 @@ rm .ddev/bin/wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz
 Global installation is optional convenience, not required:
 
 ```bash
-gh release download v0.3.1 \
+rm -f wp-ssh-bridge_*_darwin_arm64.tar.gz
+gh release download \
   --repo Citation-Media/wp-ssh-bridge \
-  --pattern 'wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz'
-tar -xzf wp-ssh-bridge_v0.3.1_darwin_arm64.tar.gz
+  --pattern 'wp-ssh-bridge_*_darwin_arm64.tar.gz' \
+  --clobber
+tar -xzf wp-ssh-bridge_*_darwin_arm64.tar.gz
 install wp-ssh-bridge /usr/local/bin/wp-ssh-bridge
 ```
 
@@ -34,7 +38,7 @@ You can also build directly from the private GitHub repository with Go:
 
 ```bash
 git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@v0.3.1
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@latest
 ```
 
 ## Configure A Project
@@ -237,8 +241,8 @@ wp-ssh-bridge provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.3.1
-git push origin v0.3.1
+git tag v0.3.2
+git push origin v0.3.2
 ```
 
 The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `wp-ssh-bridge version` with the tag, publishes archives, and uploads SHA-256 checksums.

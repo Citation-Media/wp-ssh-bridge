@@ -3,8 +3,13 @@ set -eu -o pipefail
 
 repo_url="https://github.com/Citation-Media/wp-ssh-bridge"
 repo="${repo_url#https://github.com/}"
+
+if [ "$#" -gt 1 ]; then
+  printf 'Usage: %s [target-dir]\n' "$0" >&2
+  exit 1
+fi
+
 target_dir="${1:-.}"
-version="${2:-${WP_SSH_BRIDGE_VERSION:-}}"
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -27,13 +32,8 @@ normalize_arch() {
   esac
 }
 
-if [ -n "${version}" ] && [ "${version#v}" = "${version}" ]; then
-  version="v${version}"
-fi
-
 target_dir="${target_dir%/}"
-ddev_dir="${target_dir}/.ddev"
-[ -f "${ddev_dir}/config.yaml" ] || die "Run from a DDEV project folder or pass one as the first argument."
+[ -n "${target_dir}" ] || target_dir="."
 
 command -v gh >/dev/null || die "Install gh and authenticate with access to ${repo_url}."
 command -v tar >/dev/null || die "tar is required."
@@ -41,21 +41,17 @@ command -v tar >/dev/null || die "tar is required."
 artifact_os="$(normalize_os)"
 artifact_arch="$(normalize_arch)"
 artifact_pattern="wp-ssh-bridge_*_${artifact_os}_${artifact_arch}.tar.gz"
-if [ -n "${version}" ]; then
-  artifact_pattern="wp-ssh-bridge_${version}_${artifact_os}_${artifact_arch}.tar.gz"
-fi
 
-bin_dir="${ddev_dir}/bin"
+if [ -f "${target_dir}/.ddev/config.yaml" ]; then
+  bin_dir="${target_dir}/.ddev/bin"
+else
+  bin_dir="${target_dir}"
+fi
 
 mkdir -p "${bin_dir}"
 rm -f "${bin_dir}"/wp-ssh-bridge_*_"${artifact_os}"_"${artifact_arch}".tar.gz
 
-gh_args=(release download)
-if [ -n "${version}" ]; then
-  gh_args+=("${version}")
-fi
-
-gh "${gh_args[@]}" \
+gh release download \
   --repo "${repo}" \
   --pattern "${artifact_pattern}" \
   --dir "${bin_dir}" \
