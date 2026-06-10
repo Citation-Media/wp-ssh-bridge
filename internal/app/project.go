@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // DDEVDescription contains the fields the CLI needs from `ddev describe -j`.
@@ -31,6 +32,18 @@ type runtimeContext struct {
 	Mode runtimeMode
 	Root string
 	DDEV DDEVDescription
+}
+
+type ddevDescribeResult struct {
+	desc DDEVDescription
+	ok   bool
+}
+
+var ddevDescribeCache = struct {
+	sync.Mutex
+	values map[string]ddevDescribeResult
+}{
+	values: map[string]ddevDescribeResult{},
 }
 
 // detectRuntime uses `ddev describe -j` as the source of truth for DDEV mode.
@@ -140,17 +153,38 @@ func applyDDEVDefaults(projectRoot string, cfg *Config) {
 
 // ddevDescribe reads structured DDEV metadata when the project can be described.
 func ddevDescribe(projectRoot string) (DDEVDescription, bool) {
+	key, err := filepath.Abs(projectRoot)
+	if err != nil {
+		key = projectRoot
+	}
+
+	ddevDescribeCache.Lock()
+	if cached, ok := ddevDescribeCache.values[key]; ok {
+		ddevDescribeCache.Unlock()
+		return cached.desc, cached.ok
+	}
+	ddevDescribeCache.Unlock()
+
 	cmd := exec.Command("ddev", "describe", "-j")
 	cmd.Dir = projectRoot
 	output, err := cmd.Output()
 	if err != nil {
+		ddevDescribeCache.Lock()
+		ddevDescribeCache.values[key] = ddevDescribeResult{}
+		ddevDescribeCache.Unlock()
 		return DDEVDescription{}, false
 	}
 
 	var desc DDEVDescription
 	if err := json.Unmarshal(output, &desc); err != nil {
+		ddevDescribeCache.Lock()
+		ddevDescribeCache.values[key] = ddevDescribeResult{}
+		ddevDescribeCache.Unlock()
 		return DDEVDescription{}, false
 	}
+	ddevDescribeCache.Lock()
+	ddevDescribeCache.values[key] = ddevDescribeResult{desc: desc, ok: true}
+	ddevDescribeCache.Unlock()
 	return desc, true
 }
 

@@ -50,7 +50,11 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	excludes := strings.Join(buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}), "\n")
+	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"})
+	if err != nil {
+		t.Fatalf("buildRsyncExcludes() error = %v", err)
+	}
+	excludes := strings.Join(excludeList, "\n")
 	for _, want := range []string{
 		"wp-content/uploads/",
 		"wp-content/plugins/updraftplus/",
@@ -61,9 +65,20 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		}
 	}
 
-	excludes = strings.Join(buildRsyncExcludes(dir, Config{CloneImages: true}), "\n")
+	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true})
+	if err != nil {
+		t.Fatalf("buildRsyncExcludes() with CloneImages error = %v", err)
+	}
+	excludes = strings.Join(excludeList, "\n")
 	if strings.Contains(excludes, "wp-content/uploads/") {
 		t.Fatalf("clone images should not exclude uploads:\n%s", excludes)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "bad-plugins.txt"), []byte("../secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/bad-plugins.txt"}); err == nil {
+		t.Fatal("buildRsyncExcludes() accepted invalid plugin block list")
 	}
 }
 

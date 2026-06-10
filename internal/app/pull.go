@@ -76,7 +76,7 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 	return cfg.validatePullRequired()
 }
 
-// dbPull exports the upstream database and downloads it to DDEV's downloads path.
+// dbPull exports the upstream database and downloads it to the runtime scratch path.
 func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
@@ -137,12 +137,16 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 	}
 
 	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
-	for _, exclude := range buildRsyncExcludes(projectRoot, cfg) {
+	excludes, err := buildRsyncExcludes(projectRoot, cfg)
+	if err != nil {
+		return err
+	}
+	for _, exclude := range excludes {
 		args = append(args, "--exclude="+exclude)
 	}
 	args = append(args, "-e", sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
 
-	err := a.runStep("Syncing upstream WordPress files", "Files synced", func() error {
+	err = a.runStep("Syncing upstream WordPress files", "Files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
 	})
 	if err == nil {
@@ -162,7 +166,7 @@ func (a *App) filesImport() {
 	a.UI.Success("Files already synced; no DDEV file import needed")
 }
 
-// postPull applies local cleanup after DDEV imports the database.
+// postPull applies local cleanup after a database or file pull.
 func (a *App) postPull(ctx context.Context, projectRoot string, cfg Config) error {
 	if err := a.sanitizeWPConfig(projectRoot, cfg); err != nil {
 		return err
@@ -174,7 +178,7 @@ func (a *App) postPull(ctx context.Context, projectRoot string, cfg Config) erro
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
-func buildRsyncExcludes(projectRoot string, cfg Config) []string {
+func buildRsyncExcludes(projectRoot string, cfg Config) ([]string, error) {
 	excludes := []string{
 		".git/",
 		".ddev/",
@@ -191,7 +195,11 @@ func buildRsyncExcludes(projectRoot string, cfg Config) []string {
 		excludes = append(excludes, "wp-content/uploads/")
 	}
 
-	for _, plugin := range readPluginListQuiet(projectRoot, cfg) {
+	plugins, err := readPluginList(projectRoot, cfg)
+	if err != nil {
+		return nil, err
+	}
+	for _, plugin := range plugins {
 		pluginDir := normalizePluginSlug(plugin)
 		if pluginDir == "" {
 			continue
@@ -200,7 +208,7 @@ func buildRsyncExcludes(projectRoot string, cfg Config) []string {
 		excludes = append(excludes, "wp-content/plugins/"+pluginDir+".php")
 	}
 
-	return excludes
+	return excludes, nil
 }
 
 // rsyncArchiveArgs stays compatible with macOS' bundled rsync, which lacks -s/--protect-args.
@@ -271,9 +279,6 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 	if cfg.SkipSearchReplace {
 		return nil
 	}
-	if !commandExists("ddev") {
-		return nil
-	}
 
 	wpRoot := localWPRoot(projectRoot, cfg)
 	if _, err := os.Stat(filepath.Join(wpRoot, "wp-config.php")); err != nil {
@@ -329,7 +334,7 @@ func uniqueReplacementPairs(pairs []replacementPair) []replacementPair {
 	return unique
 }
 
-// runSearchReplace delegates serialized WordPress updates to WP-CLI inside DDEV.
+// runSearchReplace delegates serialized WordPress updates to WP-CLI.
 func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Config, oldValue string, newValue string) error {
 	if oldValue == "" || newValue == "" || oldValue == newValue {
 		return nil
@@ -518,15 +523,6 @@ func parsePluginList(reader io.Reader, source string) ([]string, error) {
 	return plugins, scanner.Err()
 }
 
-// readPluginListQuiet lets rsync excludes ignore invalid or missing lists until command validation.
-func readPluginListQuiet(projectRoot string, cfg Config) []string {
-	plugins, err := readPluginList(projectRoot, cfg)
-	if err != nil {
-		return nil
-	}
-	return plugins
-}
-
 // normalizePluginSlug converts plugin basenames and nested paths to plugin slugs.
 func normalizePluginSlug(plugin string) string {
 	plugin = strings.SplitN(plugin, "/", 2)[0]
@@ -574,7 +570,7 @@ func removePluginPath(path string) error {
 	return os.RemoveAll(path)
 }
 
-// runWP executes WP-CLI through DDEV so database-aware cleanup stays inside containers.
+// runWP executes WP-CLI through DDEV when available, or local WP-CLI otherwise.
 func (a *App) runWP(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
 	name, fullArgs := localWPCommand(projectRoot, cfg, args...)
 	return a.runExternal(ctx, projectRoot, name, fullArgs...)

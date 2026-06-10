@@ -118,20 +118,20 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 		return nil
 	}
 
-	if err := a.runRemoteSearchReplace(ctx, projectRoot, target, oldURL, newURL); err != nil {
-		return err
-	}
 	hostPart := strings.TrimPrefix(strings.TrimPrefix(oldBase, "http://"), "https://")
-	if err := a.runRemoteSearchReplace(ctx, projectRoot, target, "http://"+hostPart, newBase); err != nil {
-		return err
-	}
-	if err := a.runRemoteSearchReplace(ctx, projectRoot, target, "https://"+hostPart, newBase); err != nil {
-		return err
+	for _, pair := range uniqueReplacementPairs([]replacementPair{
+		{old: oldURL, new: newURL},
+		{old: "http://" + hostPart, new: newBase},
+		{old: "https://" + hostPart, new: newBase},
+	}) {
+		if err := a.runRemoteSearchReplace(ctx, projectRoot, target, pair.old, pair.new); err != nil {
+			return err
+		}
 	}
 	return a.replaceRemoteMultisiteDomains(ctx, projectRoot, target, oldBase, newBase)
 }
 
-// ensureLocalDBDump creates DDEV's expected gzipped dump with WP-CLI when absent.
+// ensureLocalDBDump creates the gzipped dump used by push when absent.
 func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Config, dumpPath string) error {
 	if _, err := os.Stat(dumpPath); err == nil {
 		return nil

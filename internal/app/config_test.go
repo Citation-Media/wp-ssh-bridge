@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,35 @@ func TestValidatePushRequiredUsesPushTarget(t *testing.T) {
 	cfg.PushRemotePath = "/home/staging/public_html"
 	if err := cfg.validatePushRequired(); err != nil {
 		t.Fatalf("validatePushRequired() error = %v", err)
+	}
+}
+
+func TestValidateProviderNameRejectsUnsafeValues(t *testing.T) {
+	t.Parallel()
+	for _, provider := range []string{"../live", "live/staging", "live;rm"} {
+		if err := validateProviderName(provider); err == nil {
+			t.Fatalf("validateProviderName(%q) accepted unsafe value", provider)
+		}
+	}
+	if err := validateProviderName("live-staging_1"); err != nil {
+		t.Fatalf("validateProviderName() rejected safe value: %v", err)
+	}
+}
+
+func TestProviderInstallParserRejectsUnusedConfigFlags(t *testing.T) {
+	t.Parallel()
+	if _, err := parseProviderInstallCommand([]string{"--host", "example.com"}, io.Discard); err == nil {
+		t.Fatal("parseProviderInstallCommand() accepted unused --host flag")
+	}
+}
+
+func TestConfigOptionsRejectOperationFlags(t *testing.T) {
+	t.Parallel()
+	if err := (configOptions{SkipDB: true}).rejectOperationFlags("init"); err == nil {
+		t.Fatal("rejectOperationFlags() accepted --skip-db for init")
+	}
+	if err := (configOptions{}).rejectOperationFlags("init"); err != nil {
+		t.Fatalf("rejectOperationFlags() rejected empty flags: %v", err)
 	}
 }
 

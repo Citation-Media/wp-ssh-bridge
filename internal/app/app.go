@@ -55,28 +55,31 @@ func (a *App) run(args []string) error {
 
 // printHelp shows the user-facing command surface.
 func (a *App) printHelp() {
-	fmt.Fprint(a.Stdout, `ddev-wp-ssh pulls and pushes WordPress databases and files through SSH-only upstreams.
+	fmt.Fprint(a.Stdout, `ddev-wp-ssh syncs WordPress databases and files through SSH-only WordPress hosts.
 
 Usage:
-  ddev-wp-ssh init [flags]
-  ddev-wp-ssh pull [flags]
-  ddev-wp-ssh push [flags]
-  ddev-wp-ssh provider install [flags]
-  ddev-wp-ssh provider generate [flags]
+  ddev-wp-ssh init [flags]                  Configure this project
+  ddev-wp-ssh pull [flags]                  Pull database and files from the source host
+  ddev-wp-ssh push [flags]                  Push database and files to the target host
+  ddev-wp-ssh provider install [flags]      Regenerate DDEV provider files
+  ddev-wp-ssh provider generate [flags]     Print generated DDEV YAML
   ddev-wp-ssh plugins remove [wordpress-root]
-  ddev-wp-ssh version
+  ddev-wp-ssh version [--short]
 
 Common flags:
-  --host string              Upstream SSH host
-  --port string              Upstream SSH port
-  --user string              Upstream SSH user
+  --host string              Pull source SSH host; push alias for --push-host
+  --port string              Pull source SSH port; push alias for --push-port
+  --user string              Pull source SSH user; push alias for --push-user
   --config-file string       YAML config file path
-  --remote-path string       Upstream WordPress root
+  --remote-path string       Pull source WordPress root; push alias for --push-remote-path
   --push-host string         Push target SSH host
   --push-remote-path string  Push target WordPress root
   --local-wp-path string     Local WordPress root relative to the DDEV project
   --clone-images             Include wp-content/uploads
-  --silent                   Do not prompt; use saved config, env, and flags
+  --skip-db                  Pull/push files only
+  --skip-files               Pull/push database only
+  --skip-import              Pull only; download the database without importing it
+  --silent                   Do not prompt; use saved config, environment, and flags
 
 Run "ddev-wp-ssh init" to configure DDEV provider mode or standalone mode.
 `)
@@ -102,6 +105,9 @@ func (a *App) commandVersion(args []string) error {
 func (a *App) commandInit(args []string) error {
 	opts, err := parseConfigCommand("init", args, a.Stderr)
 	if err != nil {
+		return err
+	}
+	if err := opts.rejectOperationFlags("init"); err != nil {
 		return err
 	}
 
@@ -187,7 +193,7 @@ func (a *App) commandPull(args []string) error {
 		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
-		return a.standalonePull(context.Background(), runtime.Root, cfg)
+		return a.standalonePull(context.Background(), runtime.Root, cfg, opts)
 	}
 
 	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
@@ -216,6 +222,9 @@ func (a *App) commandPush(args []string) error {
 	if err != nil {
 		return err
 	}
+	if opts.SkipImport {
+		return errors.New("--skip-import only applies to pull")
+	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
@@ -240,7 +249,7 @@ func (a *App) commandPush(args []string) error {
 		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 			return err
 		}
-		return a.standalonePush(context.Background(), runtime.Root, cfg)
+		return a.standalonePush(context.Background(), runtime.Root, cfg, opts)
 	}
 
 	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
@@ -271,7 +280,10 @@ func (a *App) commandProvider(args []string) error {
 		return a.commandProviderInstall(args[1:])
 	case "generate":
 		return a.commandProviderGenerate(args[1:])
-	case "info", "auth", "db-pull", "files-pull", "files-import", "post-pull", "db-push", "files-push", "post-push", "sanitize-config", "remove-blocked-plugins":
+	case "info", "auth", "db-pull", "files-pull", "files-import", "post-pull", "db-push", "files-push", "post-push":
+		return a.commandProviderRuntime(args[0], args[1:])
+	case "sanitize-config", "remove-blocked-plugins":
+		// Deprecated: kept only for older generated provider files and due to be removed in a future release.
 		return a.commandProviderRuntime(args[0], args[1:])
 	default:
 		return fmt.Errorf("unknown provider command %q", args[0])
@@ -280,7 +292,7 @@ func (a *App) commandProvider(args []string) error {
 
 // commandProviderInstall refreshes the generated DDEV provider and hook files.
 func (a *App) commandProviderInstall(args []string) error {
-	opts, err := parseConfigCommand("provider install", args, a.Stderr)
+	opts, err := parseProviderInstallCommand(args, a.Stderr)
 	if err != nil {
 		return err
 	}
@@ -294,7 +306,9 @@ func (a *App) commandProviderInstall(args []string) error {
 		return err
 	}
 	applyDDEVDefaults(runtime.Root, &cfg)
-	cfg = opts.apply(cfg)
+	if opts.Provider != "" {
+		cfg.Provider = opts.Provider
+	}
 	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
 		return err
 	}
@@ -310,6 +324,9 @@ func (a *App) commandProviderGenerate(args []string) error {
 	binary := fs.String("binary", binaryName, "binary path used by generated YAML")
 	kind := fs.String("kind", "provider", "provider, hook, or all")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateProviderName(*provider); err != nil {
 		return err
 	}
 
@@ -367,8 +384,10 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	case "post-push":
 		return a.postPush(ctx, runtime.Root, cfg)
 	case "sanitize-config":
+		// Deprecated: use post-pull instead; this direct callback is due to be removed in a future release.
 		return a.sanitizeWPConfig(runtime.Root, cfg)
 	case "remove-blocked-plugins":
+		// Deprecated: use post-pull or `plugins remove`; this callback is due to be removed in a future release.
 		return a.removeBlockedPlugins(ctx, runtime.Root, cfg, opts.WordPressRoot)
 	default:
 		return fmt.Errorf("unknown provider runtime command %q", name)
@@ -462,43 +481,69 @@ func standaloneFilesReport(root string, explicitPath string, cfg Config) string 
 }
 
 // standalonePull executes the direct pull pipeline outside DDEV provider mode.
-func (a *App) standalonePull(ctx context.Context, root string, cfg Config) error {
-	if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
-		return err
+func (a *App) standalonePull(ctx context.Context, root string, cfg Config, opts configOptions) error {
+	if opts.SkipDB && opts.SkipFiles {
+		return nil
 	}
-	if err := a.ensureRemoteWPCLI(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
-		return err
+
+	if !opts.SkipDB {
+		if err := a.ensureRemoteWPCLI(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
+			return err
+		}
+		if err := a.dbPull(ctx, root, cfg); err != nil {
+			return err
+		}
 	}
-	if err := a.dbPull(ctx, root, cfg); err != nil {
-		return err
+	if !opts.SkipFiles {
+		if err := a.filesPull(ctx, root, cfg); err != nil {
+			return err
+		}
 	}
-	if err := a.filesPull(ctx, root, cfg); err != nil {
-		return err
+
+	shouldImportDB := !opts.SkipDB && !opts.SkipImport
+	if shouldImportDB {
+		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
+			return err
+		}
+		if err := a.importStandaloneDB(ctx, root, cfg); err != nil {
+			return err
+		}
 	}
-	if err := a.importStandaloneDB(ctx, root, cfg); err != nil {
-		return err
+	if !shouldImportDB {
+		cfg.SkipSearchReplace = true
 	}
 	return a.postPull(ctx, root, cfg)
 }
 
 // standalonePush executes the direct push pipeline outside DDEV provider mode.
-func (a *App) standalonePush(ctx context.Context, root string, cfg Config) error {
-	if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
-		return err
+func (a *App) standalonePush(ctx context.Context, root string, cfg Config, opts configOptions) error {
+	if opts.SkipDB && opts.SkipFiles {
+		return nil
 	}
-	if err := a.ensureRemoteWPCLI(ctx, root, cfg.pushTarget(), "push target"); err != nil {
-		return err
+
+	if !opts.SkipDB {
+		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
+			return err
+		}
+		if err := a.ensureRemoteWPCLI(ctx, root, cfg.pushTarget(), "push target"); err != nil {
+			return err
+		}
+		if err := a.dbPush(ctx, root, cfg); err != nil {
+			return err
+		}
 	}
-	if err := a.dbPush(ctx, root, cfg); err != nil {
-		return err
+	if !opts.SkipFiles {
+		if err := a.filesPush(ctx, root, cfg); err != nil {
+			return err
+		}
 	}
-	if err := a.filesPush(ctx, root, cfg); err != nil {
-		return err
+	if opts.SkipDB {
+		return nil
 	}
 	return a.postPush(ctx, root, cfg)
 }
 
-// configOptions tracks flags shared by init, pull, and provider install.
+// configOptions tracks flags shared by init, pull, and push.
 type configOptions struct {
 	ProjectRoot       string
 	ConfigFile        string
@@ -535,18 +580,18 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
-	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt")
-	fs.BoolVar(&opts.Yes, "yes", false, "skip DDEV confirmation")
-	fs.BoolVar(&opts.Yes, "y", false, "skip DDEV confirmation")
-	fs.BoolVar(&opts.SkipDB, "skip-db", false, "skip database operation")
-	fs.BoolVar(&opts.SkipFiles, "skip-files", false, "skip file operation")
-	fs.BoolVar(&opts.SkipImport, "skip-import", false, "download without importing")
+	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt; use saved config, environment, and flags")
+	fs.BoolVar(&opts.Yes, "yes", false, "pass -y to DDEV pull/push")
+	fs.BoolVar(&opts.Yes, "y", false, "pass -y to DDEV pull/push")
+	fs.BoolVar(&opts.SkipDB, "skip-db", false, "pull/push files only")
+	fs.BoolVar(&opts.SkipFiles, "skip-files", false, "pull/push database only")
+	fs.BoolVar(&opts.SkipImport, "skip-import", false, "pull only; download the database without importing it")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
-	fs.StringVar(&opts.User, "user", "", "upstream SSH user")
-	fs.StringVar(&opts.Host, "host", "", "upstream SSH host")
-	fs.StringVar(&opts.Port, "port", "", "upstream SSH port")
-	fs.StringVar(&opts.RemotePath, "remote-path", "", "upstream WordPress root")
-	fs.StringVar(&opts.RemoteTmpDir, "remote-tmp-dir", "", "upstream temporary directory")
+	fs.StringVar(&opts.User, "user", "", "pull source SSH user; push alias for --push-user")
+	fs.StringVar(&opts.Host, "host", "", "pull source SSH host; push alias for --push-host")
+	fs.StringVar(&opts.Port, "port", "", "pull source SSH port; push alias for --push-port")
+	fs.StringVar(&opts.RemotePath, "remote-path", "", "pull source WordPress root; push alias for --push-remote-path")
+	fs.StringVar(&opts.RemoteTmpDir, "remote-tmp-dir", "", "pull source temporary directory; push alias for --push-remote-tmp-dir")
 	fs.StringVar(&opts.PushUser, "push-user", "", "push target SSH user")
 	fs.StringVar(&opts.PushHost, "push-host", "", "push target SSH host")
 	fs.StringVar(&opts.PushPort, "push-port", "", "push target SSH port")
@@ -560,6 +605,46 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
+	}
+	return opts, nil
+}
+
+// rejectOperationFlags catches pull/push runtime flags on commands that only configure files.
+func (opts configOptions) rejectOperationFlags(command string) error {
+	switch {
+	case opts.SkipDB:
+		return fmt.Errorf("--skip-db only applies to pull or push, not %s", command)
+	case opts.SkipFiles:
+		return fmt.Errorf("--skip-files only applies to pull or push, not %s", command)
+	case opts.SkipImport:
+		return fmt.Errorf("--skip-import only applies to pull, not %s", command)
+	default:
+		return nil
+	}
+}
+
+// providerInstallOptions is intentionally narrow because provider install only writes generated files.
+type providerInstallOptions struct {
+	ProjectRoot string
+	ConfigFile  string
+	Binary      string
+	Provider    string
+}
+
+// parseProviderInstallCommand accepts only the flags used while regenerating DDEV YAML.
+func parseProviderInstallCommand(args []string, stderr io.Writer) (providerInstallOptions, error) {
+	opts := providerInstallOptions{Binary: defaultBinaryPath()}
+	fs := flag.NewFlagSet("provider install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
+	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
+	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
+	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	if fs.NArg() > 0 {
+		return opts, errors.New("provider install does not accept positional arguments")
 	}
 	return opts, nil
 }

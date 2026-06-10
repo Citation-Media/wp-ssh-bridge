@@ -24,10 +24,19 @@ func TestProviderYAMLUsesHostServiceAndBinary(t *testing.T) {
 		}
 	}
 	hook := hookYAML("custom-bin")
-	for _, want := range []string{"post-pull:", "post-push:", "exec-host: custom-bin provider post-push"} {
+	for _, want := range []string{"post-pull:", "post-push:", `exec-host: "custom-bin provider post-push"`} {
 		if !strings.Contains(hook, want) {
 			t.Fatalf("hook YAML missing %q:\n%s", want, hook)
 		}
+	}
+}
+
+func TestProviderYAMLQuotesBinaryPathWithSpaces(t *testing.T) {
+	t.Parallel()
+	body := providerYAML("live", "/Users/me/My Tools/ddev-wp-ssh")
+	want := `command: "'/Users/me/My Tools/ddev-wp-ssh' provider auth"`
+	if !strings.Contains(body, want) {
+		t.Fatalf("provider YAML did not quote binary path with spaces; missing %q:\n%s", want, body)
 	}
 }
 

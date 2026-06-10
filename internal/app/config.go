@@ -34,6 +34,7 @@ type Config struct {
 
 var (
 	validSSHPart    = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	validProvider   = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	validPluginPath = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 )
 
@@ -325,6 +326,17 @@ func (target RemoteTarget) validateValues(label string) error {
 // configured reports whether any field for the target has been provided.
 func (target RemoteTarget) configured() bool {
 	return target.User != "" || target.Host != "" || target.Port != "" || target.RemotePath != ""
+}
+
+// validateProviderName protects generated provider paths and DDEV command names.
+func validateProviderName(provider string) error {
+	if provider == "" {
+		return errors.New("provider name is required")
+	}
+	if !validProvider.MatchString(provider) {
+		return errors.New("provider name must contain only letters, numbers, dots, underscores, or hyphens")
+	}
+	return nil
 }
 
 // envArgs converts configuration into DDEV's legacy --environment payload.
