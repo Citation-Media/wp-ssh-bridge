@@ -122,7 +122,7 @@ func fileExists(path string) bool {
 // ensureRemoteWPCLI verifies the remote WP-CLI command and installs a managed fallback phar when needed.
 func (a *App) ensureRemoteWPCLI(ctx context.Context, projectRoot string, target RemoteTarget, label string) error {
 	err := a.runStep("Checking "+label+" WP-CLI compatibility", sentenceCase(label)+" WP-CLI compatibility verified", func() error {
-		return a.runSSH(ctx, projectRoot, target, remoteWPCLIEnsureCommand(target))
+		return a.runSSHQuietSuccess(ctx, projectRoot, target, remoteWPCLIEnsureCommand(target))
 	})
 	if err != nil {
 		return fmt.Errorf("fatal: %s WP-CLI is not available or cannot run: %w", label, err)

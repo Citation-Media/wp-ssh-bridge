@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +64,7 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 		fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 	}, " ")
 	return a.runStep("Importing database on push target", "Push target database imported", func() error {
-		return a.runSSH(ctx, projectRoot, target, remoteCommand)
+		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
 	})
 }
 
@@ -81,7 +80,7 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) err
 		return err
 	}
 
-	if err := a.runSSH(ctx, projectRoot, target, "mkdir -p "+shellQuote(trimTrailingSlash(target.RemotePath))); err != nil {
+	if err := a.runSSHQuietSuccess(ctx, projectRoot, target, "mkdir -p "+shellQuote(trimTrailingSlash(target.RemotePath))); err != nil {
 		return err
 	}
 
@@ -253,11 +252,7 @@ func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target 
 }
 
 func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
-	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target, args...))
-	stderr := a.UI.PrefixedWriter("remote", true)
-	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
-	defer flushPrefixed(filteredStderr)
-	return a.runSSHWithWriters(ctx, projectRoot, sshArgs, io.Discard, filteredStderr)
+	return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteWPCommand(target, args...))
 }
 
 func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {

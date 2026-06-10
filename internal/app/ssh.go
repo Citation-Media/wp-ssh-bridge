@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os/exec"
@@ -50,6 +51,36 @@ func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarge
 	return a.runSSHWithWriters(ctx, projectRoot, args, stdout, stderr)
 }
 
+func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
+	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
+	if err == nil {
+		return nil
+	}
+	a.writeCapturedSSHOutput(stdout.String(), false)
+	a.writeCapturedSSHOutput(stderr.String(), true)
+	return err
+}
+
+func (a *App) runSSHWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
+	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	return a.runSSHArgsWithFilteredWarnings(ctx, projectRoot, args)
+}
+
+func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot string, args []string) error {
+	stdout := bytes.Buffer{}
+	stderr := a.UI.PrefixedWriter("remote", true)
+	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
+	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, filteredStderr)
+	flushPrefixed(filteredStderr)
+	if err != nil {
+		a.writeCapturedSSHOutput(stdout.String(), false)
+	}
+	return err
+}
+
 func (a *App) runSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
 	args := append(sshArgs(target), sshTarget(target), remoteCommand)
 	return a.runSSHWithWriters(ctx, projectRoot, args, io.Discard, io.Discard)
@@ -61,6 +92,15 @@ func (a *App) runSSHWithWriters(ctx context.Context, projectRoot string, args []
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+func (a *App) writeCapturedSSHOutput(output string, stderr bool) {
+	if strings.TrimSpace(output) == "" {
+		return
+	}
+	writer := a.UI.PrefixedWriter("remote", stderr)
+	_, _ = io.WriteString(writer, output)
+	flushPrefixed(writer)
 }
 
 // outputSSH executes a remote command and captures stdout for URL and table probes.

@@ -74,8 +74,8 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 
 // authenticateTarget verifies SSH authentication before destructive sync steps run.
 func (a *App) authenticateTarget(ctx context.Context, projectRoot string, target RemoteTarget, label string) error {
-	return a.runStep("Checking "+label+" SSH access", sentenceCase(label)+" SSH access verified", func() error {
-		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("printf 'SSH key authentication works for %%s\\n' %s", shellQuote(sshTarget(target))))
+	return a.runStep("Logging into "+label+" over SSH", "Logged into "+label+" over SSH", func() error {
+		return a.runSSHQuietSuccess(ctx, projectRoot, target, "true")
 	})
 }
 
@@ -110,7 +110,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		"trap - EXIT",
 	}, " ")
 	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
-		return a.runSSH(ctx, projectRoot, target, remoteCommand)
+		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
 	}); err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 	}
 
 	return a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
-		return a.runSSH(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
+		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
 	})
 }
 
