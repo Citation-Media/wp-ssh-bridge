@@ -127,6 +127,14 @@ ddev-wp-ssh push --silent \
 
 Push uploads/imports the local database with WP-CLI and rsyncs the full local WordPress app to the target. It excludes `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
 
+## WP-CLI Compatibility
+
+Pull and push preflight checks verify WP-CLI before database or file changes start. The CLI checks the local host in standalone mode, the DDEV web container in DDEV mode, the pull source, and the push target when configured.
+
+If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` to the target's configured temporary directory as `ddev-wp-ssh-wp-cli.phar`, marks it executable, and tests it. If the fallback still cannot run directly or through `php`, the operation exits with a fatal error.
+
+In standalone mode, a missing or unusable local `wp` is handled the same way by downloading a managed fallback phar into the project downloads directory.
+
 ## Configuration
 
 Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in standalone mode.
@@ -195,6 +203,7 @@ ddev-wp-ssh provider generate --kind all
 `ddev-wp-ssh` keeps feature parity with the original provider:
 
 - Verifies local SSH key authentication.
+- Verifies WP-CLI compatibility locally and on configured pull/push remotes before relying on WP-CLI operations.
 - Exports the upstream database with remote WP-CLI and downloads `.ddev/.downloads/db.sql.gz`.
 - Rsyncs the upstream WordPress root into the local WordPress root.
 - Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.

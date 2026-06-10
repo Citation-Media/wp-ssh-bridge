@@ -463,6 +463,12 @@ func standaloneFilesReport(root string, explicitPath string, cfg Config) string 
 
 // standalonePull executes the direct pull pipeline outside DDEV provider mode.
 func (a *App) standalonePull(ctx context.Context, root string, cfg Config) error {
+	if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
+		return err
+	}
+	if err := a.ensureRemoteWPCLI(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
+		return err
+	}
 	if err := a.dbPull(ctx, root, cfg); err != nil {
 		return err
 	}
@@ -477,6 +483,12 @@ func (a *App) standalonePull(ctx context.Context, root string, cfg Config) error
 
 // standalonePush executes the direct push pipeline outside DDEV provider mode.
 func (a *App) standalonePush(ctx context.Context, root string, cfg Config) error {
+	if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
+		return err
+	}
+	if err := a.ensureRemoteWPCLI(ctx, root, cfg.pushTarget(), "push target"); err != nil {
+		return err
+	}
 	if err := a.dbPush(ctx, root, cfg); err != nil {
 		return err
 	}

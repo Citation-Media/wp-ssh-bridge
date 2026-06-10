@@ -56,10 +56,10 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 		"set -eu;",
 		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 		"trap cleanup INT TERM HUP EXIT;",
-		"command -v wp >/dev/null;",
 		"cd " + shellQuote(trimTrailingSlash(target.RemotePath)) + ";",
+		remoteWPCLIPrelude(target),
 		fmt.Sprintf("gzip -dc %s > %s;", shellQuote(remoteDumpGZ), shellQuote(remoteDump)),
-		fmt.Sprintf("wp --allow-root db import %s;", shellQuote(remoteDump)),
+		fmt.Sprintf("wp_ssh_wp --allow-root db import %s;", shellQuote(remoteDump)),
 		"trap - EXIT;",
 		fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 	}, " ")
@@ -251,11 +251,11 @@ func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target 
 
 // runRemoteWP executes WP-CLI on the push target.
 func (a *App) runRemoteWP(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
-	return a.runSSH(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+	return a.runSSH(ctx, projectRoot, target, remoteWPCommand(target, args...))
 }
 
 func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
-	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target.RemotePath, args...))
+	sshArgs := append(sshArgs(target), sshTarget(target), remoteWPCommand(target, args...))
 	stdout := a.UI.PrefixedWriter("remote", false)
 	stderr := a.UI.PrefixedWriter("remote", true)
 	filteredStderr := newDuplicateSummaryWriter(stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
@@ -265,12 +265,12 @@ func (a *App) runRemoteWPWithFilteredWarnings(ctx context.Context, projectRoot s
 }
 
 func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) error {
-	return a.runSSHSilent(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+	return a.runSSHSilent(ctx, projectRoot, target, remoteWPCommand(target, args...))
 }
 
 // remoteWPOutput captures WP-CLI output from the push target and suppresses failures.
 func (a *App) remoteWPOutput(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {
-	output, err := a.outputSSH(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+	output, err := a.outputSSH(ctx, projectRoot, target, remoteWPCommand(target, args...))
 	if err != nil {
 		return ""
 	}
@@ -278,7 +278,7 @@ func (a *App) remoteWPOutput(ctx context.Context, projectRoot string, target Rem
 }
 
 func (a *App) remoteWPOutputSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {
-	output, err := a.outputSSHSilent(ctx, projectRoot, target, remoteWPCommand(target.RemotePath, args...))
+	output, err := a.outputSSHSilent(ctx, projectRoot, target, remoteWPCommand(target, args...))
 	if err != nil {
 		return ""
 	}
@@ -286,12 +286,12 @@ func (a *App) remoteWPOutputSilent(ctx context.Context, projectRoot string, targ
 }
 
 // remoteWPCommand constructs the remote shell command needed to run WP-CLI over SSH.
-func remoteWPCommand(remotePath string, args ...string) string {
+func remoteWPCommand(target RemoteTarget, args ...string) string {
 	parts := []string{
 		"set -eu;",
-		"cd " + shellQuote(trimTrailingSlash(remotePath)) + ";",
-		"command -v wp >/dev/null;",
-		"wp",
+		"cd " + shellQuote(trimTrailingSlash(target.RemotePath)) + ";",
+		remoteWPCLIPrelude(target),
+		"wp_ssh_wp",
 		shellQuote("--allow-root"),
 		shellQuote("--skip-plugins"),
 		shellQuote("--skip-themes"),

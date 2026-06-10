@@ -45,15 +45,43 @@ func TestPushURLCacheIsTargetSpecific(t *testing.T) {
 
 func TestRemoteWPCommandQuotesArguments(t *testing.T) {
 	t.Parallel()
-	command := remoteWPCommand("/home/site/public html", "search-replace", "https://local.test", "https://example.com")
+	target := RemoteTarget{RemotePath: "/home/site/public html", RemoteTmpDir: "/var/tmp"}
+	command := remoteWPCommand(target, "search-replace", "https://local.test", "https://example.com")
 	for _, want := range []string{
 		"cd '/home/site/public html';",
-		"command -v wp >/dev/null;",
+		"WP_SSH_WP_CLI_PHAR='/var/tmp/ddev-wp-ssh-wp-cli.phar';",
+		"curl -fsSL -o \"$WP_SSH_WP_CLI_PHAR\"",
+		"wget -q -O \"$WP_SSH_WP_CLI_PHAR\"",
+		"wp_ssh_wp",
 		"'search-replace'",
 		"'https://local.test'",
 	} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("remote command missing %q:\n%s", want, command)
 		}
+	}
+}
+
+func TestLocalWPCommandUsesDownloadedPhar(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	phar := localWPCLIPharPath(dir)
+	if err := os.MkdirAll(filepath.Dir(phar), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(phar, []byte("#!/usr/bin/env php\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	name, args := localWPCommand(dir, Config{}, "db", "prefix")
+	if commandExists("php") {
+		if name != "php" || len(args) == 0 || args[0] != phar {
+			t.Fatalf("localWPCommand() did not use php phar fallback: name=%q args=%#v", name, args)
+		}
+	} else if name != phar {
+		t.Fatalf("localWPCommand() direct phar name = %q, want %q", name, phar)
+	}
+	if !strings.Contains(strings.Join(args, " "), "db prefix") {
+		t.Fatalf("localWPCommand() missing original args: name=%q args=%#v", name, args)
 	}
 }

@@ -50,6 +50,9 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		}); err != nil {
 			return err
 		}
+		if err := a.ensureRemoteWPCLI(ctx, projectRoot, source, "pull source"); err != nil {
+			return err
+		}
 		tested = true
 	}
 	target := cfg.pushTarget()
@@ -62,10 +65,13 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 		}); err != nil {
 			return err
 		}
+		if err := a.ensureRemoteWPCLI(ctx, projectRoot, target, "push target"); err != nil {
+			return err
+		}
 		tested = true
 	}
 	if tested {
-		return nil
+		return a.ensureLocalWPCLI(ctx, projectRoot, cfg)
 	}
 	return cfg.validatePullRequired()
 }
@@ -93,10 +99,10 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		"set -eu;",
 		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 		"trap cleanup INT TERM HUP EXIT;",
-		"command -v wp >/dev/null;",
 		"cd " + shellQuote(remoteWP) + ";",
+		remoteWPCLIPrelude(target),
 		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
-		fmt.Sprintf("wp --allow-root db export %s;", shellQuote(remoteDump)),
+		fmt.Sprintf("wp_ssh_wp --allow-root db export %s;", shellQuote(remoteDump)),
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		"trap - EXIT",
 	}, " ")
@@ -616,8 +622,10 @@ func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []s
 		fullArgs := append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
 		return "ddev", fullArgs
 	}
-	fullArgs := append([]string{"--path=" + localWPRoot(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
-	return "wp", fullArgs
+	name, baseArgs := localWPCLICommand(projectRoot)
+	fullArgs := append(baseArgs, "--path="+localWPRoot(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes")
+	fullArgs = append(fullArgs, args...)
+	return name, fullArgs
 }
 
 // runExternal runs a local executable without invoking a local shell.
@@ -667,6 +675,8 @@ func commandLabel(name string) string {
 	case "ddev":
 		return "ddev"
 	case "wp":
+		return "wp"
+	case "php", wpCLIPharName:
 		return "wp"
 	default:
 		return "local"
