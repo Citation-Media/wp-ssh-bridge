@@ -112,6 +112,7 @@ func (a *App) commandInit(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
 
 	if runtime.Mode == modeDDEV && runtime.DDEV.Type != "" && runtime.DDEV.Type != "wordpress" {
 		return fmt.Errorf("wp-ssh-bridge only supports DDEV WordPress projects; detected %q", runtime.DDEV.Type)
@@ -126,9 +127,7 @@ func (a *App) commandInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	if runtime.Mode == modeDDEV {
-		applyDDEVDefaults(runtime.Root, &cfg)
-	}
+	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
 
 	if !opts.Silent {
@@ -144,23 +143,13 @@ func (a *App) commandInit(args []string) error {
 	if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
 		return err
 	}
-	if runtime.Mode == modeDDEV {
-		if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
-			return err
-		}
-	} else {
-		if err := installStandaloneFiles(runtime.Root, cfg); err != nil {
-			return err
-		}
+	if err := adapter.InstallProjectFiles(cfg, opts.Binary); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(a.Stdout, "Configured %s pull source for %s:%s\n", cfg.Provider, sshTarget(cfg.pullTarget()), trimTrailingSlash(cfg.RemotePath))
 	fmt.Fprintln(a.Stdout, "Managed files:")
-	if runtime.Mode == modeDDEV {
-		fmt.Fprintln(a.Stdout, generatedFilesReport(runtime.Root, cfg))
-	} else {
-		fmt.Fprintln(a.Stdout, standaloneFilesReport(runtime.Root, opts.ConfigFile, cfg))
-	}
+	fmt.Fprintln(a.Stdout, adapter.ManagedFilesReport(opts.ConfigFile, cfg))
 	return nil
 }
 
@@ -172,15 +161,14 @@ func (a *App) commandPull(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
-	if runtime.Mode == modeDDEV {
-		applyDDEVDefaults(runtime.Root, &cfg)
-	}
+	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
-	if runtime.Mode == modeStandalone && !opts.Silent {
+	if adapter.Mode() == modeStandalone && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPullConfig(&cfg); err != nil {
 			return err
@@ -189,20 +177,11 @@ func (a *App) commandPull(args []string) error {
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
 	}
-	if runtime.Mode == modeStandalone {
-		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
-			return err
-		}
-	} else {
-		if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
-			return err
-		}
-		if err := a.confirmDirectOperation("pull", cfg.pullTarget(), opts); err != nil {
-			return err
-		}
+	if err := adapter.PreparePull(a, cfg, opts); err != nil {
+		return err
 	}
 
-	return a.runPullPipeline(context.Background(), runtime.Root, cfg, opts)
+	return a.runPullPipeline(context.Background(), adapter, cfg, opts)
 }
 
 // commandPush runs the direct push pipeline using saved push target config and one-shot overrides.
@@ -216,16 +195,15 @@ func (a *App) commandPush(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
-	if runtime.Mode == modeDDEV {
-		applyDDEVDefaults(runtime.Root, &cfg)
-	}
+	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
 	cfg = opts.applyGenericAsPush(cfg)
-	if runtime.Mode == modeStandalone && !opts.Silent {
+	if adapter.Mode() == modeStandalone && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPushConfig(&cfg); err != nil {
 			return err
@@ -234,17 +212,8 @@ func (a *App) commandPush(args []string) error {
 	if err := cfg.validatePushRequired(); err != nil {
 		return err
 	}
-	if runtime.Mode == modeStandalone {
-		if err := writeConfigForRuntime(runtime, opts.ConfigFile, cfg); err != nil {
-			return err
-		}
-	} else {
-		if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
-			return err
-		}
-		if err := a.confirmDirectOperation("push", cfg.pushTarget(), opts); err != nil {
-			return err
-		}
+	if err := adapter.PreparePush(a, cfg, opts); err != nil {
+		return err
 	}
 
 	return a.runPushPipeline(context.Background(), runtime.Root, cfg, opts)
@@ -279,6 +248,7 @@ func (a *App) commandProviderInstall(args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider install requires DDEV mode; `ddev describe -j` did not succeed")
 	}
@@ -286,14 +256,14 @@ func (a *App) commandProviderInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	applyDDEVDefaults(runtime.Root, &cfg)
+	adapter.ApplyConfigDefaults(&cfg)
 	if opts.Provider != "" {
 		cfg.Provider = opts.Provider
 	}
-	if err := installProviderFiles(runtime.Root, cfg, opts.Binary); err != nil {
+	if err := adapter.InstallProjectFiles(cfg, opts.Binary); err != nil {
 		return err
 	}
-	fmt.Fprintln(a.Stdout, generatedFilesReport(runtime.Root, cfg))
+	fmt.Fprintln(a.Stdout, adapter.ManagedFilesReport(opts.ConfigFile, cfg))
 	return nil
 }
 
@@ -334,6 +304,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	}
 
 	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider runtime commands require DDEV mode; `ddev describe -j` did not succeed")
 	}
@@ -341,7 +312,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	applyDDEVDefaults(runtime.Root, &cfg)
+	adapter.ApplyConfigDefaults(&cfg)
 
 	ctx := context.Background()
 	switch name {
@@ -352,12 +323,12 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	case "db-pull":
 		return a.dbPull(ctx, runtime.Root, cfg)
 	case "files-pull":
-		return a.filesPull(ctx, runtime.Root, cfg)
+		return a.filesPull(ctx, runtime.Root, cfg, false)
 	case "files-import":
 		a.filesImport()
 		return nil
 	case "post-pull":
-		return a.postPull(ctx, runtime.Root, cfg)
+		return a.postPull(ctx, adapter, cfg)
 	case "db-push":
 		return a.dbPush(ctx, runtime.Root, cfg)
 	case "files-push":
@@ -509,10 +480,11 @@ func standaloneFilesReport(root string, explicitPath string, cfg Config) string 
 }
 
 // runPullPipeline executes the host-side pull pipeline without DDEV lifecycle headings.
-func (a *App) runPullPipeline(ctx context.Context, root string, cfg Config, opts configOptions) error {
+func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg Config, opts configOptions) error {
 	if opts.SkipDB && opts.SkipFiles {
 		return nil
 	}
+	root := adapter.Root()
 
 	if err := a.authenticateTarget(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
 		return err
@@ -526,7 +498,7 @@ func (a *App) runPullPipeline(ctx context.Context, root string, cfg Config, opts
 		}
 	}
 	if !opts.SkipFiles {
-		if err := a.filesPull(ctx, root, cfg); err != nil {
+		if err := a.filesPull(ctx, root, cfg, adapter.Mode() == modeStandalone); err != nil {
 			return err
 		}
 	}
@@ -543,7 +515,7 @@ func (a *App) runPullPipeline(ctx context.Context, root string, cfg Config, opts
 	if !shouldImportDB {
 		cfg.SkipSearchReplace = true
 	}
-	return a.postPull(ctx, root, cfg)
+	return a.postPull(ctx, adapter, cfg)
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.

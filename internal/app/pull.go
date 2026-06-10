@@ -128,7 +128,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 }
 
 // filesPull rsyncs the remote WordPress tree directly into the local project.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) error {
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -140,7 +140,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config) err
 	}
 
 	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
-	excludes, err := buildRsyncExcludes(projectRoot, cfg)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,12 @@ func (a *App) filesImport() {
 }
 
 // postPull applies local cleanup after a database or file pull.
-func (a *App) postPull(ctx context.Context, projectRoot string, cfg Config) error {
-	if err := a.sanitizeWPConfig(projectRoot, cfg); err != nil {
-		return err
+func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config) error {
+	projectRoot := adapter.Root()
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(ctx, a, projectRoot, cfg); err != nil {
+			return err
+		}
 	}
 	if err := a.replaceSiteURLs(ctx, projectRoot, cfg); err != nil {
 		return err
@@ -183,7 +186,7 @@ func (a *App) postPull(ctx context.Context, projectRoot string, cfg Config) erro
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
-func buildRsyncExcludes(projectRoot string, cfg Config) ([]string, error) {
+func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool) ([]string, error) {
 	excludes := []string{
 		".git/",
 		".ddev/",
@@ -194,6 +197,10 @@ func buildRsyncExcludes(projectRoot string, cfg Config) ([]string, error) {
 		"wp-content/updraft/",
 		"wp-content/ai1wm-backups/",
 		"wp-content/languages/wpml/queue/",
+	}
+
+	if preserveLocalWPConfig {
+		excludes = append(excludes, "wp-config.php")
 	}
 
 	if !cfg.CloneImages {
@@ -240,7 +247,7 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 
 // sanitizeWPConfigContents is pure so config rewrite behavior is testable.
 func sanitizeWPConfigContents(contents string) string {
-	dbDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]DB_(?:NAME|USER|PASSWORD|HOST|CHARSET|COLLATE)['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
+	dbDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]DB_[A-Z0-9_]+['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
 	contents = dbDefine.ReplaceAllString(contents, "")
 
 	cookieDomain := regexp.MustCompile(`define\(\s*['"]COOKIE_DOMAIN['"]\s*,\s*\$_SERVER\s*\[\s*['"]HTTP_HOST['"]\s*\]\s*\);`)

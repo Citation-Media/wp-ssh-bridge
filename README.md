@@ -241,8 +241,8 @@ wp-ssh-bridge provider generate --kind all
 Version tags are the release source of truth:
 
 ```bash
-git tag v0.3.2
-git push origin v0.3.2
+git tag v0.3.3
+git push origin v0.3.3
 ```
 
 The `release` workflow tests the project, builds Linux and macOS artifacts for `amd64` and `arm64`, stamps `wp-ssh-bridge version` with the tag, publishes archives, and uploads SHA-256 checksums.

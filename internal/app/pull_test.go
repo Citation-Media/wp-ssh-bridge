@@ -14,13 +14,14 @@ func TestSanitizeWPConfigContents(t *testing.T) {
 	input := `<?php
 define('DB_NAME', 'prod');
 define('DB_USER', 'prod');
+define('DB_SSL_CA', '/prod/ca.pem');
 define('COOKIE_DOMAIN', $_SERVER['HTTP_HOST']);
 /* That's all, stop editing! Happy publishing. */
 require_once ABSPATH . 'wp-settings.php';
 `
 
 	got := sanitizeWPConfigContents(input)
-	for _, removed := range []string{"DB_NAME", "DB_USER', 'prod"} {
+	for _, removed := range []string{"DB_NAME", "DB_USER', 'prod", "DB_SSL_CA"} {
 		if strings.Contains(got, removed) {
 			t.Fatalf("sanitized config still contains %q:\n%s", removed, got)
 		}
@@ -37,6 +38,78 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 }
 
+func TestSanitizeWPConfigForRuntimeSkipsStandalone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	original := `<?php
+define('DB_NAME', 'prod');
+define('DB_USER', 'prod');
+define('DB_SSL_CA', '/prod/ca.pem');
+require_once ABSPATH . 'wp-settings.php';
+`
+	wpConfig := filepath.Join(dir, "wp-config.php")
+	if err := os.WriteFile(wpConfig, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(bytes.NewReader(nil), &stdout, &stderr)
+	adapter := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: dir})
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(context.Background(), app, adapter.Root(), Config{}); err != nil {
+			t.Fatalf("PostPullHooks() error = %v", err)
+		}
+	}
+
+	got, err := os.ReadFile(wpConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("standalone config was changed:\n%s", got)
+	}
+}
+
+func TestSanitizeWPConfigForRuntimeSanitizesDDEV(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	input := `<?php
+define('DB_NAME', 'prod');
+define('DB_USER', 'prod');
+define('DB_PASSWORD', 'prod');
+define('DB_HOST', 'prod-db');
+define('DB_SSL_CA', '/prod/ca.pem');
+require_once ABSPATH . 'wp-settings.php';
+`
+	wpConfig := filepath.Join(dir, "wp-config.php")
+	if err := os.WriteFile(wpConfig, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(bytes.NewReader(nil), &stdout, &stderr)
+	adapter := adapterForRuntime(runtimeContext{Mode: modeDDEV, Root: dir})
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(context.Background(), app, adapter.Root(), Config{}); err != nil {
+			t.Fatalf("PostPullHooks() error = %v", err)
+		}
+	}
+
+	gotBytes, err := os.ReadFile(wpConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotBytes)
+	for _, removed := range []string{"define('DB_NAME'", "define('DB_USER'", "define('DB_PASSWORD'", "define('DB_HOST'", "define('DB_SSL_CA'"} {
+		if strings.Contains(got, removed) {
+			t.Fatalf("DDEV config still contains %q:\n%s", removed, got)
+		}
+	}
+	if !strings.Contains(got, "wp-config-ddev.php") {
+		t.Fatalf("DDEV config missing wp-config-ddev.php include:\n%s", got)
+	}
+}
+
 func TestBuildRsyncExcludes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -50,7 +123,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"})
+	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() error = %v", err)
 	}
@@ -65,7 +138,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		}
 	}
 
-	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true})
+	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true}, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() with CloneImages error = %v", err)
 	}
@@ -73,12 +146,29 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	if strings.Contains(excludes, "wp-content/uploads/") {
 		t.Fatalf("clone images should not exclude uploads:\n%s", excludes)
 	}
+	if strings.Contains(excludes, "wp-config.php") {
+		t.Fatalf("DDEV pulls should allow wp-config.php so post-pull can sanitize it:\n%s", excludes)
+	}
 
 	if err := os.WriteFile(filepath.Join(dir, ".ddev", "bad-plugins.txt"), []byte("../secret\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/bad-plugins.txt"}); err == nil {
+	if _, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/bad-plugins.txt"}, false); err == nil {
 		t.Fatal("buildRsyncExcludes() accepted invalid plugin block list")
+	}
+}
+
+func TestBuildRsyncExcludesPreservesStandaloneWPConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	excludeList, err := buildRsyncExcludes(dir, Config{}, true)
+	if err != nil {
+		t.Fatalf("buildRsyncExcludes() error = %v", err)
+	}
+	excludes := strings.Join(excludeList, "\n")
+	if !strings.Contains(excludes, "wp-config.php") {
+		t.Fatalf("standalone pulls should preserve local wp-config.php:\n%s", excludes)
 	}
 }
 

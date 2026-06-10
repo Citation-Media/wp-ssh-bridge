@@ -38,26 +38,22 @@ The first argument can be a DDEV project root or any destination folder. When th
 
 ## Router
 
-Read only the relevant reference files:
+Read only one workflow reference unless the user explicitly compares DDEV and standalone usage:
 
 | User intent | Reference |
 | --- | --- |
-| New setup, install, or first run | `references/quickstart.md` |
-| Args vs env vs config, precedence, or exact keys | `references/configuration-modes.md` |
-| DDEV projects, generated provider files, `ddev pull wp-ssh`, or clean DDEV output | `references/ddev-workflows.md` |
-| Non-DDEV WordPress projects or local WP-CLI usage | `references/standalone-workflows.md` |
-| Pulling production/staging into local | `references/pull-workflow.md` |
-| Pushing local to staging/remote | `references/push-workflow.md` |
-| Errors, noisy output, SSH username, WP-CLI, plugins, or path problems | `references/troubleshooting.md` |
+| DDEV projects, generated provider files, `ddev pull`, `ddev push`, or DDEV debugging | `references/ddev.md` |
+| Standalone usage, direct CLI commands, args/env/config mode, or non-DDEV troubleshooting | `references/general-usage.md` |
 
 ## Default Recommendations
 
-- Prefer `wp-ssh-bridge pull --silent` and `wp-ssh-bridge push --silent` for clean direct CLI output.
-- Use `ddev pull wp-ssh -y` or `ddev push wp-ssh -y` only when the user specifically wants DDEV's native provider lifecycle output.
+- For DDEV projects, always guide the user through the DDEV provider workflow: run `wp-ssh-bridge init` from the DDEV project root first, then run `ddev pull <provider> -y` or, after explicit push confirmation, `ddev push <provider> -y`. The default provider is `wp-ssh` unless the user chose another provider name during setup.
+- Use `wp-ssh-bridge pull --silent` and `wp-ssh-bridge push --silent` only for standalone workflows or when the user explicitly asks to bypass DDEV's native provider lifecycle.
 - Prefer config mode for repeatable project setup, args mode for one-off overrides, and env mode for automation or secrets-adjacent values.
 - Keep project-local paths relative in config files so DDEV config can be versioned.
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
+- Do not instruct the AI to run lower-level provider callbacks, hand-written rsync commands, direct WP-CLI repair commands, or manual file edits as the normal DDEV workflow. If DDEV setup or pull fails, show the exact error, ask the user to confirm debugging, and suggest the smallest next debugging step.
 
 ## Response Shape
 
