@@ -91,7 +91,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 		return err
 	}
 
-	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
+	args := append(rsyncArchiveArgs(), "--delete", "--delete-excluded", "--safe-links")
 	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
 	if err != nil {
 		return err
@@ -158,6 +158,7 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		".git/",
 		".ddev/",
 		"wp-config-ddev.php",
+		"*.log",
 		"wp-content/cache/",
 		"wp-content/debug.log",
 		"wp-content/upgrade/",

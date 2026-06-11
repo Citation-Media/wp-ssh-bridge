@@ -205,6 +205,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	}
 	excludes := strings.Join(excludeList, "\n")
 	for _, want := range []string{
+		"*.log",
 		"wp-content/uploads/",
 		"wp-content/plugins/updraftplus/",
 		"wp-content/plugins/plugin-file.php",
@@ -278,6 +279,41 @@ exit 24
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestFilesPullRsyncDeletesExcludedAndStalePaths(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "rsync-args.txt")
+	installFakeCommand(t, dir, "rsync", `#!/bin/sh
+printf '%s\n' "$@" > `+shellQuote(argsPath)+`
+`)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	err := app.filesPull(context.Background(), dir, Config{
+		User:       "deploy",
+		Host:       "example.com",
+		RemotePath: "/var/www/html",
+	}, false)
+	if err != nil {
+		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := string(argsBytes)
+	for _, want := range []string{
+		"--delete",
+		"--delete-excluded",
+		"--exclude=*.log",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("rsync args missing %q:\n%s", want, args)
 		}
 	}
 }

@@ -272,7 +272,7 @@ wp-ssh-bridge provider generate --kind all
 - Verifies WP-CLI compatibility locally and on configured pull/push remotes before relying on WP-CLI operations.
 - Exports the upstream database with remote WP-CLI and downloads `.ddev/.downloads/db.sql.gz`.
 - Rsyncs the upstream WordPress root into the local WordPress root.
-- Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.
+- Excludes `.git`, `.ddev`, DDEV config, `*.log` files, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled. File pulls use rsync deletion so stale local paths no longer present on the remote are removed.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
 - Runs URL search-replace through `ddev wp`, including configured multisite domain mappings, protocol and host-only replacement pairs, per-blog search-replace, and multisite `site` and `blogs` domain tables.
 - Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
