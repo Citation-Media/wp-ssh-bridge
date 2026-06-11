@@ -57,7 +57,7 @@ Read only one workflow reference unless the user explicitly compares DDEV and st
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
 - The CLI runs preflight checks before pull/push work: local `ssh`, `rsync`, DDEV when applicable, local WP-CLI when DB work needs it, local path readability/writeability, SSH access, remote path access, remote temp writeability, and remote WP-CLI when DB work needs it.
-- File pulls use rsync deletion and exclude `*.log` files, so stale local paths and local log files are removed during pull.
+- File pulls use plain rsync `--delete` for stale synced paths and a sender-side `*.log` hide rule so WordPress-tree log files at any depth are not copied and are deleted locally, while local-only `.ddev/` including DDEV logs, `.git/`, config files, uploads when media cloning is off, and blocked-plugin paths are preserved for later CLI cleanup.
 - Do not instruct the AI to run lower-level provider callbacks, hand-written rsync commands, direct WP-CLI repair commands, or manual file edits as the normal DDEV workflow. If DDEV setup or pull fails, show the exact error, ask the user to confirm debugging, and suggest the smallest next debugging step.
 
 ## Response Shape

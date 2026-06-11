@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -205,7 +206,6 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	}
 	excludes := strings.Join(excludeList, "\n")
 	for _, want := range []string{
-		"*.log",
 		"wp-content/uploads/",
 		"wp-content/plugins/updraftplus/",
 		"wp-content/plugins/plugin-file.php",
@@ -213,6 +213,12 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		if !strings.Contains(excludes, want) {
 			t.Fatalf("excludes missing %q:\n%s", want, excludes)
 		}
+	}
+	if strings.Contains(excludes, "*.log") {
+		t.Fatalf("logs should use sender-side hide rules, not excludes:\n%s", excludes)
+	}
+	if got := strings.Join(buildRsyncHideRules(), "\n"); !strings.Contains(got, "*.log") {
+		t.Fatalf("hide rules missing recursive log rule:\n%s", got)
 	}
 
 	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true}, false)
@@ -283,8 +289,14 @@ exit 24
 	}
 }
 
-func TestFilesPullRsyncDeletesExcludedAndStalePaths(t *testing.T) {
+func TestFilesPullRsyncUsesDeleteAndHideRuleForRecursiveLogs(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "extra-plugins.txt"), []byte("updraftplus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	argsPath := filepath.Join(dir, "rsync-args.txt")
 	installFakeCommand(t, dir, "rsync", `#!/bin/sh
 printf '%s\n' "$@" > `+shellQuote(argsPath)+`
@@ -294,9 +306,10 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
 
 	err := app.filesPull(context.Background(), dir, Config{
-		User:       "deploy",
-		Host:       "example.com",
-		RemotePath: "/var/www/html",
+		User:             "deploy",
+		Host:             "example.com",
+		RemotePath:       "/var/www/html",
+		PluginRemoveFile: ".ddev/extra-plugins.txt",
 	}, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
@@ -309,11 +322,86 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 	args := string(argsBytes)
 	for _, want := range []string{
 		"--delete",
-		"--delete-excluded",
-		"--exclude=*.log",
+		"--filter=H *.log",
+		"--exclude=.ddev/",
+		"--exclude=wp-content/uploads/",
+		"--exclude=wp-content/plugins/updraftplus/",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("rsync args missing %q:\n%s", want, args)
+		}
+	}
+	for _, unwanted := range []string{
+		"--delete-excluded",
+		"--exclude=*.log",
+	} {
+		if strings.Contains(args, unwanted) {
+			t.Fatalf("rsync args should not contain %q:\n%s", unwanted, args)
+		}
+	}
+}
+
+func TestRsyncHideRuleDeletesLocalLogsRecursively(t *testing.T) {
+	t.Parallel()
+	rsync, err := exec.LookPath("rsync")
+	if err != nil {
+		t.Skip("rsync not available")
+	}
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	for _, path := range []string{
+		filepath.Join(src, "wp-content", "plugins", "foo"),
+		filepath.Join(dst, ".ddev", "bin"),
+		filepath.Join(dst, ".ddev", ".logs"),
+		filepath.Join(dst, "wp-content", "themes", "theme"),
+	} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(src, "wp-content", "plugins", "foo", "keep.php"):        "remote\n",
+		filepath.Join(src, "wp-content", "plugins", "foo", "remote.log"):      "remote log\n",
+		filepath.Join(dst, ".ddev", "bin", "wp-ssh-bridge"):                   "bridge\n",
+		filepath.Join(dst, ".ddev", "provider.log"):                           "provider log\n",
+		filepath.Join(dst, ".ddev", ".logs", "webserver.log"):                 "webserver log\n",
+		filepath.Join(dst, "root.log"):                                        "root log\n",
+		filepath.Join(dst, "wp-content", "themes", "theme", "nested.log"):     "nested log\n",
+		filepath.Join(dst, "wp-content", "plugins", "foo", "stale-local.log"): "stale log\n",
+	}
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := exec.Command(rsync, "-az", "--delete", "--safe-links", "--filter=H *.log", "--exclude=.ddev/", src+"/", dst+"/")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rsync failed: %v\n%s", err, output)
+	}
+	for _, path := range []string{
+		filepath.Join(dst, "root.log"),
+		filepath.Join(dst, "wp-content", "themes", "theme", "nested.log"),
+		filepath.Join(dst, "wp-content", "plugins", "foo", "stale-local.log"),
+		filepath.Join(dst, "wp-content", "plugins", "foo", "remote.log"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("log file should be absent at %s, got err: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(dst, ".ddev", "bin", "wp-ssh-bridge"),
+		filepath.Join(dst, ".ddev", "provider.log"),
+		filepath.Join(dst, ".ddev", ".logs", "webserver.log"),
+		filepath.Join(dst, "wp-content", "plugins", "foo", "keep.php"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected file at %s: %v", path, err)
 		}
 	}
 }

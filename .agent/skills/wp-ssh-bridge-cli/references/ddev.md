@@ -160,6 +160,8 @@ ddev pull <provider> -y
 ./.ddev/bin/wp-ssh-bridge provider generate --kind all
 ```
 
+If a provider callback fails with `.ddev/bin/wp-ssh-bridge: No such file or directory`, reinstall or update the project-local binary, then rerun `./.ddev/bin/wp-ssh-bridge init` or `./.ddev/bin/wp-ssh-bridge provider install`.
+
 Only run a suggested debugging step after the user confirms it.
 
 ## Verification

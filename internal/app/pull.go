@@ -91,10 +91,13 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 		return err
 	}
 
-	args := append(rsyncArchiveArgs(), "--delete", "--delete-excluded", "--safe-links")
+	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
 	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
 	if err != nil {
 		return err
+	}
+	for _, hide := range buildRsyncHideRules() {
+		args = append(args, "--filter=H "+hide)
 	}
 	for _, exclude := range excludes {
 		args = append(args, "--exclude="+exclude)
@@ -158,9 +161,7 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		".git/",
 		".ddev/",
 		"wp-config-ddev.php",
-		"*.log",
 		"wp-content/cache/",
-		"wp-content/debug.log",
 		"wp-content/upgrade/",
 		"wp-content/updraft/",
 		"wp-content/ai1wm-backups/",
@@ -189,6 +190,11 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 	}
 
 	return excludes, nil
+}
+
+func buildRsyncHideRules() []string {
+	// A basename-only rsync pattern matches recursively at any directory depth.
+	return []string{"*.log"}
 }
 
 // rsyncArchiveArgs stays compatible with macOS' bundled rsync, which lacks -s/--protect-args.
