@@ -80,6 +80,35 @@ Use another config file when needed:
 wp-ssh-bridge pull --silent --config-file .wp-ssh.production.yaml
 ```
 
+## Domain Replacement Setup
+
+For multisite or custom domains, use the CLI to update config on an already initialized project:
+
+```bash
+wp-ssh-bridge domains add --old example.com --new example.local
+```
+
+By default this writes both directions:
+
+```yaml
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.local"
+push_domain_replacements:
+  - old: "example.local"
+    new: "example.com"
+```
+
+Use `--direction pull` or `--direction push` only when the user explicitly wants a one-sided mapping.
+
+Prefer protocol-less domains for WordPress multisite replacements because `wp_site`, `wp_blogs`, and `DOMAIN_CURRENT_SITE` store host-only values. Use full URLs only for path-aware or scheme-specific replacements.
+
+List configured mappings with:
+
+```bash
+wp-ssh-bridge domains list
+```
+
 ## Env Mode
 
 Use env mode for shell, CI, or temporary overrides:

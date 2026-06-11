@@ -17,6 +17,7 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
    - Local WordPress path when WordPress is not at the default project/docroot location.
    - Whether uploads/media should be cloned during pull.
    - Whether URL search-replace should be skipped.
+   - Multisite/custom domain mappings, when production domains must be rewritten locally or pushed back remotely.
    - Any project-specific blocked-plugin list.
 4. Confirm which configuration mode the user wants:
    - Args mode for one-shot commands.
@@ -51,6 +52,8 @@ Read only one workflow reference unless the user explicitly compares DDEV and st
 - Use `wp-ssh-bridge pull --silent` and `wp-ssh-bridge push --silent` only for standalone workflows or when the user explicitly asks to bypass DDEV's native provider lifecycle.
 - Prefer config mode for repeatable project setup, args mode for one-off overrides, and env mode for automation or secrets-adjacent values.
 - Keep project-local paths relative in config files so DDEV config can be versioned.
+- For multisite/custom domains, prefer `wp-ssh-bridge domains add --old production.example.com --new local.ddev.site` over manual YAML edits. This writes `pull_domain_replacements` and inverse `push_domain_replacements` by default.
+- Prefer protocol-less domains in `pull_domain_replacements` and `push_domain_replacements` for multisite. Use full URLs only for path-aware or scheme-specific replacement.
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
 - Do not instruct the AI to run lower-level provider callbacks, hand-written rsync commands, direct WP-CLI repair commands, or manual file edits as the normal DDEV workflow. If DDEV setup or pull fails, show the exact error, ask the user to confirm debugging, and suggest the smallest next debugging step.

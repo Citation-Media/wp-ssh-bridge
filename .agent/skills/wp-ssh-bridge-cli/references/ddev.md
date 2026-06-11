@@ -45,6 +45,7 @@ The CLI handles DDEV detection and provider command wiring. Focus on values DDEV
 - Local WordPress path only when the DDEV docroot is not enough.
 - Whether uploads/media should be cloned during pull.
 - Whether URL search-replace should be skipped.
+- Multisite/custom domain mappings, especially when production hostnames must resolve locally.
 - A project-specific blocked-plugin list when embedded defaults are not enough.
 
 ## Generated Files
@@ -58,6 +59,31 @@ After init, the DDEV provider setup uses:
 ```
 
 Commit those files when the project wants versioned provider setup. Keep machine-local absolute paths out of config; use relative paths such as `web`, `public`, or `.ddev/plugin-blocklist.txt`.
+
+## Multisite Domain Replacements
+
+For already configured projects, use the CLI instead of hand-editing YAML:
+
+```bash
+./.ddev/bin/wp-ssh-bridge domains add --old example.com --new example.ddev.site
+```
+
+By default this writes both directions:
+
+```yaml
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+push_domain_replacements:
+  - old: "example.ddev.site"
+    new: "example.com"
+```
+
+Use `--direction pull` or `--direction push` only when the user explicitly wants a one-sided mapping.
+
+Prefer protocol-less domains for multisite mappings because `wp_site`, `wp_blogs`, and `DOMAIN_CURRENT_SITE` store host-only values. Use full URLs only when paths or schemes are part of the intended replacement.
+
+In DDEV mode, provider install/pull/push derives local hosts from `pull_domain_replacements[].new` and `push_domain_replacements[].old`, then persists those hosts in `.ddev/config.yaml` as `additional_hostnames`.
 
 ## DDEV Overrides
 
