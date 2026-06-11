@@ -558,11 +558,20 @@ func (a *App) listedPluginStatuses(ctx context.Context, projectRoot string, cfg 
 	if err != nil {
 		return statuses, fmt.Errorf("list local plugins with WP-CLI: %w", err)
 	}
+	return parsePluginStatuses(output)
+}
+
+func parsePluginStatuses(output string) (map[string]string, error) {
+	statuses := map[string]string{}
 	var plugins []struct {
 		Name   string `json:"name"`
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal([]byte(output), &plugins); err != nil {
+	payload, err := jsonPayload(output)
+	if err != nil {
+		return statuses, err
+	}
+	if err := json.Unmarshal([]byte(payload), &plugins); err != nil {
 		return statuses, err
 	}
 	for _, plugin := range plugins {
@@ -571,6 +580,19 @@ func (a *App) listedPluginStatuses(ctx context.Context, projectRoot string, cfg 
 		}
 	}
 	return statuses, nil
+}
+
+func jsonPayload(output string) (string, error) {
+	for index, char := range output {
+		if char != '[' && char != '{' {
+			continue
+		}
+		var raw json.RawMessage
+		if err := json.NewDecoder(strings.NewReader(output[index:])).Decode(&raw); err == nil {
+			return string(raw), nil
+		}
+	}
+	return "", fmt.Errorf("WP-CLI output did not contain JSON")
 }
 
 func blockedPluginRemovalTargets(plugins []string, statuses map[string]string) []string {

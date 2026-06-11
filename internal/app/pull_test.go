@@ -326,6 +326,25 @@ func TestPluginsWithStatus(t *testing.T) {
 	}
 }
 
+func TestParsePluginStatusesAcceptsWarningPrefixedJSON(t *testing.T) {
+	t.Parallel()
+	statuses, err := parsePluginStatuses(`Warning: [debug] Constant WP_DEBUG already defined
+[{"name":"updraftplus","status":"active"},{"name":"wp-mail-smtp","status":"inactive"}]`)
+	if err != nil {
+		t.Fatalf("parsePluginStatuses() error = %v", err)
+	}
+	if statuses["updraftplus"] != "active" || statuses["wp-mail-smtp"] != "inactive" {
+		t.Fatalf("parsePluginStatuses() statuses = %#v", statuses)
+	}
+}
+
+func TestParsePluginStatusesRejectsMissingJSON(t *testing.T) {
+	t.Parallel()
+	if _, err := parsePluginStatuses("Warning: WordPress emitted a bootstrap warning\n"); err == nil {
+		t.Fatal("parsePluginStatuses() accepted output without JSON")
+	}
+}
+
 func TestTruthyConfigValue(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
