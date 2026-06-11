@@ -553,13 +553,21 @@ func replacementHost(value string) string {
 	return value
 }
 
+func replacementLabel(value string) string {
+	if host := replacementHost(value); host != "" {
+		return host
+	}
+	return strings.TrimSpace(value)
+}
+
 // runSearchReplace delegates serialized WordPress updates to WP-CLI.
 func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Config, oldValue string, newValue string) error {
 	if oldValue == "" || newValue == "" || oldValue == newValue {
 		return nil
 	}
 	title := fmt.Sprintf("Replacing WordPress URLs: %s -> %s", oldValue, newValue)
-	return a.runStep(title, "WordPress URL replacement finished", func() error {
+	done := fmt.Sprintf("WordPress URL replacement finished (%s)", replacementLabel(oldValue))
+	return a.runStep(title, done, func() error {
 		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
 	})
 }
@@ -589,7 +597,8 @@ func (a *App) runSearchReplaceForSite(ctx context.Context, projectRoot string, c
 		return nil
 	}
 	title := fmt.Sprintf("Replacing WordPress URLs for %s: %s -> %s", siteURL, oldValue, newValue)
-	return a.runStep(title, "WordPress site URL replacement finished", func() error {
+	done := fmt.Sprintf("WordPress URL replacement finished (%s)", replacementLabel(siteURL))
+	return a.runStep(title, done, func() error {
 		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "--url="+siteURL, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
 	})
 }

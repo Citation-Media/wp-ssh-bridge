@@ -397,6 +397,14 @@ exit 1
 	if err := app.replaceSiteURLs(context.Background(), dir, cfg); err != nil {
 		t.Fatalf("replaceSiteURLs() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
+	for _, want := range []string{
+		"WordPress URL replacement finished (example.ddev.site)",
+		"WordPress URL replacement finished (shop.ddev.site)",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\nstdout:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+		}
+	}
 
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
