@@ -16,13 +16,14 @@ func TestSanitizeWPConfigContents(t *testing.T) {
 define('DB_NAME', 'prod');
 define('DB_USER', 'prod');
 define('DB_SSL_CA', '/prod/ca.pem');
+define('WP_DEBUG', false);
 define('COOKIE_DOMAIN', $_SERVER['HTTP_HOST']);
 /* That's all, stop editing! Happy publishing. */
 require_once ABSPATH . 'wp-settings.php';
 `
 
 	got := sanitizeWPConfigContents(input)
-	for _, removed := range []string{"DB_NAME", "DB_USER', 'prod", "DB_SSL_CA"} {
+	for _, removed := range []string{"DB_NAME", "DB_USER', 'prod", "DB_SSL_CA", "define('WP_DEBUG'"} {
 		if strings.Contains(got, removed) {
 			t.Fatalf("sanitized config still contains %q:\n%s", removed, got)
 		}
@@ -150,7 +151,7 @@ require_once ABSPATH . 'wp-settings.php';
 	for _, want := range []string{
 		"define('WP_HOME', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
 		"define('WP_SITEURL', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
-		"define('DOMAIN_CURRENT_SITE', parse_url(getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site', PHP_URL_HOST) ?: 'project.ddev.site');",
+		"define('DOMAIN_CURRENT_SITE', parse_url(getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site', PHP_URL_HOST));",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("updated config missing %q:\n%s", want, got)

@@ -266,12 +266,11 @@ func wpConfigURLConstantValues(projectRoot string, cfg Config, mode runtimeMode)
 	}
 	if mode == modeDDEV {
 		fallbackURL := phpStringLiteral(firstNonEmpty(localURL, "https://"+localHost))
-		fallbackHost := phpStringLiteral(localHost)
 		ddevURL := "getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: " + fallbackURL
 		return wpConfigURLConstants{
 			Home:              ddevURL,
 			SiteURL:           ddevURL,
-			DomainCurrentSite: "parse_url(" + ddevURL + ", PHP_URL_HOST) ?: " + fallbackHost,
+			DomainCurrentSite: "parse_url(" + ddevURL + ", PHP_URL_HOST)",
 		}
 	}
 	if localURL == "" {
@@ -369,6 +368,8 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 func sanitizeWPConfigContents(contents string) string {
 	dbDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]DB_[A-Z0-9_]+['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
 	contents = dbDefine.ReplaceAllString(contents, "")
+	wpDebugDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]WP_DEBUG['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
+	contents = wpDebugDefine.ReplaceAllString(contents, "")
 	contents = ensureDDEVConfigIncludeAtTop(contents)
 
 	cookieDomain := regexp.MustCompile(`define\(\s*['"]COOKIE_DOMAIN['"]\s*,\s*\$_SERVER\s*\[\s*['"]HTTP_HOST['"]\s*\]\s*\);`)
