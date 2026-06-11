@@ -268,8 +268,8 @@ func wpConfigURLConstantValues(projectRoot string, cfg Config, mode runtimeMode)
 		fallbackURL := phpStringLiteral(firstNonEmpty(localURL, "https://"+localHost))
 		ddevURL := "getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: " + fallbackURL
 		return wpConfigURLConstants{
-			Home:              ddevURL,
-			SiteURL:           ddevURL,
+			Home:              "",
+			SiteURL:           "",
 			DomainCurrentSite: "parse_url(" + ddevURL + ", PHP_URL_HOST)",
 		}
 	}
@@ -311,6 +311,10 @@ func updateWPConfigURLConstantsContents(contents string, values wpConfigURLConst
 	}
 	insertions := []string{}
 	for _, define := range defines {
+		if define.value == "" {
+			contents = removeWPConfigDefine(contents, define.name)
+			continue
+		}
 		updated, replaced := replaceWPConfigDefine(contents, define.name, define.value)
 		if replaced {
 			contents = updated
@@ -327,6 +331,11 @@ func updateWPConfigURLConstantsContents(contents string, values wpConfigURLConst
 		return contents[:loc[0]] + snippet + contents[loc[0]:]
 	}
 	return strings.TrimRight(contents, "\r\n") + snippet
+}
+
+func removeWPConfigDefine(contents string, name string) string {
+	pattern := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
+	return pattern.ReplaceAllString(contents, "")
 }
 
 func replaceWPConfigDefine(contents string, name string, value string) (string, bool) {

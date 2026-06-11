@@ -138,7 +138,7 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 }
 
-func TestUpdateWPConfigURLConstantsContentsUsesDDEVEnvironment(t *testing.T) {
+func TestUpdateWPConfigURLConstantsContentsLetsDDEVOwnHomeAndSiteURL(t *testing.T) {
 	t.Parallel()
 	input := `<?php
 define('WP_HOME', "https://acme-corp.de");
@@ -148,14 +148,17 @@ require_once ABSPATH . 'wp-settings.php';
 `
 
 	got := updateWPConfigURLConstantsContents(input, wpConfigURLConstantValues("/project", Config{LocalURL: "https://project.ddev.site"}, modeDDEV))
-	for _, want := range []string{
-		"define('WP_HOME', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
-		"define('WP_SITEURL', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
-		"define('DOMAIN_CURRENT_SITE', parse_url(getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site', PHP_URL_HOST));",
+	for _, removed := range []string{
+		"define('WP_HOME'",
+		"define('WP_SITEURL'",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("updated config missing %q:\n%s", want, got)
+		if strings.Contains(got, removed) {
+			t.Fatalf("DDEV config should own %q, but wp-config.php still contains it:\n%s", removed, got)
 		}
+	}
+	want := "define('DOMAIN_CURRENT_SITE', parse_url(getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site', PHP_URL_HOST));"
+	if !strings.Contains(got, want) {
+		t.Fatalf("updated config missing %q:\n%s", want, got)
 	}
 	if strings.Contains(got, "acme-corp.de") {
 		t.Fatalf("production domain remained in DDEV constants:\n%s", got)
