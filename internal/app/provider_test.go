@@ -67,6 +67,52 @@ func TestInstallProviderFiles(t *testing.T) {
 	}
 }
 
+func TestInstallProviderFilesPersistsDDEVAdditionalHostnames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ".ddev", "config.yaml")
+	if err := os.WriteFile(configPath, []byte("type: wordpress\nadditional_hostnames: [existing]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Provider: "live",
+		PullDomainReplacements: []DomainReplacement{
+			{Old: "https://example.com", New: "https://site.ddev.site"},
+			{Old: "https://shop.example.com", New: "https://shop.ddev.site"},
+		},
+		PushDomainReplacements: []DomainReplacement{
+			{Old: "blog.ddev.site", New: "blog.example.com"},
+		},
+	}
+
+	if err := installProviderFiles(dir, cfg, "wp-ssh-bridge"); err != nil {
+		t.Fatalf("installProviderFiles() error = %v", err)
+	}
+
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"additional_hostnames:",
+		"  - existing",
+		"  - blog",
+		"  - shop",
+		"  - site",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config.yaml missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "site.ddev.site") {
+		t.Fatalf("DDEV hostname should be stored without project_tld suffix:\n%s", text)
+	}
+}
+
 func TestInstallProviderFilesUsesRelativeProjectBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -63,8 +63,41 @@ exit 1
 	if err != nil {
 		t.Fatalf("postPush() error = %v", err)
 	}
-	if !strings.Contains(stderr.String(), "Skipping push URL replacement because the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.") {
+	if !strings.Contains(stderr.String(), "Skipping push URL replacement because no configured push replacement pairs exist and the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.") {
 		t.Fatalf("missing push URL replacement warning:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestPostPushUsesConfiguredPushDomainReplacements(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "ssh.log")
+	installFakeSSH(t, dir, `#!/bin/sh
+printf '%s\n' "$*" >> `+shellQuote(logPath)+`
+exit 0
+`)
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	err := app.postPush(context.Background(), dir, Config{
+		PushUser:       "deploy",
+		PushHost:       "staging.example.com",
+		PushRemotePath: "/var/www/html",
+		PushDomainReplacements: []DomainReplacement{
+			{Old: "example.ddev.site", New: "example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("postPush() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "'search-replace' 'example.ddev.site' 'example.com'") {
+		t.Fatalf("ssh log missing configured push replacement:\n%s", log)
 	}
 }
 

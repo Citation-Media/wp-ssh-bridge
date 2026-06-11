@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -13,23 +12,31 @@ import (
 
 // Config stores pull sources, push targets, and local WordPress behavior.
 type Config struct {
-	Provider          string
-	User              string
-	Host              string
-	Port              string
-	RemotePath        string
-	RemoteTmpDir      string
-	PushUser          string
-	PushHost          string
-	PushPort          string
-	PushRemotePath    string
-	PushRemoteTmpDir  string
-	PushURL           string
-	LocalWPPath       string
-	CloneImages       bool
-	PluginRemoveFile  string
-	LocalURL          string
-	SkipSearchReplace bool
+	Provider               string
+	User                   string
+	Host                   string
+	Port                   string
+	RemotePath             string
+	RemoteTmpDir           string
+	PushUser               string
+	PushHost               string
+	PushPort               string
+	PushRemotePath         string
+	PushRemoteTmpDir       string
+	PushURL                string
+	LocalWPPath            string
+	CloneImages            bool
+	PluginRemoveFile       string
+	LocalURL               string
+	PullDomainReplacements []DomainReplacement
+	PushDomainReplacements []DomainReplacement
+	SkipSearchReplace      bool
+}
+
+// DomainReplacement stores an old-to-new WordPress URL/domain replacement pair.
+type DomainReplacement struct {
+	Old string
+	New string
 }
 
 var (
@@ -76,17 +83,21 @@ func loadConfigPath(path string) (Config, error) {
 // readConfigFile parses the small YAML subset emitted by writeConfigFile.
 func readConfigFile(path string) (Config, error) {
 	cfg := Config{}
-	file, err := os.Open(path)
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, err
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	lines := strings.Split(string(contents), "\n")
+	for index := 0; index < len(lines); index++ {
+		rawLine := lines[index]
+		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+
+		if leadingSpaces(rawLine) > 0 {
+			return cfg, fmt.Errorf("unexpected nested config line in %s: %s", path, line)
 		}
 
 		key, raw, ok := strings.Cut(line, ":")
@@ -96,6 +107,21 @@ func readConfigFile(path string) (Config, error) {
 
 		key = strings.TrimSpace(key)
 		value := strings.TrimSpace(raw)
+		switch key {
+		case "domain_replacements", "pull_domain_replacements", "push_domain_replacements":
+			replacements, nextIndex, err := parseDomainReplacements(lines, index+1, path)
+			if err != nil {
+				return cfg, err
+			}
+			if key == "push_domain_replacements" {
+				cfg.PushDomainReplacements = replacements
+			} else {
+				cfg.PullDomainReplacements = replacements
+			}
+			index = nextIndex - 1
+			continue
+		}
+
 		if strings.HasPrefix(value, "#") {
 			value = ""
 		}
@@ -144,11 +170,95 @@ func readConfigFile(path string) (Config, error) {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return cfg, err
+	return cfg, nil
+}
+
+func parseDomainReplacements(lines []string, start int, source string) ([]DomainReplacement, int, error) {
+	replacements := []DomainReplacement{}
+	current := DomainReplacement{}
+	seenItem := false
+
+	flush := func() error {
+		if !seenItem {
+			return nil
+		}
+		if current.Old == "" || current.New == "" {
+			return fmt.Errorf("domain_replacements entries in %s require old and new values", source)
+		}
+		replacements = append(replacements, current)
+		current = DomainReplacement{}
+		seenItem = false
+		return nil
 	}
 
-	return cfg, nil
+	index := start
+	for ; index < len(lines); index++ {
+		rawLine := lines[index]
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if leadingSpaces(rawLine) == 0 {
+			break
+		}
+		if !strings.HasPrefix(line, "-") {
+			key, value, ok := parseNestedYAMLScalar(line)
+			if !ok || !seenItem {
+				return nil, index, fmt.Errorf("invalid domain_replacements line in %s: %s", source, line)
+			}
+			assignDomainReplacementValue(&current, key, value)
+			continue
+		}
+		if err := flush(); err != nil {
+			return nil, index, err
+		}
+		seenItem = true
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "-"))
+		if rest == "" {
+			continue
+		}
+		key, value, ok := parseNestedYAMLScalar(rest)
+		if !ok {
+			return nil, index, fmt.Errorf("invalid domain_replacements line in %s: %s", source, line)
+		}
+		assignDomainReplacementValue(&current, key, value)
+	}
+	if err := flush(); err != nil {
+		return nil, index, err
+	}
+	return replacements, index, nil
+}
+
+func parseNestedYAMLScalar(line string) (string, string, bool) {
+	key, raw, ok := strings.Cut(line, ":")
+	if !ok {
+		return "", "", false
+	}
+	value := strings.TrimSpace(raw)
+	if unquoted, err := strconv.Unquote(value); err == nil {
+		value = unquoted
+	}
+	return strings.TrimSpace(key), value, true
+}
+
+func assignDomainReplacementValue(replacement *DomainReplacement, key string, value string) {
+	switch key {
+	case "old":
+		replacement.Old = value
+	case "new":
+		replacement.New = value
+	}
+}
+
+func leadingSpaces(value string) int {
+	count := 0
+	for _, char := range value {
+		if char != ' ' {
+			return count
+		}
+		count++
+	}
+	return count
 }
 
 // writeConfigFile persists only values that differ from the runtime defaults.
@@ -175,9 +285,25 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeBoolValue(&body, "clone_images", cfg.CloneImages, defaults.CloneImages)
 	writeStringValue(&body, "plugin_remove_file", cfg.PluginRemoveFile, defaults.PluginRemoveFile)
 	writeStringValue(&body, "local_url", cfg.LocalURL, defaults.LocalURL)
+	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
+	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
 
 	return os.WriteFile(path, []byte(body.String()), 0o644)
+}
+
+func writeDomainReplacements(body *strings.Builder, key string, replacements []DomainReplacement) {
+	if len(replacements) == 0 {
+		return
+	}
+	body.WriteString(key + ":\n")
+	for _, replacement := range replacements {
+		if replacement.Old == "" || replacement.New == "" {
+			continue
+		}
+		body.WriteString(fmt.Sprintf("  - old: %s\n", quoteYAML(replacement.Old)))
+		body.WriteString(fmt.Sprintf("    new: %s\n", quoteYAML(replacement.New)))
+	}
 }
 
 func writeStringValue(body *strings.Builder, key string, value string, defaultValue string) {
@@ -417,6 +543,12 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	if overlay.LocalURL != "" {
 		base.LocalURL = overlay.LocalURL
+	}
+	if len(overlay.PullDomainReplacements) > 0 {
+		base.PullDomainReplacements = overlay.PullDomainReplacements
+	}
+	if len(overlay.PushDomainReplacements) > 0 {
+		base.PushDomainReplacements = overlay.PushDomainReplacements
 	}
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace

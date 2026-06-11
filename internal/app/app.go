@@ -48,6 +48,8 @@ func (a *App) run(args []string) error {
 		return a.commandProvider(args[1:])
 	case "plugins":
 		return a.commandPlugins(args[1:])
+	case "domains":
+		return a.commandDomains(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -63,6 +65,7 @@ Usage:
   wp-ssh-bridge push [flags]                  Push database and files to the target host
   wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
   wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
+  wp-ssh-bridge domains add --old A --new B   Add pull/push domain mappings
   wp-ssh-bridge plugins remove [wordpress-root]
   wp-ssh-bridge version [--short]
 
@@ -364,6 +367,124 @@ func (a *App) commandPlugins(args []string) error {
 		return err
 	}
 	return a.removeBlockedPlugins(context.Background(), projectRoot, cfg, opts.WordPressRoot)
+}
+
+// commandDomains updates configured pull/push domain mappings after initial setup.
+func (a *App) commandDomains(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: wp-ssh-bridge domains {add|list}")
+	}
+	switch args[0] {
+	case "add", "configure":
+		return a.commandDomainsAdd(args[1:])
+	case "list":
+		return a.commandDomainsList(args[1:])
+	default:
+		return fmt.Errorf("unknown domains command %q", args[0])
+	}
+}
+
+func (a *App) commandDomainsAdd(args []string) error {
+	fs := flag.NewFlagSet("domains add", flag.ContinueOnError)
+	fs.SetOutput(a.Stderr)
+	projectRoot := fs.String("project-root", "", "DDEV project root")
+	configFile := fs.String("config-file", "", "YAML config file path")
+	oldValue := fs.String("old", "", "source domain or URL")
+	newValue := fs.String("new", "", "target domain or URL")
+	direction := fs.String("direction", "both", "pull, push, or both")
+	binary := fs.String("binary", defaultBinaryPath(), "binary path used by generated provider files")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	replacement := DomainReplacement{Old: strings.TrimSpace(*oldValue), New: strings.TrimSpace(*newValue)}
+	if err := validateDomainReplacement(replacement); err != nil {
+		return err
+	}
+
+	runtime := a.resolveRuntime(*projectRoot)
+	adapter := adapterForRuntime(runtime)
+	cfg, err := loadConfigForRuntime(runtime, *configFile)
+	if err != nil {
+		return err
+	}
+	adapter.ApplyConfigDefaults(&cfg)
+
+	switch *direction {
+	case "pull":
+		cfg.PullDomainReplacements = addDomainReplacement(cfg.PullDomainReplacements, replacement)
+	case "push":
+		cfg.PushDomainReplacements = addDomainReplacement(cfg.PushDomainReplacements, replacement)
+	case "both":
+		cfg.PullDomainReplacements = addDomainReplacement(cfg.PullDomainReplacements, replacement)
+		cfg.PushDomainReplacements = addDomainReplacement(cfg.PushDomainReplacements, invertDomainReplacement(replacement))
+	default:
+		return fmt.Errorf("--direction must be pull, push, or both")
+	}
+
+	if err := writeConfigForRuntime(runtime, *configFile, cfg); err != nil {
+		return err
+	}
+	if runtime.Mode == modeDDEV {
+		if err := adapter.InstallProjectFiles(cfg, *binary); err != nil {
+			return err
+		}
+	}
+	a.UI.Success("Domain replacement configured")
+	return nil
+}
+
+func (a *App) commandDomainsList(args []string) error {
+	fs := flag.NewFlagSet("domains list", flag.ContinueOnError)
+	fs.SetOutput(a.Stderr)
+	projectRoot := fs.String("project-root", "", "DDEV project root")
+	configFile := fs.String("config-file", "", "YAML config file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	runtime := a.resolveRuntime(*projectRoot)
+	cfg, err := loadConfigForRuntime(runtime, *configFile)
+	if err != nil {
+		return err
+	}
+	printDomainReplacements(a.Stdout, "pull_domain_replacements", cfg.PullDomainReplacements)
+	printDomainReplacements(a.Stdout, "push_domain_replacements", cfg.PushDomainReplacements)
+	return nil
+}
+
+func validateDomainReplacement(replacement DomainReplacement) error {
+	if replacement.Old == "" || replacement.New == "" {
+		return errors.New("--old and --new are required")
+	}
+	if strings.ContainsAny(replacement.Old, "\r\n") || strings.ContainsAny(replacement.New, "\r\n") {
+		return errors.New("domain replacement values must not contain newlines")
+	}
+	return nil
+}
+
+func addDomainReplacement(replacements []DomainReplacement, replacement DomainReplacement) []DomainReplacement {
+	for _, existing := range replacements {
+		if existing == replacement {
+			return replacements
+		}
+	}
+	return append(replacements, replacement)
+}
+
+func invertDomainReplacement(replacement DomainReplacement) DomainReplacement {
+	return DomainReplacement{Old: replacement.New, New: replacement.Old}
+}
+
+func printDomainReplacements(writer io.Writer, label string, replacements []DomainReplacement) {
+	fmt.Fprintf(writer, "%s:\n", label)
+	if len(replacements) == 0 {
+		fmt.Fprintln(writer, "  (none)")
+		return
+	}
+	for _, replacement := range replacements {
+		fmt.Fprintf(writer, "  %s -> %s\n", replacement.Old, replacement.New)
+	}
 }
 
 // resolveProjectRoot handles explicit roots and DDEV upward discovery.

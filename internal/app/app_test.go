@@ -63,6 +63,33 @@ func TestInitSilentSupportsConfigFileEnv(t *testing.T) {
 	}
 }
 
+func TestDomainsAddConfiguresPullAndInversePushMappings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+
+	if err := app.commandInit([]string{"--silent"}); err != nil {
+		t.Fatalf("commandInit() error = %v\nstderr:\n%s", err, stderr.String())
+	}
+	if err := app.commandDomains([]string{"add", "--old", "example.com", "--new", "example.ddev.site"}); err != nil {
+		t.Fatalf("commandDomains(add) error = %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	cfg, err := readConfigFile(filepath.Join(dir, ".wp-ssh.yaml"))
+	if err != nil {
+		t.Fatalf("readConfigFile() error = %v", err)
+	}
+	if len(cfg.PullDomainReplacements) != 1 || cfg.PullDomainReplacements[0] != (DomainReplacement{Old: "example.com", New: "example.ddev.site"}) {
+		t.Fatalf("pull replacements = %#v", cfg.PullDomainReplacements)
+	}
+	if len(cfg.PushDomainReplacements) != 1 || cfg.PushDomainReplacements[0] != (DomainReplacement{Old: "example.ddev.site", New: "example.com"}) {
+		t.Fatalf("push replacements = %#v", cfg.PushDomainReplacements)
+	}
+}
+
 func TestFillPullConfigDoesNotPromptForConfiguredRequiredValues(t *testing.T) {
 	t.Parallel()
 	cfg := Config{

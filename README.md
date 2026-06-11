@@ -202,7 +202,51 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads`. Defaults to `false`. |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Optional path to an additional project-specific blocked-plugin list. |
 | `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for post-pull search-replace. |
+| `pull_domain_replacements` | - | Optional pull-time old-to-new domain/URL replacements. Prefer protocol-less domains for multisite mappings. |
+| `push_domain_replacements` | - | Optional push-time old-to-new domain/URL replacements. Usually the inverse of pull replacements. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
+
+Add mappings to an already configured project with the CLI:
+
+```bash
+wp-ssh-bridge domains add --old example.com --new example.ddev.site
+```
+
+By default this writes both directions:
+
+- `pull_domain_replacements`: `example.com` -> `example.ddev.site`
+- `push_domain_replacements`: `example.ddev.site` -> `example.com`
+
+Use `--direction pull` or `--direction push` when only one side should be changed.
+
+Example multisite domain mapping:
+
+```yaml
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+  - old: "shop.example.com"
+    new: "shop.ddev.site"
+push_domain_replacements:
+  - old: "example.ddev.site"
+    new: "example.com"
+  - old: "shop.ddev.site"
+    new: "shop.example.com"
+```
+
+Use protocol-less domains for multisite replacements whenever possible. WordPress multisite network tables and constants such as `DOMAIN_CURRENT_SITE` store hosts without `http://` or `https://`, and protocol-less mappings avoid missing those values. Full URLs are still supported when path-aware replacements are needed.
+
+In DDEV mode, provider install/pull/push derives local hosts from `pull_domain_replacements[].new` and `push_domain_replacements[].old`, then persists them in `.ddev/config.yaml` as `additional_hostnames`. The search-replace behavior itself is core CLI behavior and also works outside DDEV.
+
+Post-pull also updates hardcoded URL constants in `wp-config.php` so production values do not override the imported database:
+
+```php
+define('WP_HOME', ...);
+define('WP_SITEURL', ...);
+define('DOMAIN_CURRENT_SITE', ...);
+```
+
+In DDEV mode these constants are rewritten to use DDEV-provided environment variables, preferring `DDEV_PRIMARY_URL_WITHOUT_PORT` and falling back to `DDEV_PRIMARY_URL`. Outside DDEV they are rewritten as literal values from `local_url`, the first `pull_domain_replacements[].new` URL, or the detected local URL.
 
 ## Provider Generation
 
@@ -230,7 +274,7 @@ wp-ssh-bridge provider generate --kind all
 - Rsyncs the upstream WordPress root into the local WordPress root.
 - Excludes `.git`, `.ddev`, DDEV config, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
-- Runs URL search-replace through `ddev wp`, including multisite `site` and `blogs` domain tables.
+- Runs URL search-replace through `ddev wp`, including configured multisite domain mappings, protocol and host-only replacement pairs, per-blog search-replace, and multisite `site` and `blogs` domain tables.
 - Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.
 - Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.

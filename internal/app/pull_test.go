@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -133,6 +134,51 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 }
 
+func TestUpdateWPConfigURLConstantsContentsUsesDDEVEnvironment(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+define('WP_HOME', "https://acme-corp.de");
+define('WP_SITEURL', "https://acme-corp.de");
+define( 'DOMAIN_CURRENT_SITE', 'acme-corp.de' );
+require_once ABSPATH . 'wp-settings.php';
+`
+
+	got := updateWPConfigURLConstantsContents(input, wpConfigURLConstantValues("/project", Config{LocalURL: "https://project.ddev.site"}, modeDDEV))
+	for _, want := range []string{
+		"define('WP_HOME', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
+		"define('WP_SITEURL', getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site');",
+		"define('DOMAIN_CURRENT_SITE', parse_url(getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: 'https://project.ddev.site', PHP_URL_HOST) ?: 'project.ddev.site');",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "acme-corp.de") {
+		t.Fatalf("production domain remained in DDEV constants:\n%s", got)
+	}
+}
+
+func TestUpdateWPConfigURLConstantsContentsUsesStandaloneLiterals(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+/* That's all, stop editing! Happy publishing. */
+`
+
+	got := updateWPConfigURLConstantsContents(input, wpConfigURLConstantValues("/project", Config{LocalURL: "https://local.test"}, modeStandalone))
+	for _, want := range []string{
+		"define('WP_HOME', 'https://local.test');",
+		"define('WP_SITEURL', 'https://local.test');",
+		"define('DOMAIN_CURRENT_SITE', 'local.test');",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "define('WP_HOME'") > strings.Index(got, "stop editing") {
+		t.Fatalf("constants should be inserted before stop-editing marker:\n%s", got)
+	}
+}
+
 func TestBuildRsyncExcludes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -240,22 +286,52 @@ func TestRsyncArchiveArgsSupportMacOSRsync(t *testing.T) {
 	}
 }
 
-func TestUniqueReplacementPairsRemovesDuplicatesAndNoops(t *testing.T) {
+func TestUniqueReplacementPairsRemovesDuplicatesNoopsAndOrdersLongestFirst(t *testing.T) {
 	t.Parallel()
 	pairs := uniqueReplacementPairs([]replacementPair{
-		{old: "https://example.com", new: "https://local.test"},
-		{old: "http://example.com", new: "https://local.test"},
-		{old: "https://example.com", new: "https://local.test"},
+		{old: "example.com", new: "example.ddev.site"},
+		{old: "shop.example.com", new: "shop.ddev.site"},
+		{old: "https://shop.example.com", new: "https://shop.ddev.site"},
+		{old: "example.com", new: "example.ddev.site"},
 		{old: "https://local.test", new: "https://local.test"},
 		{old: "", new: "https://local.test"},
 	})
 
-	if len(pairs) != 2 {
+	if len(pairs) != 3 {
 		t.Fatalf("uniqueReplacementPairs() length = %d, pairs = %#v", len(pairs), pairs)
 	}
-	if pairs[0].old != "https://example.com" || pairs[1].old != "http://example.com" {
-		t.Fatalf("uniqueReplacementPairs() kept unexpected order: %#v", pairs)
+	gotOrder := []string{pairs[0].old, pairs[1].old, pairs[2].old}
+	wantOrder := []string{"https://shop.example.com", "shop.example.com", "example.com"}
+	if !reflect.DeepEqual(gotOrder, wantOrder) {
+		t.Fatalf("uniqueReplacementPairs() order = %#v, want %#v", gotOrder, wantOrder)
 	}
+}
+
+func TestReplacementPairsIncludeHostOnlyValues(t *testing.T) {
+	t.Parallel()
+	pairs := replacementPairsForConfiguredDomain(DomainReplacement{
+		Old: "https://acme-corp.de",
+		New: "https://acme-corp.ddev.site",
+	})
+
+	for _, want := range []replacementPair{
+		{old: "https://acme-corp.de", new: "https://acme-corp.ddev.site"},
+		{old: "http://acme-corp.de", new: "https://acme-corp.ddev.site"},
+		{old: "acme-corp.de", new: "acme-corp.ddev.site"},
+	} {
+		if !replacementPairsContain(pairs, want) {
+			t.Fatalf("replacementPairsForConfiguredDomain() missing %#v in %#v", want, pairs)
+		}
+	}
+}
+
+func replacementPairsContain(pairs []replacementPair, want replacementPair) bool {
+	for _, pair := range pairs {
+		if pair == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLineSetContains(t *testing.T) {
@@ -284,8 +360,58 @@ exit 1
 	if err := app.replaceSiteURLs(context.Background(), dir, Config{LocalURL: "https://local.test"}); err != nil {
 		t.Fatalf("replaceSiteURLs() error = %v", err)
 	}
-	if !strings.Contains(stderr.String(), "Skipping WordPress URL replacement because the old or new URL could not be detected.") {
+	if !strings.Contains(stderr.String(), "Skipping WordPress URL replacement because no configured replacement pairs exist and the old or new URL could not be detected.") {
 		t.Fatalf("missing URL replacement warning:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestReplaceSiteURLsRunsConfiguredReplacementsPerMultisiteBlog(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "wp.log")
+	installFakeCommand(t, dir, "wp", `#!/bin/sh
+printf '%s\n' "$*" >> `+shellQuote(logPath)+`
+case "$*" in
+  *"option get home"*) printf 'https://example.com\n'; exit 0 ;;
+  *"core is-installed --network"*) exit 0 ;;
+  *"site list --field=url"*) printf 'https://example.ddev.site/\nhttps://shop.ddev.site/\n'; exit 0 ;;
+  *"db prefix"*) printf 'wp_\n'; exit 0 ;;
+  *"db tables"*) printf 'wp_options\nwp_site\nwp_blogs\n'; exit 0 ;;
+  *"db query"*) exit 0 ;;
+  *"search-replace"*) exit 0 ;;
+esac
+exit 1
+`)
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte("<?php\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+
+	cfg := Config{
+		LocalURL: "https://example.ddev.site",
+		PullDomainReplacements: []DomainReplacement{
+			{Old: "https://shop.example.com", New: "https://shop.ddev.site"},
+		},
+	}
+	if err := app.replaceSiteURLs(context.Background(), dir, cfg); err != nil {
+		t.Fatalf("replaceSiteURLs() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	for _, want := range []string{
+		"--url=https://example.ddev.site/ search-replace https://example.com https://example.ddev.site",
+		"--url=https://shop.ddev.site/ search-replace https://shop.example.com https://shop.ddev.site",
+		"db query UPDATE `wp_site` SET domain = 'shop.ddev.site' WHERE domain = 'shop.example.com'",
+		"db query UPDATE `wp_blogs` SET domain = 'shop.ddev.site' WHERE domain = 'shop.example.com'",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("wp log missing %q:\n%s", want, log)
+		}
 	}
 }
 

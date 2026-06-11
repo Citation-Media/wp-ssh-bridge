@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -13,22 +14,30 @@ func TestWriteReadConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".ddev", configFileName)
 	cfg := Config{
-		Provider:          "live",
-		User:              "deploy",
-		Host:              "example.com",
-		Port:              "2222",
-		RemotePath:        "/home/site/public_html",
-		RemoteTmpDir:      "/var/tmp",
-		PushUser:          "release",
-		PushHost:          "staging.example.com",
-		PushPort:          "2223",
-		PushRemotePath:    "/home/staging/public_html",
-		PushRemoteTmpDir:  "/tmp/push",
-		PushURL:           "https://staging.example.com",
-		LocalWPPath:       "public",
-		CloneImages:       true,
-		PluginRemoveFile:  ".ddev/plugins.txt",
-		LocalURL:          "https://site.ddev.site",
+		Provider:         "live",
+		User:             "deploy",
+		Host:             "example.com",
+		Port:             "2222",
+		RemotePath:       "/home/site/public_html",
+		RemoteTmpDir:     "/var/tmp",
+		PushUser:         "release",
+		PushHost:         "staging.example.com",
+		PushPort:         "2223",
+		PushRemotePath:   "/home/staging/public_html",
+		PushRemoteTmpDir: "/tmp/push",
+		PushURL:          "https://staging.example.com",
+		LocalWPPath:      "public",
+		CloneImages:      true,
+		PluginRemoveFile: ".ddev/plugins.txt",
+		LocalURL:         "https://site.ddev.site",
+		PullDomainReplacements: []DomainReplacement{
+			{Old: "example.com", New: "site.ddev.site"},
+			{Old: "shop.example.com", New: "shop.ddev.site"},
+		},
+		PushDomainReplacements: []DomainReplacement{
+			{Old: "site.ddev.site", New: "example.com"},
+			{Old: "shop.ddev.site", New: "shop.example.com"},
+		},
 		SkipSearchReplace: true,
 	}
 
@@ -46,6 +55,12 @@ func TestWriteReadConfigFile(t *testing.T) {
 		"pull_port: \"2222\"",
 		"pull_remote_path: \"/home/site/public_html\"",
 		"pull_remote_tmp_dir: \"/var/tmp\"",
+		"pull_domain_replacements:",
+		"  - old: \"example.com\"",
+		"    new: \"site.ddev.site\"",
+		"push_domain_replacements:",
+		"  - old: \"site.ddev.site\"",
+		"    new: \"example.com\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("written config missing %q:\n%s", want, text)
@@ -62,8 +77,44 @@ func TestWriteReadConfigFile(t *testing.T) {
 		t.Fatalf("readConfigFile() error = %v", err)
 	}
 
-	if got != cfg {
+	if !reflect.DeepEqual(got, cfg) {
 		t.Fatalf("read config mismatch\nwant: %#v\n got: %#v", cfg, got)
+	}
+}
+
+func TestReadConfigFileTreatsDomainReplacementsAsPullAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wp-ssh.yaml")
+	if err := os.WriteFile(path, []byte(`domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readConfigFile(path)
+	if err != nil {
+		t.Fatalf("readConfigFile() error = %v", err)
+	}
+	want := []DomainReplacement{{Old: "example.com", New: "example.ddev.site"}}
+	if !reflect.DeepEqual(got.PullDomainReplacements, want) {
+		t.Fatalf("legacy domain_replacements alias = %#v, want %#v", got.PullDomainReplacements, want)
+	}
+}
+
+func TestReadConfigFileRejectsIncompleteDomainReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wp-ssh.yaml")
+	if err := os.WriteFile(path, []byte(`domain_replacements:
+  - old: "https://example.com"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readConfigFile(path); err == nil {
+		t.Fatal("readConfigFile() accepted incomplete domain replacement")
 	}
 }
 

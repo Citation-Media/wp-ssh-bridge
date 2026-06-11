@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -159,6 +161,9 @@ func installProviderFiles(projectRoot string, cfg Config, binary string) error {
 	if err := os.WriteFile(hookPath, []byte(hookYAML(binary)), 0o644); err != nil {
 		return err
 	}
+	if err := ensureDDEVAdditionalHostnames(projectRoot, cfg); err != nil {
+		return err
+	}
 
 	return ensureCustomPluginList(projectRoot, cfg)
 }
@@ -198,4 +203,161 @@ func ensureCustomPluginList(root string, cfg Config) error {
 		return err
 	}
 	return os.WriteFile(listPath, []byte(defaultPluginList), 0o644)
+}
+
+var validDDEVHostname = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+
+// ensureDDEVAdditionalHostnames keeps DDEV routing in sync with configured local replacement targets.
+func ensureDDEVAdditionalHostnames(projectRoot string, cfg Config) error {
+	hostnames, err := ddevHostnamesForReplacements(projectRoot, ddevLocalDomainReplacements(cfg))
+	if err != nil {
+		return err
+	}
+	if len(hostnames) == 0 {
+		return nil
+	}
+	return mergeSimpleYAMLList(filepath.Join(projectRoot, ".ddev", "config.yaml"), "additional_hostnames", hostnames)
+}
+
+func ddevLocalDomainReplacements(cfg Config) []DomainReplacement {
+	replacements := append([]DomainReplacement{}, cfg.PullDomainReplacements...)
+	for _, replacement := range cfg.PushDomainReplacements {
+		replacements = append(replacements, DomainReplacement{Old: replacement.New, New: replacement.Old})
+	}
+	return replacements
+}
+
+func ddevHostnamesForReplacements(projectRoot string, replacements []DomainReplacement) ([]string, error) {
+	projectTLD := ddevProjectTLD(projectRoot)
+	seen := map[string]bool{}
+	hostnames := []string{}
+	for _, replacement := range replacements {
+		host := replacementHost(replacement.New)
+		if host == "" {
+			continue
+		}
+		host = strings.Trim(strings.ToLower(host), ".")
+		if projectTLD != "" {
+			host = strings.TrimSuffix(host, "."+projectTLD)
+		}
+		if host == "" {
+			continue
+		}
+		if !validDDEVHostname.MatchString(host) {
+			return nil, fmt.Errorf("invalid DDEV additional hostname %q derived from domain replacement target %q", host, replacement.New)
+		}
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
+		hostnames = append(hostnames, host)
+	}
+	return hostnames, nil
+}
+
+func ddevProjectTLD(projectRoot string) string {
+	value, err := readSimpleYAMLValue(filepath.Join(projectRoot, ".ddev", "config.yaml"), "project_tld")
+	if err != nil || value == "" {
+		return "ddev.site"
+	}
+	return strings.Trim(value, ".")
+}
+
+func mergeSimpleYAMLList(path string, key string, additions []string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(contents), "\n")
+	existing, start, end := readSimpleYAMLList(lines, key)
+	merged := append([]string{}, existing...)
+	seen := map[string]bool{}
+	for _, value := range merged {
+		seen[value] = true
+	}
+	for _, value := range additions {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		merged = append(merged, value)
+	}
+	sort.Strings(merged)
+
+	block := []string{key + ":"}
+	for _, value := range merged {
+		block = append(block, "  - "+value)
+	}
+
+	updated := []string{}
+	if start >= 0 {
+		updated = append(updated, lines[:start]...)
+		updated = append(updated, block...)
+		updated = append(updated, lines[end:]...)
+	} else {
+		updated = append(updated, lines...)
+		if len(updated) > 0 && strings.TrimSpace(updated[len(updated)-1]) == "" {
+			updated = updated[:len(updated)-1]
+		}
+		updated = append(updated, block...)
+		updated = append(updated, "")
+	}
+	return os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+}
+
+func readSimpleYAMLList(lines []string, key string) ([]string, int, int) {
+	for index, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") || leadingSpaces(rawLine) > 0 {
+			continue
+		}
+		currentKey, rawValue, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(currentKey) != key {
+			continue
+		}
+		values := parseInlineYAMLList(strings.TrimSpace(rawValue))
+		end := index + 1
+		for ; end < len(lines); end++ {
+			child := strings.TrimSpace(lines[end])
+			if child == "" || strings.HasPrefix(child, "#") {
+				continue
+			}
+			if leadingSpaces(lines[end]) == 0 {
+				break
+			}
+			if strings.HasPrefix(child, "-") {
+				values = append(values, strings.Trim(strings.TrimSpace(strings.TrimPrefix(child, "-")), `"'`))
+			}
+		}
+		return compactStrings(values), index, end
+	}
+	return nil, -1, -1
+}
+
+func parseInlineYAMLList(value string) []string {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]") {
+		return nil
+	}
+	value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"))
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		values = append(values, strings.Trim(strings.TrimSpace(part), `"'`))
+	}
+	return values
+}
+
+func compactStrings(values []string) []string {
+	compacted := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			compacted = append(compacted, value)
+		}
+	}
+	return compacted
 }

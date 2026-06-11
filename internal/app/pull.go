@@ -180,6 +180,9 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config) 
 			return err
 		}
 	}
+	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
+		return err
+	}
 	if err := a.replaceSiteURLs(ctx, projectRoot, cfg); err != nil {
 		return err
 	}
@@ -227,6 +230,122 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 // rsyncArchiveArgs stays compatible with macOS' bundled rsync, which lacks -s/--protect-args.
 func rsyncArchiveArgs() []string {
 	return []string{"-az"}
+}
+
+// updateWPConfigURLConstants keeps hardcoded WordPress URL constants from overriding local URLs.
+func (a *App) updateWPConfigURLConstants(projectRoot string, cfg Config, mode runtimeMode) error {
+	wpConfig := filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")
+	contents, err := os.ReadFile(wpConfig)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	updated := updateWPConfigURLConstantsContents(string(contents), wpConfigURLConstantValues(projectRoot, cfg, mode))
+	if updated == string(contents) {
+		return nil
+	}
+	return a.runStep("Updating local WordPress URL constants", "Local WordPress URL constants updated", func() error {
+		return os.WriteFile(wpConfig, []byte(updated), 0o644)
+	})
+}
+
+type wpConfigURLConstants struct {
+	Home              string
+	SiteURL           string
+	DomainCurrentSite string
+}
+
+func wpConfigURLConstantValues(projectRoot string, cfg Config, mode runtimeMode) wpConfigURLConstants {
+	localURL := preferredLocalURL(projectRoot, cfg)
+	localHost := replacementHost(localURL)
+	if localHost == "" {
+		localHost = "localhost"
+	}
+	if mode == modeDDEV {
+		fallbackURL := phpStringLiteral(firstNonEmpty(localURL, "https://"+localHost))
+		fallbackHost := phpStringLiteral(localHost)
+		ddevURL := "getenv('DDEV_PRIMARY_URL_WITHOUT_PORT') ?: getenv('DDEV_PRIMARY_URL') ?: " + fallbackURL
+		return wpConfigURLConstants{
+			Home:              ddevURL,
+			SiteURL:           ddevURL,
+			DomainCurrentSite: "parse_url(" + ddevURL + ", PHP_URL_HOST) ?: " + fallbackHost,
+		}
+	}
+	if localURL == "" {
+		localURL = "https://" + localHost
+	}
+	return wpConfigURLConstants{
+		Home:              phpStringLiteral(localURL),
+		SiteURL:           phpStringLiteral(localURL),
+		DomainCurrentSite: phpStringLiteral(localHost),
+	}
+}
+
+func preferredLocalURL(projectRoot string, cfg Config) string {
+	if cfg.LocalURL != "" {
+		return trimTrailingSlash(cfg.LocalURL)
+	}
+	for _, replacement := range cfg.PullDomainReplacements {
+		if urlBase(replacement.New) != "" {
+			return trimTrailingSlash(replacement.New)
+		}
+	}
+	for _, replacement := range cfg.PushDomainReplacements {
+		if urlBase(replacement.Old) != "" {
+			return trimTrailingSlash(replacement.Old)
+		}
+	}
+	return localSiteURL(projectRoot, cfg)
+}
+
+func updateWPConfigURLConstantsContents(contents string, values wpConfigURLConstants) string {
+	defines := []struct {
+		name  string
+		value string
+	}{
+		{name: "WP_HOME", value: values.Home},
+		{name: "WP_SITEURL", value: values.SiteURL},
+		{name: "DOMAIN_CURRENT_SITE", value: values.DomainCurrentSite},
+	}
+	insertions := []string{}
+	for _, define := range defines {
+		updated, replaced := replaceWPConfigDefine(contents, define.name, define.value)
+		if replaced {
+			contents = updated
+			continue
+		}
+		insertions = append(insertions, wpConfigDefineLine(define.name, define.value))
+	}
+	if len(insertions) == 0 {
+		return contents
+	}
+	snippet := "\n" + strings.Join(insertions, "")
+	stopEditing := regexp.MustCompile(`\n\s*/\* That(?:\\'|'|\x{2019})s all, stop editing! Happy publishing\. \*/`)
+	if loc := stopEditing.FindStringIndex(contents); loc != nil {
+		return contents[:loc[0]] + snippet + contents[loc[0]:]
+	}
+	return strings.TrimRight(contents, "\r\n") + snippet
+}
+
+func replaceWPConfigDefine(contents string, name string, value string) (string, bool) {
+	pattern := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
+	if !pattern.MatchString(contents) {
+		return contents, false
+	}
+	return pattern.ReplaceAllString(contents, wpConfigDefineLine(name, value)), true
+}
+
+func wpConfigDefineLine(name string, value string) string {
+	return "define('" + name + "', " + value + ");\n"
+}
+
+func phpStringLiteral(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `'`, `\'`)
+	return "'" + value + "'"
 }
 
 // sanitizeWPConfig removes production DB constants and adds DDEV-safe settings.
@@ -310,31 +429,44 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 		return nil
 	}
 
+	pairs := []replacementPair{}
+	for _, configured := range cfg.PullDomainReplacements {
+		pairs = append(pairs, replacementPairsForConfiguredDomain(configured)...)
+	}
+
 	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"))
 	newURL := localSiteURL(projectRoot, cfg)
-	if oldURL == "" || newURL == "" {
-		a.UI.Warning("Skipping WordPress URL replacement because the old or new URL could not be detected.")
+	if oldURL != "" && newURL != "" {
+		autoPairs := replacementPairsForURLs(oldURL, newURL)
+		if len(autoPairs) == 0 {
+			a.UI.Warning("Skipping automatic WordPress URL replacement because the old or new URL is invalid.")
+		}
+		pairs = append(pairs, autoPairs...)
+	}
+	if len(pairs) == 0 {
+		a.UI.Warning("Skipping WordPress URL replacement because no configured replacement pairs exist and the old or new URL could not be detected.")
+		return nil
+	}
+	pairs = uniqueReplacementPairs(pairs)
+
+	if a.isMultisite(ctx, projectRoot, cfg) {
+		if err := a.runMultisiteSearchReplace(ctx, projectRoot, cfg, pairs); err != nil {
+			return err
+		}
+		for _, pair := range pairs {
+			if err := a.replaceMultisiteDomains(ctx, projectRoot, cfg, pair.old, pair.new); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
-	oldBase := urlBase(oldURL)
-	newBase := urlBase(newURL)
-	if oldBase == "" || newBase == "" {
-		a.UI.Warning("Skipping WordPress URL replacement because the old or new URL is invalid.")
-		return nil
-	}
-
-	hostPart := strings.TrimPrefix(strings.TrimPrefix(oldBase, "http://"), "https://")
-	for _, pair := range uniqueReplacementPairs([]replacementPair{
-		{old: oldURL, new: newURL},
-		{old: "http://" + hostPart, new: newBase},
-		{old: "https://" + hostPart, new: newBase},
-	}) {
+	for _, pair := range pairs {
 		if err := a.runSearchReplace(ctx, projectRoot, cfg, pair.old, pair.new); err != nil {
 			return err
 		}
 	}
-	return a.replaceMultisiteDomains(ctx, projectRoot, cfg, oldBase, newBase)
+	return nil
 }
 
 type replacementPair struct {
@@ -356,7 +488,69 @@ func uniqueReplacementPairs(pairs []replacementPair) []replacementPair {
 		seen[key] = true
 		unique = append(unique, pair)
 	}
+	sort.SliceStable(unique, func(i int, j int) bool {
+		return len(unique[i].old) > len(unique[j].old)
+	})
 	return unique
+}
+
+func replacementPairsForURLs(oldURL string, newURL string) []replacementPair {
+	oldBase := urlBase(oldURL)
+	newBase := urlBase(newURL)
+	if oldBase == "" || newBase == "" {
+		return nil
+	}
+	hostPart := strings.TrimPrefix(strings.TrimPrefix(oldBase, "http://"), "https://")
+	newHost := replacementHost(newBase)
+	return []replacementPair{
+		{old: oldURL, new: newURL},
+		{old: "http://" + hostPart, new: newBase},
+		{old: "https://" + hostPart, new: newBase},
+		{old: hostPart, new: newHost},
+	}
+}
+
+func replacementPairsForConfiguredDomain(replacement DomainReplacement) []replacementPair {
+	oldValue := strings.TrimSpace(replacement.Old)
+	newValue := strings.TrimSpace(replacement.New)
+	if oldValue == "" || newValue == "" {
+		return nil
+	}
+	pairs := []replacementPair{{old: oldValue, new: newValue}}
+	oldHost := replacementHost(oldValue)
+	newHost := replacementHost(newValue)
+	if oldHost == "" || newHost == "" {
+		return pairs
+	}
+	if newBase := urlBase(newValue); newBase != "" {
+		pairs = append(pairs,
+			replacementPair{old: "http://" + oldHost, new: newBase},
+			replacementPair{old: "https://" + oldHost, new: newBase},
+			replacementPair{old: oldHost, new: newHost},
+		)
+		return pairs
+	}
+	pairs = append(pairs,
+		replacementPair{old: "http://" + oldHost, new: "http://" + newHost},
+		replacementPair{old: "https://" + oldHost, new: "https://" + newHost},
+		replacementPair{old: oldHost, new: newHost},
+	)
+	return pairs
+}
+
+func replacementHost(value string) string {
+	if host := urlHost(urlBase(value)); host != "" {
+		return host
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "/ \t\r\n") {
+		return ""
+	}
+	host, _, ok := strings.Cut(value, ":")
+	if ok {
+		return host
+	}
+	return value
 }
 
 // runSearchReplace delegates serialized WordPress updates to WP-CLI.
@@ -370,10 +564,55 @@ func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Conf
 	})
 }
 
+func (a *App) runMultisiteSearchReplace(ctx context.Context, projectRoot string, cfg Config, pairs []replacementPair) error {
+	siteURLs := a.multisiteSiteURLs(ctx, projectRoot, cfg)
+	if len(siteURLs) == 0 {
+		for _, pair := range pairs {
+			if err := a.runSearchReplace(ctx, projectRoot, cfg, pair.old, pair.new); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, siteURL := range siteURLs {
+		for _, pair := range pairs {
+			if err := a.runSearchReplaceForSite(ctx, projectRoot, cfg, siteURL, pair.old, pair.new); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *App) runSearchReplaceForSite(ctx context.Context, projectRoot string, cfg Config, siteURL string, oldValue string, newValue string) error {
+	if oldValue == "" || newValue == "" || oldValue == newValue {
+		return nil
+	}
+	title := fmt.Sprintf("Replacing WordPress URLs for %s: %s -> %s", siteURL, oldValue, newValue)
+	return a.runStep(title, "WordPress site URL replacement finished", func() error {
+		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "--url="+siteURL, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+	})
+}
+
+func (a *App) multisiteSiteURLs(ctx context.Context, projectRoot string, cfg Config) []string {
+	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "site", "list", "--field=url")
+	if err != nil {
+		return nil
+	}
+	siteURLs := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		siteURL := strings.TrimSpace(line)
+		if siteURL != "" {
+			siteURLs = append(siteURLs, siteURL)
+		}
+	}
+	return siteURLs
+}
+
 // replaceMultisiteDomains updates wp_site and wp_blogs domain columns when present.
 func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, cfg Config, oldBase string, newBase string) error {
-	oldDomain := urlHost(oldBase)
-	newDomain := urlHost(newBase)
+	oldDomain := replacementHost(oldBase)
+	newDomain := replacementHost(newBase)
 	if oldDomain == "" || newDomain == "" || oldDomain == newDomain {
 		return nil
 	}

@@ -105,31 +105,34 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 		return err
 	}
 
+	pairs := []replacementPair{}
+	for _, configured := range cfg.PushDomainReplacements {
+		pairs = append(pairs, replacementPairsForConfiguredDomain(configured)...)
+	}
+
 	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"), localSiteURL(projectRoot, cfg))
 	newURL := firstNonEmpty(cfg.PushURL, readPushURLCache(projectRoot, target))
-	if oldURL == "" || newURL == "" {
-		a.UI.Warning("Skipping push URL replacement because the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.")
+	if oldURL != "" && newURL != "" {
+		autoPairs := replacementPairsForURLs(oldURL, newURL)
+		if len(autoPairs) == 0 {
+			a.UI.Warning("Skipping automatic push URL replacement because the local or push target URL is invalid.")
+		}
+		pairs = append(pairs, autoPairs...)
+	}
+	if len(pairs) == 0 {
+		a.UI.Warning("Skipping push URL replacement because no configured push replacement pairs exist and the local or push target URL could not be detected. Set push_url or WP_SSH_PUSH_URL.")
 		return nil
 	}
 
-	oldBase := urlBase(oldURL)
-	newBase := urlBase(newURL)
-	if oldBase == "" || newBase == "" {
-		a.UI.Warning("Skipping push URL replacement because the local or push target URL is invalid.")
-		return nil
-	}
-
-	hostPart := strings.TrimPrefix(strings.TrimPrefix(oldBase, "http://"), "https://")
-	for _, pair := range uniqueReplacementPairs([]replacementPair{
-		{old: oldURL, new: newURL},
-		{old: "http://" + hostPart, new: newBase},
-		{old: "https://" + hostPart, new: newBase},
-	}) {
+	for _, pair := range uniqueReplacementPairs(pairs) {
 		if err := a.runRemoteSearchReplace(ctx, projectRoot, target, pair.old, pair.new); err != nil {
 			return err
 		}
+		if err := a.replaceRemoteMultisiteDomains(ctx, projectRoot, target, pair.old, pair.new); err != nil {
+			return err
+		}
 	}
-	return a.replaceRemoteMultisiteDomains(ctx, projectRoot, target, oldBase, newBase)
+	return nil
 }
 
 // ensureLocalDBDump creates the gzipped dump used by push when absent.
@@ -210,8 +213,8 @@ func (a *App) runRemoteSearchReplace(ctx context.Context, projectRoot string, ta
 
 // replaceRemoteMultisiteDomains updates wp_site and wp_blogs domain columns remotely.
 func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot string, target RemoteTarget, oldBase string, newBase string) error {
-	oldDomain := urlHost(oldBase)
-	newDomain := urlHost(newBase)
+	oldDomain := replacementHost(oldBase)
+	newDomain := replacementHost(newBase)
 	if oldDomain == "" || newDomain == "" || oldDomain == newDomain {
 		return nil
 	}
