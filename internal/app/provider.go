@@ -48,6 +48,10 @@ sendgrid-email-delivery-simplified
 mailersend-official-smtp-integration
 smtp2go
 wp-offload-ses-lite
+
+# Security and site monitoring plugins.
+patchstack
+wp-health
 `
 
 // providerYAML renders the DDEV provider that delegates to this host CLI.

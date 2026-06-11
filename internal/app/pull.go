@@ -28,44 +28,7 @@ func (a *App) providerInfo(cfg Config) error {
 
 // providerAuth verifies upstream key authentication with the actual SSH command.
 func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) error {
-	tested := false
-	source := cfg.pullTarget()
-	if source.configured() {
-		if err := cfg.validatePullRequired(); err != nil {
-			return err
-		}
-		if err := a.authenticateTarget(ctx, projectRoot, source, "pull source"); err != nil {
-			return err
-		}
-		if err := a.ensureRemoteWPCLI(ctx, projectRoot, source, "pull source"); err != nil {
-			return err
-		}
-		tested = true
-	}
-	target := cfg.pushTarget()
-	if target.configured() {
-		if err := cfg.validatePushRequired(); err != nil {
-			return err
-		}
-		if err := a.authenticateTarget(ctx, projectRoot, target, "push target"); err != nil {
-			return err
-		}
-		if err := a.ensureRemoteWPCLI(ctx, projectRoot, target, "push target"); err != nil {
-			return err
-		}
-		tested = true
-	}
-	if tested {
-		return a.ensureLocalWPCLI(ctx, projectRoot, cfg)
-	}
-	return cfg.validatePullRequired()
-}
-
-// authenticateTarget verifies SSH authentication before destructive sync steps run.
-func (a *App) authenticateTarget(ctx context.Context, projectRoot string, target RemoteTarget, label string) error {
-	return a.runStep("Logging into "+label+" over SSH", "Logged into "+label+" over SSH", func() error {
-		return a.runSSHQuietSuccess(ctx, projectRoot, target, "true")
-	})
+	return a.preflightProviderAuth(ctx, projectRoot, cfg)
 }
 
 // dbPull exports the upstream database and downloads it to the runtime scratch path.
@@ -1047,11 +1010,6 @@ func isTruthyConfigValue(value string) bool {
 func isRepeatedWarningLine(line string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(line))
 	return strings.HasPrefix(normalized, "warning:") || strings.HasPrefix(normalized, "php warning:")
-}
-
-func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
 }
 
 func trimTrailingSlash(value string) string {

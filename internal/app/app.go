@@ -218,7 +218,7 @@ func (a *App) commandPush(args []string) error {
 		return err
 	}
 
-	return a.runPushPipeline(context.Background(), runtime.Root, cfg, opts)
+	return a.runPushPipeline(context.Background(), adapter, cfg, opts)
 }
 
 // commandProvider handles both generated-file commands and DDEV runtime callbacks.
@@ -323,8 +323,14 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	case "auth":
 		return a.providerAuth(ctx, runtime.Root, cfg)
 	case "db-pull":
+		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipFiles: true}); err != nil {
+			return err
+		}
 		return a.dbPull(ctx, runtime.Root, cfg)
 	case "files-pull":
+		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
+			return err
+		}
 		return a.filesPull(ctx, runtime.Root, cfg, false)
 	case "files-import":
 		a.filesImport()
@@ -332,8 +338,14 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	case "post-pull":
 		return a.postPull(ctx, adapter, cfg)
 	case "db-push":
+		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
+			return err
+		}
 		return a.dbPush(ctx, runtime.Root, cfg)
 	case "files-push":
+		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipDB: true}); err != nil {
+			return err
+		}
 		return a.filesPush(ctx, runtime.Root, cfg)
 	case "post-push":
 		return a.postPush(ctx, runtime.Root, cfg)
@@ -595,13 +607,10 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 	root := adapter.Root()
 
-	if err := a.authenticateTarget(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
+	if err := a.preflightPull(ctx, adapter, cfg, opts); err != nil {
 		return err
 	}
 	if !opts.SkipDB {
-		if err := a.ensureRemoteWPCLI(ctx, root, cfg.pullTarget(), "pull source"); err != nil {
-			return err
-		}
 		if err := a.dbPull(ctx, root, cfg); err != nil {
 			return err
 		}
@@ -614,9 +623,6 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 
 	shouldImportDB := !opts.SkipDB && !opts.SkipImport
 	if shouldImportDB {
-		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
-			return err
-		}
 		if err := a.importLocalDB(ctx, root, cfg); err != nil {
 			return err
 		}
@@ -628,21 +634,16 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
-func (a *App) runPushPipeline(ctx context.Context, root string, cfg Config, opts configOptions) error {
+func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg Config, opts configOptions) error {
 	if opts.SkipDB && opts.SkipFiles {
 		return nil
 	}
+	root := adapter.Root()
 
-	if err := a.authenticateTarget(ctx, root, cfg.pushTarget(), "push target"); err != nil {
+	if err := a.preflightPush(ctx, root, adapter.Mode(), cfg, opts); err != nil {
 		return err
 	}
 	if !opts.SkipDB {
-		if err := a.ensureLocalWPCLI(ctx, root, cfg); err != nil {
-			return err
-		}
-		if err := a.ensureRemoteWPCLI(ctx, root, cfg.pushTarget(), "push target"); err != nil {
-			return err
-		}
 		if err := a.dbPush(ctx, root, cfg); err != nil {
 			return err
 		}

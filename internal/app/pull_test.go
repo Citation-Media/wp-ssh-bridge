@@ -282,6 +282,28 @@ exit 24
 	}
 }
 
+func TestEnsureLocalPullDestinationWritableRepairsUserOwnedDirectories(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	wpContent := filepath.Join(dir, "wp-content")
+	if err := os.MkdirAll(wpContent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(wpContent, 0o700)
+	})
+	if localDirWritable(wpContent) {
+		t.Skip("filesystem permits writes to read-only directories")
+	}
+
+	if err := ensureLocalPullDestinationWritable(dir); err != nil {
+		t.Fatalf("ensureLocalPullDestinationWritable() error = %v", err)
+	}
+	if !localDirWritable(wpContent) {
+		t.Fatal("ensureLocalPullDestinationWritable() did not repair directory write access")
+	}
+}
+
 func TestRsyncArchiveArgsSupportMacOSRsync(t *testing.T) {
 	t.Parallel()
 	args := strings.Join(rsyncArchiveArgs(), " ")

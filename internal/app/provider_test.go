@@ -158,7 +158,7 @@ func TestPortableProviderBinary(t *testing.T) {
 	}
 }
 
-func TestDefaultPluginListIncludesBackupMigrationAndSMTPPlugins(t *testing.T) {
+func TestDefaultPluginListIncludesBackupMigrationSMTPAndMonitoringPlugins(t *testing.T) {
 	t.Parallel()
 	for _, want := range []string{
 		"updraftplus",
@@ -174,6 +174,8 @@ func TestDefaultPluginListIncludesBackupMigrationAndSMTPPlugins(t *testing.T) {
 		"mailgun",
 		"sendgrid-email-delivery-simplified",
 		"wp-offload-ses-lite",
+		"patchstack",
+		"wp-health",
 	} {
 		if !strings.Contains(defaultPluginList, "\n"+want+"\n") {
 			t.Fatalf("default plugin list missing %q:\n%s", want, defaultPluginList)
