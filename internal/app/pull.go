@@ -391,7 +391,9 @@ func sanitizeWPConfigContents(contents string) string {
 }
 
 func ensureDDEVConfigIncludeAtTop(contents string) string {
-	contents = removeManagedDDEVConfigInclude(contents)
+	if hasDDEVConfigInclude(contents) {
+		return contents
+	}
 
 	openingTag := regexp.MustCompile(`(?s)\A(\s*<\?php[^\r\n]*(?:\r?\n)?)`)
 	if loc := openingTag.FindStringSubmatchIndex(contents); loc != nil {
@@ -405,9 +407,8 @@ func ensureDDEVConfigIncludeAtTop(contents string) string {
 	return ddevConfigIncludeSnippet + strings.TrimLeft(contents, "\r\n")
 }
 
-func removeManagedDDEVConfigInclude(contents string) string {
-	block := regexp.MustCompile(`(?s)\n*// Include for DDEV-managed settings in wp-config-ddev\.php\.\r?\n\$ddev_settings = __DIR__ \. '/wp-config-ddev\.php';\r?\nif \(is_readable\(\$ddev_settings\) && !defined\('DB_USER'\)\) \{\r?\n[ \t]*require_once\(\$ddev_settings\);\r?\n\}\r?\n*`)
-	return block.ReplaceAllString(contents, "\n")
+func hasDDEVConfigInclude(contents string) bool {
+	return strings.Contains(contents, "wp-config-ddev.php")
 }
 
 const ddevConfigIncludeSnippet = `// Include for DDEV-managed settings in wp-config-ddev.php.

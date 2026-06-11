@@ -45,7 +45,7 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 }
 
-func TestSanitizeWPConfigContentsMovesManagedDDEVIncludeToTop(t *testing.T) {
+func TestSanitizeWPConfigContentsPreservesExistingDDEVInclude(t *testing.T) {
 	t.Parallel()
 	input := `<?php
 // Custom bootstrap.
@@ -54,8 +54,8 @@ func TestSanitizeWPConfigContentsMovesManagedDDEVIncludeToTop(t *testing.T) {
 `
 
 	got := sanitizeWPConfigContents(input)
-	if !strings.HasPrefix(got, "<?php\n"+ddevConfigIncludeSnippet+"// Custom bootstrap.") {
-		t.Fatalf("DDEV config include should be moved to the top:\n%s", got)
+	if !strings.Contains(got, "// Custom bootstrap.\n\n"+ddevConfigIncludeSnippet) {
+		t.Fatalf("existing DDEV config include should be preserved in place with its comment:\n%s", got)
 	}
 	if count := strings.Count(got, "$ddev_settings = __DIR__ . '/wp-config-ddev.php';"); count != 1 {
 		t.Fatalf("DDEV config include count = %d, want 1:\n%s", count, got)
@@ -131,6 +131,9 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 	if !strings.Contains(got, "wp-config-ddev.php") {
 		t.Fatalf("DDEV config missing wp-config-ddev.php include:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wp-config-ddev.php")); !os.IsNotExist(err) {
+		t.Fatalf("sanitize should not create or overwrite wp-config-ddev.php, got err: %v", err)
 	}
 }
 
