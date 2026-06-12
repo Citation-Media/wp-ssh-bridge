@@ -478,6 +478,23 @@ func TestReplacementPairsIncludeHostOnlyValues(t *testing.T) {
 	}
 }
 
+func TestSearchReplaceCommandArgsDisableReport(t *testing.T) {
+	t.Parallel()
+	got := searchReplaceCommandArgs("https://example.com", "https://example.ddev.site")
+	want := []string{
+		"search-replace",
+		"https://example.com",
+		"https://example.ddev.site",
+		"--all-tables-with-prefix",
+		"--precise",
+		"--skip-columns=guid",
+		"--no-report",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("searchReplaceCommandArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func replacementPairsContain(pairs []replacementPair, want replacementPair) bool {
 	for _, pair := range pairs {
 		if pair == want {
@@ -567,6 +584,7 @@ exit 1
 	for _, want := range []string{
 		"--url=https://example.ddev.site/ search-replace https://example.com https://example.ddev.site",
 		"--url=https://shop.ddev.site/ search-replace https://shop.example.com https://shop.ddev.site",
+		"--skip-columns=guid --no-report",
 		"db query UPDATE `wp_site` SET domain = 'shop.ddev.site' WHERE domain = 'shop.example.com'",
 		"db query UPDATE `wp_blogs` SET domain = 'shop.ddev.site' WHERE domain = 'shop.example.com'",
 	} {

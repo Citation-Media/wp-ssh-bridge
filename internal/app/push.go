@@ -207,7 +207,7 @@ func (a *App) runRemoteSearchReplace(ctx context.Context, projectRoot string, ta
 	}
 	title := fmt.Sprintf("Replacing push target URLs: %s -> %s", oldValue, newValue)
 	return a.runStep(title, "Push target URL replacement finished", func() error {
-		return a.runRemoteWPWithFilteredWarnings(ctx, projectRoot, target, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+		return a.runRemoteWPWithFilteredWarnings(ctx, projectRoot, target, searchReplaceCommandArgs(oldValue, newValue)...)
 	})
 }
 

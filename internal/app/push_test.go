@@ -99,6 +99,9 @@ exit 0
 	if !strings.Contains(log, "'search-replace' 'example.ddev.site' 'example.com'") {
 		t.Fatalf("ssh log missing configured push replacement:\n%s", log)
 	}
+	if !strings.Contains(log, "'--no-report'") {
+		t.Fatalf("ssh log missing low-memory search-replace flag:\n%s", log)
+	}
 }
 
 func TestRemoteWPCommandQuotesArguments(t *testing.T) {

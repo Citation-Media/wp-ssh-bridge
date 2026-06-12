@@ -541,6 +541,11 @@ func replacementLabel(value string) string {
 	return strings.TrimSpace(value)
 }
 
+// searchReplaceCommandArgs centralizes the WP-CLI flags used for serialized-safe URL changes.
+func searchReplaceCommandArgs(oldValue string, newValue string) []string {
+	return []string{"search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--no-report"}
+}
+
 // runSearchReplace delegates serialized WordPress updates to WP-CLI.
 func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Config, oldValue string, newValue string) error {
 	if oldValue == "" || newValue == "" || oldValue == newValue {
@@ -549,7 +554,7 @@ func (a *App) runSearchReplace(ctx context.Context, projectRoot string, cfg Conf
 	title := fmt.Sprintf("Replacing WordPress URLs: %s -> %s", oldValue, newValue)
 	done := fmt.Sprintf("WordPress URL replacement finished (%s)", replacementLabel(oldValue))
 	return a.runStep(title, done, func() error {
-		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, searchReplaceCommandArgs(oldValue, newValue)...)
 	})
 }
 
@@ -580,7 +585,8 @@ func (a *App) runSearchReplaceForSite(ctx context.Context, projectRoot string, c
 	title := fmt.Sprintf("Replacing WordPress URLs for %s: %s -> %s", siteURL, oldValue, newValue)
 	done := fmt.Sprintf("WordPress URL replacement finished (%s)", replacementLabel(siteURL))
 	return a.runStep(title, done, func() error {
-		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "--url="+siteURL, "search-replace", oldValue, newValue, "--all-tables-with-prefix", "--precise", "--skip-columns=guid", "--report-changed-only")
+		args := append([]string{"--url=" + siteURL}, searchReplaceCommandArgs(oldValue, newValue)...)
+		return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, args...)
 	})
 }
 
