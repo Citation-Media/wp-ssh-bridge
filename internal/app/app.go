@@ -82,6 +82,7 @@ Common flags:
   --skip-db                  Pull/push files only
   --skip-files               Pull/push database only
   --skip-import              Pull only; download the database without importing it
+  --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
 
 Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
@@ -622,6 +623,12 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	shouldImportDB := !opts.SkipDB && !opts.SkipImport
+	if shouldImportDB && !opts.SkipMaintenanceMode {
+		if err := a.enableLocalMaintenanceMode(ctx, root, cfg); err != nil {
+			return err
+		}
+		defer a.disableLocalMaintenanceMode(context.Background(), root, cfg)
+	}
 	if shouldImportDB {
 		if err := a.importLocalDB(ctx, root, cfg); err != nil {
 			return err
@@ -643,6 +650,15 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if err := a.preflightPush(ctx, root, adapter.Mode(), cfg, opts); err != nil {
 		return err
 	}
+
+	if !opts.SkipMaintenanceMode {
+		target := cfg.pushTarget()
+		if err := a.enableRemoteMaintenanceMode(ctx, root, target); err != nil {
+			return err
+		}
+		defer a.disableRemoteMaintenanceMode(context.Background(), root, target)
+	}
+
 	if !opts.SkipDB {
 		if err := a.dbPush(ctx, root, cfg); err != nil {
 			return err
@@ -661,31 +677,32 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 
 // configOptions tracks flags shared by init, pull, and push.
 type configOptions struct {
-	ProjectRoot       string
-	ConfigFile        string
-	Binary            string
-	Silent            bool
-	Yes               bool
-	SkipDB            bool
-	SkipFiles         bool
-	SkipImport        bool
-	Provider          string
-	User              string
-	Host              string
-	Port              string
-	RemotePath        string
-	RemoteTmpDir      string
-	PushUser          string
-	PushHost          string
-	PushPort          string
-	PushRemotePath    string
-	PushRemoteTmpDir  string
-	PushURL           string
-	LocalWPPath       string
-	CloneImages       bool
-	PluginRemoveFile  string
-	LocalURL          string
-	SkipSearchReplace bool
+	ProjectRoot         string
+	ConfigFile          string
+	Binary              string
+	Silent              bool
+	Yes                 bool
+	SkipDB              bool
+	SkipFiles           bool
+	SkipImport          bool
+	SkipMaintenanceMode bool
+	Provider            string
+	User                string
+	Host                string
+	Port                string
+	RemotePath          string
+	RemoteTmpDir        string
+	PushUser            string
+	PushHost            string
+	PushPort            string
+	PushRemotePath      string
+	PushRemoteTmpDir    string
+	PushURL             string
+	LocalWPPath         string
+	CloneImages         bool
+	PluginRemoveFile    string
+	LocalURL            string
+	SkipSearchReplace   bool
 }
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
@@ -702,6 +719,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.BoolVar(&opts.SkipDB, "skip-db", false, "pull/push files only")
 	fs.BoolVar(&opts.SkipFiles, "skip-files", false, "pull/push database only")
 	fs.BoolVar(&opts.SkipImport, "skip-import", false, "pull only; download the database without importing it")
+	fs.BoolVar(&opts.SkipMaintenanceMode, "skip-maintenance-mode", false, "skip enabling WordPress maintenance mode during write operations")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
 	fs.StringVar(&opts.User, "user", "", "pull source SSH user; push alias for --push-user")
 	fs.StringVar(&opts.Host, "host", "", "pull source SSH host; push alias for --push-host")
