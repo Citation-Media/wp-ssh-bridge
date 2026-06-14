@@ -46,7 +46,7 @@ func (a *App) preflightPull(ctx context.Context, adapter runtimeAdapter, cfg Con
 		ProjectRoot:    adapter.Root(),
 		Mode:           adapter.Mode(),
 		NeedSSH:        true,
-		NeedRsync:      true,
+		NeedRsync:      false, // transport detection in pipeline handles rsync vs scp/tar
 		NeedLocalWPCLI: shouldImportDB,
 		Remotes: []preflightRemoteNeeds{
 			{
@@ -91,7 +91,7 @@ func (a *App) preflightPush(ctx context.Context, root string, mode runtimeMode, 
 		ProjectRoot:    root,
 		Mode:           mode,
 		NeedSSH:        true,
-		NeedRsync:      true,
+		NeedRsync:      false, // transport detection in pipeline handles rsync vs scp/tar
 		NeedLocalWPCLI: !opts.SkipDB,
 		Remotes:        []preflightRemoteNeeds{remote},
 	}
