@@ -82,6 +82,7 @@ Common flags:
   --skip-db                  Pull/push files only
   --skip-files               Pull/push database only
   --skip-import              Pull only; download the database without importing it
+  --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
 
@@ -327,12 +328,12 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
-		return a.dbPull(ctx, runtime.Root, cfg)
+		return a.dbPull(ctx, runtime.Root, cfg, false)
 	case "files-pull":
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
 			return err
 		}
-		return a.filesPull(ctx, runtime.Root, cfg, false)
+		return a.filesPull(ctx, runtime.Root, cfg, false, false)
 	case "files-import":
 		a.filesImport()
 		return nil
@@ -342,12 +343,12 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
-		return a.dbPush(ctx, runtime.Root, cfg)
+		return a.dbPush(ctx, runtime.Root, cfg, false)
 	case "files-push":
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipDB: true}); err != nil {
 			return err
 		}
-		return a.filesPush(ctx, runtime.Root, cfg)
+		return a.filesPush(ctx, runtime.Root, cfg, false)
 	case "post-push":
 		return a.postPush(ctx, runtime.Root, cfg)
 	case "sanitize-config":
@@ -611,13 +612,16 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if err := a.preflightPull(ctx, adapter, cfg, opts); err != nil {
 		return err
 	}
+
+	useSCP := a.needsScpTransport(ctx, root, cfg.pullTarget(), opts.ForceScpTransport)
+
 	if !opts.SkipDB {
-		if err := a.dbPull(ctx, root, cfg); err != nil {
+		if err := a.dbPull(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}
 	}
 	if !opts.SkipFiles {
-		if err := a.filesPull(ctx, root, cfg, adapter.Mode() == modeStandalone); err != nil {
+		if err := a.filesPull(ctx, root, cfg, adapter.Mode() == modeStandalone, useSCP); err != nil {
 			return err
 		}
 	}
@@ -651,6 +655,8 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		return err
 	}
 
+	useSCP := a.needsScpTransport(ctx, root, cfg.pushTarget(), opts.ForceScpTransport)
+
 	if !opts.SkipMaintenanceMode {
 		target := cfg.pushTarget()
 		if err := a.enableRemoteMaintenanceMode(ctx, root, target); err != nil {
@@ -660,12 +666,12 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	if !opts.SkipDB {
-		if err := a.dbPush(ctx, root, cfg); err != nil {
+		if err := a.dbPush(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}
 	}
 	if !opts.SkipFiles {
-		if err := a.filesPush(ctx, root, cfg); err != nil {
+		if err := a.filesPush(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}
 	}
@@ -685,6 +691,7 @@ type configOptions struct {
 	SkipDB              bool
 	SkipFiles           bool
 	SkipImport          bool
+	ForceScpTransport   bool
 	SkipMaintenanceMode bool
 	Provider            string
 	User                string
@@ -719,6 +726,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.BoolVar(&opts.SkipDB, "skip-db", false, "pull/push files only")
 	fs.BoolVar(&opts.SkipFiles, "skip-files", false, "pull/push database only")
 	fs.BoolVar(&opts.SkipImport, "skip-import", false, "pull only; download the database without importing it")
+	fs.BoolVar(&opts.ForceScpTransport, "force-scp", false, "use scp/tar instead of rsync even when rsync is available")
 	fs.BoolVar(&opts.SkipMaintenanceMode, "skip-maintenance-mode", false, "skip enabling WordPress maintenance mode during write operations")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
 	fs.StringVar(&opts.User, "user", "", "pull source SSH user; push alias for --push-user")

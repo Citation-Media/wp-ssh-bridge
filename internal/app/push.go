@@ -15,7 +15,8 @@ import (
 )
 
 // dbPush uploads the local database dump and imports it on the push target with WP-CLI.
-func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error {
+// When useSCP is true it uses scp instead of rsync for the upload step.
+func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP bool) error {
 	target := cfg.pushTarget()
 	if err := cfg.validatePushRequired(); err != nil {
 		return err
@@ -46,11 +47,20 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 	remoteDumpGZ := fmt.Sprintf("%s/ddev-%s-push-%s-%s.sql.gz", remoteTmp, projectName, time.Now().Format("20060102150405"), randomID())
 	remoteDump := strings.TrimSuffix(remoteDumpGZ, ".gz")
 
-	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
-	if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
-		return a.runExternal(ctx, projectRoot, "rsync", args...)
-	}); err != nil {
-		return err
+	if useSCP {
+		args := append(scpArgs(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
+		if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
+			return a.runExternal(ctx, projectRoot, "scp", args...)
+		}); err != nil {
+			return err
+		}
+	} else {
+		args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
+		if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
+			return a.runExternal(ctx, projectRoot, "rsync", args...)
+		}); err != nil {
+			return err
+		}
 	}
 
 	remoteCommand := strings.Join([]string{
@@ -70,7 +80,12 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config) error 
 }
 
 // filesPush syncs the complete local WordPress app to the push target.
-func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) error {
+// When useSCP is true it uses a tar pipe over SSH instead of rsync.
+func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config, useSCP bool) error {
+	if useSCP {
+		return a.filesPushTar(ctx, projectRoot, cfg)
+	}
+
 	target := cfg.pushTarget()
 	if err := cfg.validatePushRequired(); err != nil {
 		return err
@@ -92,6 +107,37 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config) err
 	args = append(args, "-e", sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
 	return a.runStep("Syncing WordPress files to push target", "Push target files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
+	})
+}
+
+// filesPushTar syncs the local WordPress tree to the push target using a tar pipe over SSH.
+// Unlike rsync, this does not delete remote files absent locally; it only adds or updates.
+func (a *App) filesPushTar(ctx context.Context, projectRoot string, cfg Config) error {
+	target := cfg.pushTarget()
+	if err := cfg.validatePushRequired(); err != nil {
+		return err
+	}
+
+	source := localWPRoot(projectRoot, cfg)
+	if _, err := os.Stat(source); err != nil {
+		return err
+	}
+
+	if err := a.runSSHQuietSuccess(ctx, projectRoot, target, "mkdir -p "+shellQuote(trimTrailingSlash(target.RemotePath))); err != nil {
+		return err
+	}
+
+	localTarArgs := []string{"-czf", "-"}
+	for _, p := range buildTarExcludeArgs(buildPushRsyncExcludes()) {
+		localTarArgs = append(localTarArgs, p)
+	}
+	localTarArgs = append(localTarArgs, "-C", source, ".")
+
+	remoteCmd := "tar -xzf - -C " + shellQuote(trimTrailingSlash(target.RemotePath))
+
+	a.UI.Warning("scp/tar transport: stale remote files not removed (no --delete equivalent)")
+	return a.runStep("Syncing WordPress files to push target", "Push target files synced", func() error {
+		return a.tarPipeToRemote(ctx, projectRoot, target, localTarArgs, remoteCmd)
 	})
 }
 

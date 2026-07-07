@@ -269,7 +269,7 @@ exit 24
 		User:       "deploy",
 		Host:       "example.com",
 		RemotePath: "/var/www/html",
-	}, false)
+	}, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
@@ -310,7 +310,7 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 		Host:             "example.com",
 		RemotePath:       "/var/www/html",
 		PluginRemoveFile: ".ddev/extra-plugins.txt",
-	}, false)
+	}, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}

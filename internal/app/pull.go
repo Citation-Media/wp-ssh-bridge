@@ -32,7 +32,7 @@ func (a *App) providerAuth(ctx context.Context, projectRoot string, cfg Config) 
 }
 
 // dbPull exports the upstream database and downloads it to the runtime scratch path.
-func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error {
+func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -67,11 +67,21 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 		return err
 	}
 
-	args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, filepath.Join(downloadDir, "db.sql.gz"))
-	if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
-		return a.runExternal(ctx, projectRoot, "rsync", args...)
-	}); err != nil {
-		return err
+	localDump := filepath.Join(downloadDir, "db.sql.gz")
+	if useSCP {
+		args := append(scpArgs(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
+		if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
+			return a.runExternal(ctx, projectRoot, "scp", args...)
+		}); err != nil {
+			return err
+		}
+	} else {
+		args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
+		if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
+			return a.runExternal(ctx, projectRoot, "rsync", args...)
+		}); err != nil {
+			return err
+		}
 	}
 
 	return a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
@@ -79,8 +89,13 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config) error 
 	})
 }
 
-// filesPull rsyncs the remote WordPress tree directly into the local project.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool) error {
+// filesPull syncs the remote WordPress tree into the local project.
+// When useSCP is true it uses a tar pipe over SSH instead of rsync.
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, useSCP bool) error {
+	if useSCP {
+		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig)
+	}
+
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -106,6 +121,41 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 
 	return a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
 		return a.runExternalAllowRsyncVanished(ctx, projectRoot, args...)
+	})
+}
+
+// filesPullTar syncs the remote WordPress tree using a tar pipe over SSH.
+// Unlike rsync this does not delete local files absent on the remote; it only adds or updates.
+func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool) error {
+	target := cfg.pullTarget()
+	if err := cfg.validatePullRequired(); err != nil {
+		return err
+	}
+
+	destination := localWPRoot(projectRoot, cfg)
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return err
+	}
+
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
+	if err != nil {
+		return err
+	}
+
+	// Build the remote tar command. Exclude patterns use the same set as rsync
+	// but without trailing slashes (which are rsync-specific).
+	parts := []string{"tar", "-czf", "-"}
+	for _, p := range buildTarExcludeArgs(excludes) {
+		parts = append(parts, p)
+	}
+	// *.log is hidden by a rsync filter rule; use an explicit tar exclude instead.
+	parts = append(parts, "--exclude="+shellQuote("*.log"))
+	parts = append(parts, "-C", shellQuote(trimTrailingSlash(target.RemotePath)), ".")
+	remoteCmd := strings.Join(parts, " ")
+
+	a.UI.Warning("scp/tar transport: stale local files not removed (no --delete equivalent)")
+	return a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
+		return a.tarPipeFromRemote(ctx, projectRoot, target, remoteCmd, destination)
 	})
 }
 
