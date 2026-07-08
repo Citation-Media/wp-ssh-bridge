@@ -111,6 +111,10 @@ ddev push wp-ssh \
 
 Do not suggest `ddev pull wp-ssh --user deploy`; that flag belongs to direct `wp-ssh-bridge pull`, not native DDEV pull.
 
+## Migration Pulls
+
+Migration is not a DDEV workflow. `wp-ssh-bridge migrate` exits with an error inside a DDEV project; it targets a standalone (non-DDEV) directory. Use the DDEV pull workflow here for DDEV onboarding, and see `references/migration.md` for host-to-host migration.
+
 ## Provider Maintenance
 
 Regenerate provider files only after updating the binary or changing provider names. This is not the normal pull workflow.

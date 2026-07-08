@@ -139,6 +139,96 @@ require_once ABSPATH . 'wp-settings.php';
 	}
 }
 
+func TestUpdateWPConfigDBCredentialsContents(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+define('DB_NAME', 'source');
+define('DB_USER', 'source');
+define('DB_PASSWORD', 'source');
+define('DB_HOST', 'source-db');
+$table_prefix = 'src_';
+define('WP_ENVIRONMENT_TYPE', 'production');
+/* That's all, stop editing! Happy publishing. */
+require_once ABSPATH . 'wp-settings.php';
+`
+
+	got := updateWPConfigDBCredentialsContents(input, Config{
+		MigrateDBName:     "target",
+		MigrateDBUser:     "target_user",
+		MigrateDBPassword: `pa'ss\word`,
+		MigrateDBHost:     "target-db:3306",
+		MigrateDBPrefix:   "wp_",
+	})
+	for _, want := range []string{
+		"define('DB_NAME', 'target');",
+		"define('DB_USER', 'target_user');",
+		"define('DB_PASSWORD', 'pa\\'ss\\\\word');",
+		"define('DB_HOST', 'target-db:3306');",
+		"$table_prefix = 'wp_';",
+		"define('WP_ENVIRONMENT_TYPE', 'production');",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, got)
+		}
+	}
+	for _, removed := range []string{"'source'", "'source-db'", "$table_prefix = 'src_'"} {
+		if strings.Contains(got, removed) {
+			t.Fatalf("source value %q remained:\n%s", removed, got)
+		}
+	}
+}
+
+func TestUpdateWPConfigDBCredentialsContentsPreservesDollarSigns(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+define('DB_NAME', 'source');
+define('DB_USER', 'source');
+define('DB_PASSWORD', 'source');
+define('DB_HOST', 'source-db');
+/* That's all, stop editing! Happy publishing. */
+require_once ABSPATH . 'wp-settings.php';
+`
+
+	// A "$"-bearing password must be written verbatim; the regex replacement must
+	// not treat "$k9" or "${x}" as capture-group references.
+	got := updateWPConfigDBCredentialsContents(input, Config{
+		MigrateDBName:     "target",
+		MigrateDBUser:     "target_user",
+		MigrateDBPassword: `xY$k9${x}Az`,
+		MigrateDBHost:     "target-db",
+	})
+	if !strings.Contains(got, `define('DB_PASSWORD', 'xY$k9${x}Az');`) {
+		t.Fatalf("password with $ was corrupted:\n%s", got)
+	}
+}
+
+func TestUpdateWPConfigDBCredentialsContentsInsertsMissingValues(t *testing.T) {
+	t.Parallel()
+	input := `<?php
+/* That's all, stop editing! Happy publishing. */
+`
+
+	got := updateWPConfigDBCredentialsContents(input, Config{
+		MigrateDBName:     "target",
+		MigrateDBUser:     "target_user",
+		MigrateDBPassword: "secret",
+		MigrateDBHost:     "target-db",
+	})
+	if strings.Index(got, "define('DB_NAME'") > strings.Index(got, "stop editing") {
+		t.Fatalf("DB constants should be inserted before stop-editing marker:\n%s", got)
+	}
+	for _, want := range []string{
+		"define('DB_NAME', 'target');",
+		"define('DB_USER', 'target_user');",
+		"define('DB_PASSWORD', 'secret');",
+		"define('DB_HOST', 'target-db');",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestUpdateWPConfigURLConstantsContentsLetsDDEVOwnHomeAndSiteURL(t *testing.T) {
 	t.Parallel()
 	input := `<?php
@@ -200,7 +290,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}, false)
+	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}, false, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() error = %v", err)
 	}
@@ -221,7 +311,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		t.Fatalf("hide rules missing recursive log rule:\n%s", got)
 	}
 
-	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true}, false)
+	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true}, false, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() with CloneImages error = %v", err)
 	}
@@ -236,7 +326,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".ddev", "bad-plugins.txt"), []byte("../secret\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/bad-plugins.txt"}, false); err == nil {
+	if _, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/bad-plugins.txt"}, false, false); err == nil {
 		t.Fatal("buildRsyncExcludes() accepted invalid plugin block list")
 	}
 }
@@ -245,13 +335,44 @@ func TestBuildRsyncExcludesPreservesStandaloneWPConfig(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	excludeList, err := buildRsyncExcludes(dir, Config{}, true)
+	excludeList, err := buildRsyncExcludes(dir, Config{}, true, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() error = %v", err)
 	}
 	excludes := strings.Join(excludeList, "\n")
 	if !strings.Contains(excludes, "wp-config.php") {
 		t.Fatalf("standalone pulls should preserve local wp-config.php:\n%s", excludes)
+	}
+}
+
+func TestBuildRsyncExcludesKeepsPluginsAndUploadsForMigration(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "extra-plugins.txt"), []byte("updraftplus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}, false, true)
+	if err != nil {
+		t.Fatalf("buildRsyncExcludes() error = %v", err)
+	}
+	excludes := strings.Join(excludeList, "\n")
+	for _, unwanted := range []string{
+		"wp-content/uploads/",
+		"wp-content/plugins/updraftplus/",
+		"wp-content/plugins/wpallexport/",
+	} {
+		if strings.Contains(excludes, unwanted) {
+			t.Fatalf("migration excludes should not contain %q:\n%s", unwanted, excludes)
+		}
+	}
+	for _, want := range []string{".git/", ".ddev/", "wp-content/cache/"} {
+		if !strings.Contains(excludes, want) {
+			t.Fatalf("migration excludes missing safe local-only rule %q:\n%s", want, excludes)
+		}
 	}
 }
 
@@ -269,7 +390,7 @@ exit 24
 		User:       "deploy",
 		Host:       "example.com",
 		RemotePath: "/var/www/html",
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
@@ -310,7 +431,7 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 		Host:             "example.com",
 		RemotePath:       "/var/www/html",
 		PluginRemoveFile: ".ddev/extra-plugins.txt",
-	}, false, false)
+	}, false, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}

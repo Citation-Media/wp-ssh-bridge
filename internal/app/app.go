@@ -42,6 +42,8 @@ func (a *App) run(args []string) error {
 		return a.commandInit(args[1:])
 	case "pull":
 		return a.commandPull(args[1:])
+	case "migrate":
+		return a.commandMigrate(args[1:])
 	case "push":
 		return a.commandPush(args[1:])
 	case "provider":
@@ -62,6 +64,7 @@ func (a *App) printHelp() {
 Usage:
   wp-ssh-bridge init [flags]                  Configure this project
   wp-ssh-bridge pull [flags]                  Pull database and files from the source host
+  wp-ssh-bridge migrate [flags]               Pull as a site migration without dev-mode rewrites
   wp-ssh-bridge push [flags]                  Push database and files to the target host
   wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
   wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
@@ -85,6 +88,13 @@ Common flags:
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
+
+Migration flags:
+  --db-host string           Migration target DB host
+  --db-name string           Migration target DB name
+  --db-user string           Migration target DB user
+  --db-password string       Migration target DB password
+  --db-prefix string         Migration target table prefix
 
 Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
 `)
@@ -186,6 +196,55 @@ func (a *App) commandPull(args []string) error {
 	}
 
 	return a.runPullPipeline(context.Background(), adapter, cfg, opts)
+}
+
+// commandMigrate runs the pull pipeline in migration mode with target DB config injection.
+func (a *App) commandMigrate(args []string) error {
+	opts, err := parseConfigCommand("migrate", args, a.Stderr)
+	if err != nil {
+		return err
+	}
+	opts.Migrate = true
+
+	runtime := a.resolveRuntime(opts.ProjectRoot)
+	adapter := adapterForRuntime(runtime)
+	if err := ensureMigrateAdapterSupported(adapter); err != nil {
+		return err
+	}
+	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
+	if err != nil {
+		return err
+	}
+	adapter.ApplyConfigDefaults(&cfg)
+	cfg = opts.apply(cfg)
+	if adapter.Mode() == modeStandalone && !opts.Silent {
+		prompter := newPrompter(a.Stdin, a.Stdout)
+		if err := prompter.fillPullConfig(&cfg); err != nil {
+			return err
+		}
+	}
+	if err := cfg.validatePullRequired(); err != nil {
+		return err
+	}
+	if err := opts.validateMigrationCommand(cfg); err != nil {
+		return err
+	}
+	if err := adapter.PreparePull(a, cfg, opts); err != nil {
+		return err
+	}
+
+	return a.runPullPipeline(context.Background(), adapter, cfg, opts)
+}
+
+// ensureMigrateAdapterSupported blocks migrate in DDEV projects. migrate is a live
+// host-to-host move into a standalone target: the DDEV adapter would route the
+// database import through `ddev wp` into the local container DB instead of the
+// injected target credentials, silently migrating to the wrong database.
+func ensureMigrateAdapterSupported(adapter runtimeAdapter) error {
+	if adapter.Mode() == modeDDEV {
+		return errors.New("migrate does not support DDEV projects; it moves a live WordPress site host-to-host into a standalone target. Run migrate against a plain destination directory, not a DDEV project root")
+	}
+	return nil
 }
 
 // commandPush runs the direct push pipeline using saved push target config and one-shot overrides.
@@ -333,12 +392,12 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
 			return err
 		}
-		return a.filesPull(ctx, runtime.Root, cfg, false, false)
+		return a.filesPull(ctx, runtime.Root, cfg, false, false, false)
 	case "files-import":
 		a.filesImport()
 		return nil
 	case "post-pull":
-		return a.postPull(ctx, adapter, cfg)
+		return a.postPull(ctx, adapter, cfg, false)
 	case "db-push":
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
@@ -621,12 +680,18 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if !opts.SkipFiles {
-		if err := a.filesPull(ctx, root, cfg, adapter.Mode() == modeStandalone, useSCP); err != nil {
+		preserveLocalWPConfig := adapter.Mode() == modeStandalone && !opts.Migrate
+		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Migrate, useSCP); err != nil {
 			return err
 		}
 	}
 
 	shouldImportDB := !opts.SkipDB && !opts.SkipImport
+	if opts.Migrate && (shouldImportDB || !opts.SkipFiles) {
+		if err := a.applyMigrationWPConfig(root, cfg); err != nil {
+			return err
+		}
+	}
 	if shouldImportDB && !opts.SkipMaintenanceMode {
 		if err := a.enableLocalMaintenanceMode(ctx, root, cfg); err != nil {
 			return err
@@ -641,7 +706,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if !shouldImportDB {
 		cfg.SkipSearchReplace = true
 	}
-	return a.postPull(ctx, adapter, cfg)
+	return a.postPull(ctx, adapter, cfg, opts.Migrate)
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
@@ -681,7 +746,7 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	return a.postPush(ctx, root, cfg)
 }
 
-// configOptions tracks flags shared by init, pull, and push.
+// configOptions tracks flags shared by init, pull, migrate, and push.
 type configOptions struct {
 	ProjectRoot         string
 	ConfigFile          string
@@ -691,6 +756,7 @@ type configOptions struct {
 	SkipDB              bool
 	SkipFiles           bool
 	SkipImport          bool
+	Migrate             bool
 	ForceScpTransport   bool
 	SkipMaintenanceMode bool
 	Provider            string
@@ -710,6 +776,11 @@ type configOptions struct {
 	PluginRemoveFile    string
 	LocalURL            string
 	SkipSearchReplace   bool
+	MigrateDBHost       string
+	MigrateDBName       string
+	MigrateDBUser       string
+	MigrateDBPassword   string
+	MigrateDBPrefix     string
 }
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
@@ -745,6 +816,13 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
+	if name == "migrate" {
+		fs.StringVar(&opts.MigrateDBHost, "db-host", "", "migration target DB host")
+		fs.StringVar(&opts.MigrateDBName, "db-name", "", "migration target DB name")
+		fs.StringVar(&opts.MigrateDBUser, "db-user", "", "migration target DB user")
+		fs.StringVar(&opts.MigrateDBPassword, "db-password", "", "migration target DB password")
+		fs.StringVar(&opts.MigrateDBPrefix, "db-prefix", "", "migration target table prefix")
+	}
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
@@ -760,9 +838,23 @@ func (opts configOptions) rejectOperationFlags(command string) error {
 		return fmt.Errorf("--skip-files only applies to pull or push, not %s", command)
 	case opts.SkipImport:
 		return fmt.Errorf("--skip-import only applies to pull, not %s", command)
+	case opts.hasMigrationDBOptions():
+		return fmt.Errorf("--db-* migration options only apply to migrate, not %s", command)
 	default:
 		return nil
 	}
+}
+
+func (opts configOptions) validateMigrationCommand(cfg Config) error {
+	return cfg.validateMigrationDBCredentials(!opts.SkipFiles)
+}
+
+func (opts configOptions) hasMigrationDBOptions() bool {
+	return opts.MigrateDBHost != "" ||
+		opts.MigrateDBName != "" ||
+		opts.MigrateDBUser != "" ||
+		opts.MigrateDBPassword != "" ||
+		opts.MigrateDBPrefix != ""
 }
 
 // providerInstallOptions is intentionally narrow because provider install only writes generated files.
@@ -843,6 +935,21 @@ func (opts configOptions) apply(cfg Config) Config {
 	}
 	if opts.SkipSearchReplace {
 		cfg.SkipSearchReplace = true
+	}
+	if opts.MigrateDBHost != "" {
+		cfg.MigrateDBHost = opts.MigrateDBHost
+	}
+	if opts.MigrateDBName != "" {
+		cfg.MigrateDBName = opts.MigrateDBName
+	}
+	if opts.MigrateDBUser != "" {
+		cfg.MigrateDBUser = opts.MigrateDBUser
+	}
+	if opts.MigrateDBPassword != "" {
+		cfg.MigrateDBPassword = opts.MigrateDBPassword
+	}
+	if opts.MigrateDBPrefix != "" {
+		cfg.MigrateDBPrefix = opts.MigrateDBPrefix
 	}
 	return cfg
 }

@@ -91,9 +91,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 
 // filesPull syncs the remote WordPress tree into the local project.
 // When useSCP is true it uses a tar pipe over SSH instead of rsync.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, useSCP bool) error {
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, useSCP bool) error {
 	if useSCP {
-		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig)
+		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, migrate)
 	}
 
 	target := cfg.pullTarget()
@@ -107,7 +107,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 	}
 
 	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, migrate)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 
 // filesPullTar syncs the remote WordPress tree using a tar pipe over SSH.
 // Unlike rsync this does not delete local files absent on the remote; it only adds or updates.
-func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool) error {
+func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -137,7 +137,7 @@ func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, 
 		return err
 	}
 
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, migrate)
 	if err != nil {
 		return err
 	}
@@ -189,11 +189,16 @@ func (a *App) filesImport() {
 }
 
 // postPull applies local cleanup after a database or file pull.
-func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config) error {
+func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, migrate bool) error {
 	projectRoot := adapter.Root()
-	for _, hook := range adapter.PostPullHooks() {
-		if err := hook(ctx, a, projectRoot, cfg); err != nil {
-			return err
+	// Migration writes the target DB credentials before import (see runPullPipeline),
+	// so it only runs URL updates and keeps blocked plugins and the runtime's
+	// dev-mode post-pull hooks are skipped.
+	if !migrate {
+		for _, hook := range adapter.PostPullHooks() {
+			if err := hook(ctx, a, projectRoot, cfg); err != nil {
+				return err
+			}
 		}
 	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
@@ -202,14 +207,18 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config) 
 	if err := a.replaceSiteURLs(ctx, projectRoot, cfg); err != nil {
 		return err
 	}
+	if migrate {
+		return nil
+	}
 	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
-func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool) ([]string, error) {
+func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool) ([]string, error) {
 	excludes := []string{
 		".git/",
 		".ddev/",
+		".wp-ssh/",
 		"wp-config-ddev.php",
 		"wp-content/cache/",
 		"wp-content/upgrade/",
@@ -222,8 +231,12 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		excludes = append(excludes, "wp-config.php")
 	}
 
-	if !cfg.CloneImages {
+	if !cfg.CloneImages && !migrate {
 		excludes = append(excludes, "wp-content/uploads/")
+	}
+
+	if migrate {
+		return excludes, nil
 	}
 
 	plugins, err := readPluginList(projectRoot, cfg)
@@ -363,7 +376,7 @@ func replaceWPConfigDefine(contents string, name string, value string) (string, 
 	if !pattern.MatchString(contents) {
 		return contents, false
 	}
-	return pattern.ReplaceAllString(contents, wpConfigDefineLine(name, value)), true
+	return pattern.ReplaceAllLiteralString(contents, wpConfigDefineLine(name, value)), true
 }
 
 func wpConfigDefineLine(name string, value string) string {
@@ -374,6 +387,86 @@ func phpStringLiteral(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `'`, `\'`)
 	return "'" + value + "'"
+}
+
+// applyMigrationWPConfig writes target database settings into the copied wp-config.php.
+func (a *App) applyMigrationWPConfig(projectRoot string, cfg Config) error {
+	if !cfg.hasAnyMigrationDBCredential() {
+		return nil
+	}
+
+	wpConfig := filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")
+	contents, err := os.ReadFile(wpConfig)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("wp-config.php not found at %s; migrate needs a copied or existing target config", wpConfig)
+		}
+		return err
+	}
+
+	updated := updateWPConfigDBCredentialsContents(string(contents), cfg)
+	if updated == string(contents) {
+		return nil
+	}
+	return a.runStep("Writing migration database credentials", "Migration database credentials written", func() error {
+		return os.WriteFile(wpConfig, []byte(updated), 0o644)
+	})
+}
+
+// updateWPConfigDBCredentialsContents is pure so migration config rewrites are testable.
+func updateWPConfigDBCredentialsContents(contents string, cfg Config) string {
+	defines := []struct {
+		name  string
+		value string
+	}{
+		{name: "DB_NAME", value: phpStringLiteral(cfg.MigrateDBName)},
+		{name: "DB_USER", value: phpStringLiteral(cfg.MigrateDBUser)},
+		{name: "DB_PASSWORD", value: phpStringLiteral(cfg.MigrateDBPassword)},
+		{name: "DB_HOST", value: phpStringLiteral(cfg.MigrateDBHost)},
+	}
+
+	insertions := []string{}
+	for _, define := range defines {
+		updated, replaced := replaceWPConfigDefine(contents, define.name, define.value)
+		if replaced {
+			contents = updated
+			continue
+		}
+		insertions = append(insertions, wpConfigDefineLine(define.name, define.value))
+	}
+	if cfg.MigrateDBPrefix != "" {
+		updated, replaced := replaceWPConfigTablePrefix(contents, phpStringLiteral(cfg.MigrateDBPrefix))
+		if replaced {
+			contents = updated
+		} else {
+			insertions = append(insertions, wpConfigTablePrefixLine(phpStringLiteral(cfg.MigrateDBPrefix)))
+		}
+	}
+	if len(insertions) == 0 {
+		return contents
+	}
+	return insertWPConfigSnippet(contents, strings.Join(insertions, ""))
+}
+
+func replaceWPConfigTablePrefix(contents string, value string) (string, bool) {
+	pattern := regexp.MustCompile(`(?m)^[ \t]*\$table_prefix\s*=\s*.*?;[ \t]*(?:\r?\n)?`)
+	if !pattern.MatchString(contents) {
+		return contents, false
+	}
+	return pattern.ReplaceAllLiteralString(contents, wpConfigTablePrefixLine(value)), true
+}
+
+func wpConfigTablePrefixLine(value string) string {
+	return "$table_prefix = " + value + ";\n"
+}
+
+func insertWPConfigSnippet(contents string, snippet string) string {
+	snippet = "\n" + snippet
+	stopEditing := regexp.MustCompile(`\n\s*/\* That(?:\\'|'|\x{2019})s all, stop editing! Happy publishing\. \*/`)
+	if loc := stopEditing.FindStringIndex(contents); loc != nil {
+		return contents[:loc[0]] + snippet + contents[loc[0]:]
+	}
+	return strings.TrimRight(contents, "\r\n") + snippet
 }
 
 // sanitizeWPConfig removes production DB constants and adds DDEV-safe settings.

@@ -13,7 +13,9 @@ func TestBuildPushRsyncExcludes(t *testing.T) {
 	t.Parallel()
 	excludes := strings.Join(buildPushRsyncExcludes(), "\n")
 	for _, want := range []string{
+		".git/",
 		".ddev/",
+		".wp-ssh/",
 		"wp-config.php",
 		"wp-config-ddev.php",
 	} {

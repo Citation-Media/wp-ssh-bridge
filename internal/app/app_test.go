@@ -90,6 +90,89 @@ func TestDomainsAddConfiguresPullAndInversePushMappings(t *testing.T) {
 	}
 }
 
+func TestPullRejectsMigrationFlags(t *testing.T) {
+	t.Parallel()
+	if _, err := parseConfigCommand("pull", []string{"--migrate"}, new(strings.Builder)); err == nil {
+		t.Fatal("parseConfigCommand(pull) accepted --migrate")
+	}
+	if _, err := parseConfigCommand("pull", []string{"--db-host", "db.example.com"}, new(strings.Builder)); err == nil {
+		t.Fatal("parseConfigCommand(pull) accepted --db-host")
+	}
+}
+
+func TestMigrateRejectsDDEVAdapter(t *testing.T) {
+	t.Parallel()
+	ddev := adapterForRuntime(runtimeContext{Mode: modeDDEV, Root: t.TempDir()})
+	if err := ensureMigrateAdapterSupported(ddev); err == nil {
+		t.Fatal("ensureMigrateAdapterSupported() accepted the DDEV adapter")
+	}
+	standalone := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: t.TempDir()})
+	if err := ensureMigrateAdapterSupported(standalone); err != nil {
+		t.Fatalf("ensureMigrateAdapterSupported() rejected the standalone adapter: %v", err)
+	}
+}
+
+func TestMigrateCommandRequiresCredentialsForFilePull(t *testing.T) {
+	t.Parallel()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = t.TempDir()
+
+	err := app.commandMigrate([]string{
+		"--silent",
+		"--user", "deploy",
+		"--host", "source.example.com",
+		"--remote-path", "/var/www/html",
+	})
+	if err == nil {
+		t.Fatal("commandMigrate() accepted file migration without credentials")
+	}
+	if !strings.Contains(err.Error(), "migrate requires target database credentials") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMigrateCommandAcceptsDBFlags(t *testing.T) {
+	t.Parallel()
+	opts, err := parseConfigCommand("migrate", []string{
+		"--db-host", "db.example.com",
+		"--db-name", "target",
+		"--db-user", "user",
+		"--db-password", "pass",
+	}, new(strings.Builder))
+	if err != nil {
+		t.Fatalf("parseConfigCommand(migrate) error = %v", err)
+	}
+	opts.Migrate = true
+
+	cfg := Config{
+		MigrateDBHost:     opts.MigrateDBHost,
+		MigrateDBName:     opts.MigrateDBName,
+		MigrateDBUser:     opts.MigrateDBUser,
+		MigrateDBPassword: opts.MigrateDBPassword,
+	}
+	if err := opts.validateMigrationCommand(cfg); err != nil {
+		t.Fatalf("validateMigrationCommand() rejected complete credentials: %v", err)
+	}
+}
+
+func TestPushRejectsMigrateFlag(t *testing.T) {
+	t.Parallel()
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = t.TempDir()
+
+	err := app.commandPush([]string{"--migrate"})
+	if err == nil {
+		t.Fatal("commandPush() accepted --migrate")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestFillPullConfigDoesNotPromptForConfiguredRequiredValues(t *testing.T) {
 	t.Parallel()
 	cfg := Config{
