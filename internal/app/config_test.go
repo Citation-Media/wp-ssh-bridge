@@ -39,6 +39,11 @@ func TestWriteReadConfigFile(t *testing.T) {
 			{Old: "shop.ddev.site", New: "shop.example.com"},
 		},
 		SkipSearchReplace: true,
+		MigrateDBHost:     "db.example.com",
+		MigrateDBName:     "target_db",
+		MigrateDBUser:     "target_user",
+		MigrateDBPassword: "target_pass",
+		MigrateDBPrefix:   "wp_",
 	}
 
 	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
@@ -61,6 +66,11 @@ func TestWriteReadConfigFile(t *testing.T) {
 		"push_domain_replacements:",
 		"  - old: \"site.ddev.site\"",
 		"    new: \"example.com\"",
+		"migrate_db_host: \"db.example.com\"",
+		"migrate_db_name: \"target_db\"",
+		"migrate_db_user: \"target_user\"",
+		"migrate_db_password: \"target_pass\"",
+		"migrate_db_prefix: \"wp_\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("written config missing %q:\n%s", want, text)
@@ -274,6 +284,8 @@ func TestEnvArgsIncludePullAndPushDefaults(t *testing.T) {
 		PushURL:           "https://staging.example.com",
 		LocalWPPath:       "public",
 		SkipSearchReplace: true,
+		MigrateDBHost:     "db.example.com",
+		MigrateDBName:     "target",
 	}
 
 	env := cfg.envArgs()
@@ -284,10 +296,55 @@ func TestEnvArgsIncludePullAndPushDefaults(t *testing.T) {
 		"WP_SSH_PUSH_URL=https://staging.example.com",
 		"WP_SSH_LOCAL_WP_PATH=public",
 		"WP_SSH_PUSH_SKIP_SEARCH_REPLACE=true",
+		"WP_SSH_MIGRATE_DB_HOST=db.example.com",
+		"WP_SSH_MIGRATE_DB_NAME=target",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("env args missing %q:\n%s", want, env)
 		}
+	}
+}
+
+func TestValidateMigrationDBCredentials(t *testing.T) {
+	t.Parallel()
+	if err := (Config{}).validateMigrationDBCredentials(true); err == nil {
+		t.Fatal("validateMigrationDBCredentials() accepted missing required values")
+	}
+
+	cfg := Config{
+		MigrateDBHost:     "db.example.com",
+		MigrateDBName:     "target",
+		MigrateDBUser:     "user",
+		MigrateDBPassword: "pass",
+		MigrateDBPrefix:   "wp_",
+	}
+	if err := cfg.validateMigrationDBCredentials(true); err != nil {
+		t.Fatalf("validateMigrationDBCredentials() error = %v", err)
+	}
+
+	cfg.MigrateDBPrefix = "bad-prefix"
+	if err := cfg.validateMigrationDBCredentials(true); err == nil {
+		t.Fatal("validateMigrationDBCredentials() accepted unsafe prefix")
+	}
+}
+
+func TestApplyEnvSupportsMigrationDBCredentials(t *testing.T) {
+	t.Parallel()
+	cfg := Config{}
+	cfg.applyEnv([]string{
+		"WP_SSH_MIGRATE_DB_HOST=db.example.com",
+		"WP_SSH_MIGRATE_DB_NAME=target",
+		"WP_SSH_MIGRATE_DB_USER=user",
+		"WP_SSH_MIGRATE_DB_PASSWORD=pass",
+		"WP_SSH_MIGRATE_DB_PREFIX=wp_",
+	})
+
+	if cfg.MigrateDBHost != "db.example.com" ||
+		cfg.MigrateDBName != "target" ||
+		cfg.MigrateDBUser != "user" ||
+		cfg.MigrateDBPassword != "pass" ||
+		cfg.MigrateDBPrefix != "wp_" {
+		t.Fatalf("migration DB env values not applied: %#v", cfg)
 	}
 }
 

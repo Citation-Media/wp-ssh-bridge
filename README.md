@@ -123,6 +123,25 @@ One-shot overrides are supported:
 wp-ssh-bridge pull --silent --user deploy --host example.com --remote-path /home/example/public_html
 ```
 
+### Migration
+
+Use `migrate` when pulling a WordPress site as a migration target instead of a local development copy. Migration mode still exports/imports the database, syncs files, and runs configured URL search-replace, but it skips DDEV/dev rewrites and blocked-plugin cleanup.
+
+Migration is standalone-only: it moves a live site host-to-host into a plain target directory. `migrate` exits with an error when run against a DDEV project root — use the normal DDEV pull for local DDEV onboarding.
+
+```bash
+wp-ssh-bridge migrate --silent \
+  --user deploy \
+  --host source.example.com \
+  --remote-path /home/source/public_html \
+  --db-host db.example.com \
+  --db-name target_db \
+  --db-user target_user \
+  --db-password target_password
+```
+
+Migration pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. There is no `push --migrate`; remote migration needs a separate target `wp-config.php` rewrite design.
+
 ## Push
 
 Use the direct CLI wrapper. In DDEV mode this installs/refreshes provider files and runs the push directly with SSH, rsync, and `ddev wp` for local WP-CLI work. Outside DDEV it uses local WP-CLI.
@@ -147,7 +166,7 @@ wp-ssh-bridge push --silent \
   --push-url https://staging.example.com
 ```
 
-Push uploads/imports the local database with WP-CLI and rsyncs the full local WordPress app to the target. It excludes `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
+Push uploads/imports the local database with WP-CLI and rsyncs the full local WordPress app to the target. It excludes `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and the CLI scratch directory (`.wp-ssh/`) so local-only state and the downloaded database dump are never pushed.
 
 ## WP-CLI Compatibility
 
@@ -205,6 +224,11 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `pull_domain_replacements` | - | Optional pull-time old-to-new domain/URL replacements. Prefer protocol-less domains for multisite mappings. |
 | `push_domain_replacements` | - | Optional push-time old-to-new domain/URL replacements. Usually the inverse of pull replacements. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
+| `migrate_db_host` | `WP_SSH_MIGRATE_DB_HOST` | Target DB host written to `wp-config.php` during `migrate`. |
+| `migrate_db_name` | `WP_SSH_MIGRATE_DB_NAME` | Target DB name written to `wp-config.php` during `migrate`. |
+| `migrate_db_user` | `WP_SSH_MIGRATE_DB_USER` | Target DB user written to `wp-config.php` during `migrate`. |
+| `migrate_db_password` | `WP_SSH_MIGRATE_DB_PASSWORD` | Target DB password written to `wp-config.php` during `migrate`. |
+| `migrate_db_prefix` | `WP_SSH_MIGRATE_DB_PREFIX` | Optional target table prefix written to `wp-config.php` during `migrate`. |
 
 Add mappings to an already configured project with the CLI:
 
@@ -277,7 +301,7 @@ wp-ssh-bridge provider generate --kind all
 - Runs URL search-replace through `ddev wp`, including configured multisite domain mappings, protocol and host-only replacement pairs, per-blog search-replace, and multisite `site` and `blogs` domain tables.
 - Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.
-- Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, and `.ddev/`.
+- Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and the CLI scratch directory (`.wp-ssh/`).
 - Runs post-push URL search-replace on the remote target with WP-CLI, including multisite `site` and `blogs` domain tables.
 
 ## Release Versioning

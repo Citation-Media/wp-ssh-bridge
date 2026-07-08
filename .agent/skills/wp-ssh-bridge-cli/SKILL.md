@@ -1,6 +1,6 @@
 ---
 name: wp-ssh-bridge-cli
-description: Guide for using the wp-ssh-bridge CLI to pull or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull and push workflows.
+description: Guide for using the wp-ssh-bridge CLI to pull, migrate, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, migration mode, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, migrate, and push workflows.
 ---
 
 # wp-ssh-bridge CLI
@@ -19,6 +19,7 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
    - Whether URL search-replace should be skipped.
    - Multisite/custom domain mappings, when production domains must be rewritten locally or pushed back remotely.
    - Any project-specific blocked-plugin list.
+   - For `migrate`, the target DB host, name, user, password, and optional table prefix.
 4. Confirm which configuration mode the user wants:
    - Args mode for one-shot commands.
    - Env mode for CI, shells, or temporary overrides.
@@ -39,10 +40,11 @@ The first argument can be a DDEV project root or any destination folder. When th
 
 ## Router
 
-Read only one workflow reference unless the user explicitly compares DDEV and standalone usage:
+Read the most specific workflow reference first. Read only one reference unless the user explicitly compares workflows or the first reference says another one is needed:
 
 | User intent | Reference |
 | --- | --- |
+| Site migration, `wp-ssh-bridge migrate`, target DB credential injection, or host-to-host migration questions | `references/migration.md` |
 | DDEV projects, generated provider files, `ddev pull`, `ddev push`, or DDEV debugging | `references/ddev.md` |
 | Standalone usage, direct CLI commands, args/env/config mode, or non-DDEV troubleshooting | `references/general-usage.md` |
 
@@ -56,6 +58,7 @@ Read only one workflow reference unless the user explicitly compares DDEV and st
 - Prefer protocol-less domains in `pull_domain_replacements` and `push_domain_replacements` for multisite. Use full URLs only for path-aware or scheme-specific replacement.
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
+- For migration-style pulls, read `references/migration.md` before recommending commands. Recommend `wp-ssh-bridge migrate`; do not recommend `pull --migrate` or `push --migrate`.
 - The CLI runs preflight checks before pull/push work: local `ssh`, DDEV when applicable, local WP-CLI when DB work needs it, local path readability/writeability, SSH access, remote path access, remote temp writeability, and remote WP-CLI when DB work needs it.
 - File pulls use plain rsync `--delete` for stale synced paths and a sender-side `*.log` hide rule so WordPress-tree log files at any depth are not copied and are deleted locally, while local-only `.ddev/` including DDEV logs, `.git/`, config files, uploads when media cloning is off, and blocked-plugin paths are preserved for later CLI cleanup.
 - When `rsync` is unavailable locally or on the remote host, the CLI automatically falls back to a tar-pipe-over-SSH transport for file and database transfers. Use `--force-scp` to force this fallback even when rsync is available. The scp/tar transport does not remove stale remote files (no `--delete` equivalent); the CLI emits a warning when it uses this path.

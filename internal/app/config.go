@@ -31,6 +31,11 @@ type Config struct {
 	PullDomainReplacements []DomainReplacement
 	PushDomainReplacements []DomainReplacement
 	SkipSearchReplace      bool
+	MigrateDBHost          string
+	MigrateDBName          string
+	MigrateDBUser          string
+	MigrateDBPassword      string
+	MigrateDBPrefix        string
 }
 
 // DomainReplacement stores an old-to-new WordPress URL/domain replacement pair.
@@ -165,6 +170,16 @@ func readConfigFile(path string) (Config, error) {
 			cfg.LocalURL = value
 		case "skip_search_replace":
 			cfg.SkipSearchReplace = parseBool(value)
+		case "migrate_db_host":
+			cfg.MigrateDBHost = value
+		case "migrate_db_name":
+			cfg.MigrateDBName = value
+		case "migrate_db_user":
+			cfg.MigrateDBUser = value
+		case "migrate_db_password":
+			cfg.MigrateDBPassword = value
+		case "migrate_db_prefix":
+			cfg.MigrateDBPrefix = value
 		default:
 			return cfg, fmt.Errorf("unknown config key %q in %s", key, path)
 		}
@@ -288,6 +303,11 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
+	writeStringValue(&body, "migrate_db_host", cfg.MigrateDBHost, defaults.MigrateDBHost)
+	writeStringValue(&body, "migrate_db_name", cfg.MigrateDBName, defaults.MigrateDBName)
+	writeStringValue(&body, "migrate_db_user", cfg.MigrateDBUser, defaults.MigrateDBUser)
+	writeStringValue(&body, "migrate_db_password", cfg.MigrateDBPassword, defaults.MigrateDBPassword)
+	writeStringValue(&body, "migrate_db_prefix", cfg.MigrateDBPrefix, defaults.MigrateDBPrefix)
 
 	return os.WriteFile(path, []byte(body.String()), 0o644)
 }
@@ -338,6 +358,11 @@ func (cfg *Config) applyEnv(env []string) {
 	cfg.PluginRemoveFile = firstNonEmpty(values["WP_SSH_PULL_PLUGIN_REMOVE_FILE"], cfg.PluginRemoveFile)
 	cfg.LocalURL = firstNonEmpty(values["WP_SSH_PULL_LOCAL_URL"], cfg.LocalURL)
 	cfg.Provider = firstNonEmpty(values["WP_SSH_PROVIDER"], cfg.Provider)
+	cfg.MigrateDBHost = firstNonEmpty(values["WP_SSH_MIGRATE_DB_HOST"], cfg.MigrateDBHost)
+	cfg.MigrateDBName = firstNonEmpty(values["WP_SSH_MIGRATE_DB_NAME"], cfg.MigrateDBName)
+	cfg.MigrateDBUser = firstNonEmpty(values["WP_SSH_MIGRATE_DB_USER"], cfg.MigrateDBUser)
+	cfg.MigrateDBPassword = firstNonEmpty(values["WP_SSH_MIGRATE_DB_PASSWORD"], cfg.MigrateDBPassword)
+	cfg.MigrateDBPrefix = firstNonEmpty(values["WP_SSH_MIGRATE_DB_PREFIX"], cfg.MigrateDBPrefix)
 
 	if value, ok := values["WP_SSH_PULL_CLONE_IMAGES"]; ok {
 		cfg.CloneImages = parseBool(value)
@@ -454,6 +479,54 @@ func (target RemoteTarget) configured() bool {
 	return target.User != "" || target.Host != "" || target.Port != "" || target.RemotePath != ""
 }
 
+// validateMigrationDBCredentials catches unsafe or incomplete target wp-config.php values.
+func (cfg Config) validateMigrationDBCredentials(required bool) error {
+	missing := []string{}
+	if cfg.MigrateDBHost == "" {
+		missing = append(missing, "--db-host or migrate_db_host")
+	}
+	if cfg.MigrateDBName == "" {
+		missing = append(missing, "--db-name or migrate_db_name")
+	}
+	if cfg.MigrateDBUser == "" {
+		missing = append(missing, "--db-user or migrate_db_user")
+	}
+	if cfg.MigrateDBPassword == "" {
+		missing = append(missing, "--db-password or migrate_db_password")
+	}
+	if required && len(missing) > 0 {
+		return fmt.Errorf("migrate requires target database credentials: %s", strings.Join(missing, ", "))
+	}
+	if !required && len(missing) > 0 && cfg.hasAnyMigrationDBCredential() {
+		return fmt.Errorf("migration database credentials are incomplete; provide %s", strings.Join(missing, ", "))
+	}
+
+	values := map[string]string{
+		"migrate_db_host":     cfg.MigrateDBHost,
+		"migrate_db_name":     cfg.MigrateDBName,
+		"migrate_db_user":     cfg.MigrateDBUser,
+		"migrate_db_password": cfg.MigrateDBPassword,
+		"migrate_db_prefix":   cfg.MigrateDBPrefix,
+	}
+	for key, value := range values {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("%s must not contain newlines", key)
+		}
+	}
+	if cfg.MigrateDBPrefix != "" && regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(cfg.MigrateDBPrefix) {
+		return fmt.Errorf("migrate_db_prefix must contain only letters, numbers, and underscores")
+	}
+	return nil
+}
+
+func (cfg Config) hasAnyMigrationDBCredential() bool {
+	return cfg.MigrateDBHost != "" ||
+		cfg.MigrateDBName != "" ||
+		cfg.MigrateDBUser != "" ||
+		cfg.MigrateDBPassword != "" ||
+		cfg.MigrateDBPrefix != ""
+}
+
 // validateProviderName protects generated provider paths and DDEV command names.
 func validateProviderName(provider string) error {
 	if provider == "" {
@@ -490,6 +563,11 @@ func (cfg Config) envArgs() string {
 	add("WP_SSH_PULL_PLUGIN_REMOVE_FILE", cfg.PluginRemoveFile)
 	add("WP_SSH_PULL_LOCAL_URL", cfg.LocalURL)
 	add("WP_SSH_PROVIDER", cfg.Provider)
+	add("WP_SSH_MIGRATE_DB_HOST", cfg.MigrateDBHost)
+	add("WP_SSH_MIGRATE_DB_NAME", cfg.MigrateDBName)
+	add("WP_SSH_MIGRATE_DB_USER", cfg.MigrateDBUser)
+	add("WP_SSH_MIGRATE_DB_PASSWORD", cfg.MigrateDBPassword)
+	add("WP_SSH_MIGRATE_DB_PREFIX", cfg.MigrateDBPrefix)
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_CLONE_IMAGES=%t", cfg.CloneImages))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
@@ -549,6 +627,21 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	if len(overlay.PushDomainReplacements) > 0 {
 		base.PushDomainReplacements = overlay.PushDomainReplacements
+	}
+	if overlay.MigrateDBHost != "" {
+		base.MigrateDBHost = overlay.MigrateDBHost
+	}
+	if overlay.MigrateDBName != "" {
+		base.MigrateDBName = overlay.MigrateDBName
+	}
+	if overlay.MigrateDBUser != "" {
+		base.MigrateDBUser = overlay.MigrateDBUser
+	}
+	if overlay.MigrateDBPassword != "" {
+		base.MigrateDBPassword = overlay.MigrateDBPassword
+	}
+	if overlay.MigrateDBPrefix != "" {
+		base.MigrateDBPrefix = overlay.MigrateDBPrefix
 	}
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace

@@ -230,7 +230,9 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 // buildPushRsyncExcludes protects environment-specific config while pushing the full app.
 func buildPushRsyncExcludes() []string {
 	return []string{
+		".git/",
 		".ddev/",
+		".wp-ssh/",
 		"wp-config.php",
 		"wp-config-ddev.php",
 	}
