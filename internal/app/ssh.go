@@ -96,6 +96,7 @@ func (a *App) runSSHWithWriters(ctx context.Context, projectRoot string, args []
 	cmd.Dir = projectRoot
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.WaitDelay = sshWaitDelay
 	return cmd.Run()
 }
 
@@ -128,6 +129,7 @@ func (a *App) outputSSHWithStderr(ctx context.Context, projectRoot string, args 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Dir = projectRoot
 	cmd.Stderr = stderr
+	cmd.WaitDelay = sshWaitDelay
 	output, err := cmd.Output()
 	return string(output), err
 }
