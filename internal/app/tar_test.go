@@ -5,11 +5,22 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// incompressibleBytes returns n deterministic pseudo-random bytes that gzip cannot
+// meaningfully compress, so a streamed archive exceeds the OS pipe buffer and a
+// stalled consumer/producer would block on write (surfacing a pipe deadlock).
+func incompressibleBytes(n int) []byte {
+	b := make([]byte, n)
+	_, _ = rand.New(rand.NewSource(1)).Read(b)
+	return b
+}
 
 // --- buildTarExcludeArgs ---
 
@@ -118,6 +129,81 @@ cat - > `+shellQuote(receivedPath)+`
 	}
 	if !found {
 		t.Error("expected wp-config.php in received archive")
+	}
+}
+
+// TestTarPipeToRemoteDoesNotHangWhenRemoteExitsEarly guards against a pipe deadlock:
+// if the remote extract exits before draining stdin, the local tar must not block
+// forever writing to a pipe with no reader.
+func TestTarPipeToRemoteDoesNotHangWhenRemoteExitsEarly(t *testing.T) {
+	dir := t.TempDir()
+
+	src := filepath.Join(dir, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "big.bin"), incompressibleBytes(256*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fake SSH exits with an error without reading stdin, closing the read end early.
+	installFakeSSH(t, dir, `#!/bin/sh
+echo "remote extract failed" >&2
+exit 1
+`)
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	target := RemoteTarget{User: "deploy", Host: "example.com", RemotePath: "/remote/wp"}
+	localTarArgs := []string{"-czf", "-", "-C", src, "."}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.tarPipeToRemote(context.Background(), dir, target, localTarArgs, "tar -xzf - -C /remote/wp")
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("tarPipeToRemote() returned nil despite an early remote failure")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("tarPipeToRemote() hung when the remote exited early (deadlock regression)")
+	}
+}
+
+// TestTarPipeFromRemoteDoesNotHangWhenExtractFails guards the mirror case: if the
+// local extract exits early, the remote (ssh) producer must not block forever
+// writing to a full pipe with no reader.
+func TestTarPipeFromRemoteDoesNotHangWhenExtractFails(t *testing.T) {
+	dir := t.TempDir()
+
+	archivePath := filepath.Join(dir, "big.tar.gz")
+	if err := writeTarGz(archivePath, map[string]string{"big.bin": string(incompressibleBytes(256 * 1024))}); err != nil {
+		t.Fatal(err)
+	}
+	installFakeSSH(t, dir, `#!/bin/sh
+cat `+shellQuote(archivePath)+`
+`)
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	target := RemoteTarget{User: "deploy", Host: "example.com", RemotePath: "/remote/wp"}
+	// Missing destination makes the local `tar -xzf - -C <missing>` fail immediately.
+	missingDest := filepath.Join(dir, "does-not-exist")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.tarPipeFromRemote(context.Background(), dir, target, "tar -czf - -C /remote/wp .", missingDest)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("tarPipeFromRemote() returned nil despite a failing local extract")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("tarPipeFromRemote() hung when the local extract failed (deadlock regression)")
 	}
 }
 
