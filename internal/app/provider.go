@@ -260,6 +260,9 @@ func ddevHostnamesForReplacements(projectRoot string, replacements []DomainRepla
 }
 
 func ddevProjectTLD(projectRoot string) string {
+	if value := strings.Trim(os.Getenv("DDEV_TLD"), "."); value != "" {
+		return value
+	}
 	value, err := readSimpleYAMLValue(filepath.Join(projectRoot, ".ddev", "config.yaml"), "project_tld")
 	if err != nil || value == "" {
 		return "ddev.site"

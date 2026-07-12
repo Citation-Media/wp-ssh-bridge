@@ -95,6 +95,7 @@ Migration flags:
   --db-user string           Migration target DB user
   --db-password string       Migration target DB password
   --db-prefix string         Migration target table prefix
+  --clean-target             Remove pre-existing target content before syncing
 
 Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
 `)
@@ -392,7 +393,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
 			return err
 		}
-		return a.filesPull(ctx, runtime.Root, cfg, false, false, false)
+		return a.filesPull(ctx, runtime.Root, cfg, false, false, false, false)
 	case "files-import":
 		a.filesImport()
 		return nil
@@ -680,8 +681,17 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if !opts.SkipFiles {
+		// For migrate, --clean-target empties the destination before extraction so
+		// pre-existing content on the target (e.g. a web host's default files) does not
+		// survive. rsync achieves this via --delete; the scp/tar transport cannot, so it
+		// needs an explicit wipe. Only the scp/tar path requires it.
+		if opts.Migrate && opts.CleanTarget && useSCP {
+			if err := a.cleanMigrationTarget(root, cfg); err != nil {
+				return err
+			}
+		}
 		preserveLocalWPConfig := adapter.Mode() == modeStandalone && !opts.Migrate
-		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Migrate, useSCP); err != nil {
+		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Migrate, opts.CleanTarget, useSCP); err != nil {
 			return err
 		}
 	}
@@ -757,6 +767,7 @@ type configOptions struct {
 	SkipFiles           bool
 	SkipImport          bool
 	Migrate             bool
+	CleanTarget         bool
 	ForceScpTransport   bool
 	SkipMaintenanceMode bool
 	Provider            string
@@ -822,6 +833,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 		fs.StringVar(&opts.MigrateDBUser, "db-user", "", "migration target DB user")
 		fs.StringVar(&opts.MigrateDBPassword, "db-password", "", "migration target DB password")
 		fs.StringVar(&opts.MigrateDBPrefix, "db-prefix", "", "migration target table prefix")
+		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target content before syncing (rsync --delete or scp/tar target cleanup)")
 	}
 	if err := fs.Parse(args); err != nil {
 		return opts, err

@@ -91,9 +91,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 
 // filesPull syncs the remote WordPress tree into the local project.
 // When useSCP is true it uses a tar pipe over SSH instead of rsync.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, useSCP bool) error {
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, cleanTarget bool, useSCP bool) error {
 	if useSCP {
-		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, migrate)
+		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, migrate, cleanTarget)
 	}
 
 	target := cfg.pullTarget()
@@ -106,7 +106,14 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 		return err
 	}
 
-	args := append(rsyncArchiveArgs(), "--delete", "--safe-links")
+	args := rsyncArchiveArgs()
+	// A normal pull always mirrors the source, so it deletes stale local files. A
+	// migration is additive by default and only removes pre-existing target content when
+	// --clean-target (cleanTarget) is set, so both transports behave consistently.
+	if !migrate || cleanTarget {
+		args = append(args, "--delete")
+	}
+	args = append(args, "--safe-links")
 	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, migrate)
 	if err != nil {
 		return err
@@ -125,8 +132,10 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 }
 
 // filesPullTar syncs the remote WordPress tree using a tar pipe over SSH.
-// Unlike rsync this does not delete local files absent on the remote; it only adds or updates.
-func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool) error {
+// The tar step itself only adds or updates files; when cleanTarget is set the destination
+// was already emptied by cleanMigrationTarget before this runs (there is no rsync --delete
+// equivalent for the tar transport).
+func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, cleanTarget bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -153,10 +162,88 @@ func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, 
 	parts = append(parts, "-C", shellQuote(trimTrailingSlash(target.RemotePath)), ".")
 	remoteCmd := strings.Join(parts, " ")
 
-	a.UI.Warning("scp/tar transport: stale local files not removed (no --delete equivalent)")
+	if !cleanTarget {
+		a.UI.Warning("scp/tar transport: stale local files not removed (no --delete equivalent)")
+	}
 	return a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
 		return a.tarPipeFromRemote(ctx, projectRoot, target, remoteCmd, destination)
 	})
+}
+
+// cleanMigrationTarget empties the migration destination before the scp/tar transport
+// extracts into it, so pre-existing content on the target (for example a web host's
+// default files) does not survive the migration. The rsync transport achieves the same
+// via --delete, which the scp/tar transport lacks. A small set of operational entries
+// (VCS metadata, DDEV/tool state, this tool's own config and binary) is preserved,
+// mirroring the rsync migrate excludes.
+func (a *App) cleanMigrationTarget(projectRoot string, cfg Config) error {
+	destination := localWPRoot(projectRoot, cfg)
+	keep := migrationCleanKeep(defaultBinaryPath())
+	a.UI.Warning("clean-target: emptying %s before extract (preserved: %s)", destination, strings.Join(sortedKeep(keep), ", "))
+	return a.runStep("Clearing migration target", "Migration target cleared", func() error {
+		if err := os.MkdirAll(destination, 0o755); err != nil {
+			return err
+		}
+		return emptyDirExcept(destination, keep)
+	})
+}
+
+// migrationCleanKeep is the set of top-level entries cleanMigrationTarget must not delete:
+// version-control and tooling state plus this tool's own config file and binary, which may
+// live in the destination when it is the project root. It mirrors the rsync migrate
+// excludes (.git, .ddev, .wp-ssh, wp-config-ddev.php) so both transports preserve the same
+// operational files.
+func migrationCleanKeep(binaryPath string) map[string]bool {
+	keep := map[string]bool{
+		".git":               true,
+		".ddev":              true,
+		".wp-ssh":            true,
+		".wp-ssh.yaml":       true,
+		"wp-config-ddev.php": true,
+	}
+	if base := filepath.Base(binaryPath); base != "" && base != "." && base != string(filepath.Separator) {
+		keep[base] = true
+	}
+	return keep
+}
+
+func sortedKeep(keep map[string]bool) []string {
+	names := make([]string, 0, len(keep))
+	for name := range keep {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// emptyDirExcept removes every direct child of dir except those named in keep. It refuses
+// to operate on a filesystem root or the user's home directory as a guard against a
+// misconfigured destination wiping far more than intended.
+func emptyDirExcept(dir string, keep map[string]bool) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	cleaned := filepath.Clean(abs)
+	if cleaned == "" || filepath.Dir(cleaned) == cleaned {
+		return fmt.Errorf("refusing to empty filesystem root %q", dir)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && filepath.Clean(home) == cleaned {
+		return fmt.Errorf("refusing to empty home directory %q", dir)
+	}
+	entries, err := os.ReadDir(cleaned)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if keep[entry.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(cleaned, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) runExternalAllowRsyncVanished(ctx context.Context, projectRoot string, args ...string) error {
@@ -562,8 +649,18 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 	newURL := localSiteURL(projectRoot, cfg)
 	if oldURL != "" && newURL != "" {
 		autoPairs := replacementPairsForURLs(oldURL, newURL)
+		// A protocol-less configured mapping already replaces the hostname in both
+		// complete URLs and bare domain values. Adding automatic URL variants for the
+		// same hosts would rewrite the configured target a second time when the target
+		// contains the source hostname (for example example.com.ddev.site).
+		coveredByConfiguredHost := configuredHostReplacementCoversURLs(cfg.PullDomainReplacements, oldURL, newURL)
+		if coveredByConfiguredHost {
+			autoPairs = nil
+		}
 		if len(autoPairs) == 0 {
-			a.UI.Warning("Skipping automatic WordPress URL replacement because the old or new URL is invalid.")
+			if !coveredByConfiguredHost {
+				a.UI.Warning("Skipping automatic WordPress URL replacement because the old or new URL is invalid.")
+			}
 		}
 		pairs = append(pairs, autoPairs...)
 	}
@@ -646,6 +743,12 @@ func replacementPairsForConfiguredDomain(replacement DomainReplacement) []replac
 	if oldHost == "" || newHost == "" {
 		return pairs
 	}
+	if urlBase(oldValue) == "" && urlBase(newValue) == "" {
+		// Replacing the hostname once covers protocol-prefixed URLs as well as bare
+		// multisite domain values. Separate http/https pairs would overlap and can
+		// mutate a freshly-written target such as example.com.ddev.site again.
+		return []replacementPair{{old: oldHost, new: newHost}}
+	}
 	if newBase := urlBase(newValue); newBase != "" {
 		pairs = append(pairs,
 			replacementPair{old: "http://" + oldHost, new: newBase},
@@ -660,6 +763,39 @@ func replacementPairsForConfiguredDomain(replacement DomainReplacement) []replac
 		replacementPair{old: oldHost, new: newHost},
 	)
 	return pairs
+}
+
+// configuredHostReplacementCoversURLs reports whether an explicit protocol-less
+// mapping already covers the automatically detected root URLs. Explicit mappings take
+// precedence and intentionally preserve the URL scheme.
+func configuredHostReplacementCoversURLs(replacements []DomainReplacement, oldURL string, newURL string) bool {
+	oldParsed, oldOK := rootURL(oldURL)
+	newParsed, newOK := rootURL(newURL)
+	if !oldOK || !newOK {
+		return false
+	}
+	for _, replacement := range replacements {
+		if urlBase(replacement.Old) != "" || urlBase(replacement.New) != "" {
+			continue
+		}
+		if strings.EqualFold(replacementHost(replacement.Old), oldParsed.Hostname()) && strings.EqualFold(replacementHost(replacement.New), newParsed.Hostname()) {
+			return true
+		}
+	}
+	return false
+}
+
+// rootURL accepts only complete site-root URLs because a host-only mapping must not
+// suppress automatic replacements that carry meaningful path changes.
+func rootURL(value string) (*url.URL, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, false
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return nil, false
+	}
+	return parsed, true
 }
 
 func replacementHost(value string) string {

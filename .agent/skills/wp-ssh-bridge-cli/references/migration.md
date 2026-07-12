@@ -25,6 +25,7 @@ Migration pulls:
 - keep blocked plugins and do not run blocked-plugin cleanup
 - skip DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
 - still run configured URL search-replace unless `--skip-search-replace` is set
+- be additive by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
 
 Migration mode is a top-level `migrate` command. Do not recommend `pull --migrate` or `push --migrate`.
 
@@ -66,6 +67,21 @@ wp-ssh-bridge migrate --silent \
 ```
 
 Add `--db-prefix wp_` only when the target table prefix should differ from the copied source `wp-config.php`.
+
+## Emptying The Target (`--clean-target`)
+
+By default a migration is additive: files are added or updated, but content already on the target (for example a web host's default `index.html` or a starter theme) stays in place. This holds on both transports — the rsync transport does not pass `--delete` for migrations, and the scp/tar transport has no `--delete` equivalent. (A normal, non-migration `pull` still mirrors the source with rsync `--delete`.)
+
+Pass `--clean-target` (migrate only) to remove pre-existing target content before files are synced, so the migrated site starts from a clean tree on either transport:
+
+- rsync transport: the CLI adds `--delete`, so files not present on the source are removed (configured excludes and operational paths are preserved).
+- scp/tar transport: the CLI empties the target WordPress directory before extracting, since rsync `--delete` has no tar equivalent.
+
+Safety:
+
+- It is destructive and cannot be undone. Recommend it only when the user explicitly wants pre-existing target content removed, and confirm the resolved target path first.
+- On the scp/tar transport it preserves only operational entries — `.git`, `.ddev`, `.wp-ssh`, `wp-config-ddev.php`, `.wp-ssh.yaml`, and the `wp-ssh-bridge` binary — and refuses to run against a filesystem root or the home directory. On rsync, the configured `--exclude` paths are preserved.
+- It is rejected on `pull` and `push`; it exists only on `migrate`.
 
 ## DDEV Projects
 
