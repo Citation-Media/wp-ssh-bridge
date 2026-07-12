@@ -258,9 +258,9 @@ push_domain_replacements:
     new: "shop.example.com"
 ```
 
-Use protocol-less domains for multisite replacements whenever possible. WordPress multisite network tables and constants such as `DOMAIN_CURRENT_SITE` store hosts without `http://` or `https://`, and protocol-less mappings avoid missing those values. Full URLs are still supported when path-aware replacements are needed.
+Use protocol-less domains for multisite replacements whenever possible. WordPress multisite network tables and constants such as `DOMAIN_CURRENT_SITE` store hosts without `http://` or `https://`, and protocol-less mappings avoid missing those values. A protocol-less mapping is applied once to both bare domains and the hostname inside complete URLs, including when the local hostname contains the production hostname (for example `example.com.ddev.site`). Full URLs are still supported when path-aware replacements are needed.
 
-In DDEV mode, provider install/pull/push derives local hosts from `pull_domain_replacements[].new` and `push_domain_replacements[].old`, then persists them in `.ddev/config.yaml` as `additional_hostnames`. The search-replace behavior itself is core CLI behavior and also works outside DDEV.
+In DDEV mode, provider install/pull/push derives local hosts from `pull_domain_replacements[].new` and `push_domain_replacements[].old`, then persists them in `.ddev/config.yaml` as `additional_hostnames`. It uses DDEV's resolved `DDEV_TLD` when available, so custom project TLDs are handled as well as the default `ddev.site`. DDEV also exposes every routed project FQDN in `DDEV_HOSTNAME`; the explicit replacement mappings remain the source of truth for deciding which production host maps to which local host. The search-replace behavior itself is core CLI behavior and also works outside DDEV.
 
 Post-pull also updates hardcoded URL constants in `wp-config.php` so production values do not override the imported database:
 

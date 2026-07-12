@@ -113,6 +113,18 @@ func TestInstallProviderFilesPersistsDDEVAdditionalHostnames(t *testing.T) {
 	}
 }
 
+func TestDDEVHostnamesUseResolvedTLDEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DDEV_TLD", "ddev.test")
+	got, err := ddevHostnamesForReplacements(dir, []DomainReplacement{{New: "site.ddev.test"}})
+	if err != nil {
+		t.Fatalf("ddevHostnamesForReplacements() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != "site" {
+		t.Fatalf("ddevHostnamesForReplacements() = %#v, want []string{\"site\"}", got)
+	}
+}
+
 func TestInstallProviderFilesUsesRelativeProjectBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

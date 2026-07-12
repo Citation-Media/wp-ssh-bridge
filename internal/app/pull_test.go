@@ -390,7 +390,7 @@ exit 24
 		User:       "deploy",
 		Host:       "example.com",
 		RemotePath: "/var/www/html",
-	}, false, false, false)
+	}, false, false, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
@@ -431,7 +431,7 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 		Host:             "example.com",
 		RemotePath:       "/var/www/html",
 		PluginRemoveFile: ".ddev/extra-plugins.txt",
-	}, false, false, false)
+	}, false, false, false, false)
 	if err != nil {
 		t.Fatalf("filesPull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
@@ -599,6 +599,29 @@ func TestReplacementPairsIncludeHostOnlyValues(t *testing.T) {
 	}
 }
 
+func TestReplacementPairsForProtocolLessDomainDoNotOverlap(t *testing.T) {
+	t.Parallel()
+	got := replacementPairsForConfiguredDomain(DomainReplacement{
+		Old: "acme-group.de",
+		New: "acme-group.de.ddev.site",
+	})
+	want := []replacementPair{{old: "acme-group.de", new: "acme-group.de.ddev.site"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replacementPairsForConfiguredDomain() = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfiguredHostReplacementCoversRootURLs(t *testing.T) {
+	t.Parallel()
+	replacements := []DomainReplacement{{Old: "acme-group.de", New: "acme-group.de.ddev.site"}}
+	if !configuredHostReplacementCoversURLs(replacements, "https://acme-group.de/", "https://acme-group.de.ddev.site") {
+		t.Fatal("configuredHostReplacementCoversURLs() did not recognize equivalent root URLs")
+	}
+	if configuredHostReplacementCoversURLs(replacements, "https://acme-group.de/subsite", "https://acme-group.de.ddev.site/subsite") {
+		t.Fatal("configuredHostReplacementCoversURLs() ignored path-specific URL replacement")
+	}
+}
+
 func TestSearchReplaceCommandArgsDisableReport(t *testing.T) {
 	t.Parallel()
 	got := searchReplaceCommandArgs("https://example.com", "https://example.ddev.site")
@@ -712,6 +735,49 @@ exit 1
 		if !strings.Contains(log, want) {
 			t.Fatalf("wp log missing %q:\n%s", want, log)
 		}
+	}
+}
+
+func TestReplaceSiteURLsDoesNotRewriteProtocolLessTargetTwice(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "wp.log")
+	installFakeCommand(t, dir, "wp", `#!/bin/sh
+printf '%s\n' "$*" >> `+shellQuote(logPath)+`
+case "$*" in
+  *"option get home"*) printf 'https://acme-group.de\n'; exit 0 ;;
+  *"core is-installed --network"*) exit 0 ;;
+  *"site list --field=url"*) printf 'https://acme-group.de.ddev.site/\n'; exit 0 ;;
+  *"db prefix"*) printf 'wp_\n'; exit 0 ;;
+  *"db tables"*) printf 'wp_options\nwp_site\nwp_blogs\n'; exit 0 ;;
+  *"db query"*) exit 0 ;;
+  *"search-replace"*) exit 0 ;;
+esac
+exit 1
+`)
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte("<?php\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	cfg := Config{
+		LocalURL: "https://acme-group.de.ddev.site",
+		PullDomainReplacements: []DomainReplacement{
+			{Old: "acme-group.de", New: "acme-group.de.ddev.site"},
+		},
+	}
+	if err := app.replaceSiteURLs(context.Background(), dir, cfg); err != nil {
+		t.Fatalf("replaceSiteURLs() error = %v", err)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	want := "--url=https://acme-group.de.ddev.site/ search-replace acme-group.de acme-group.de.ddev.site"
+	if !strings.Contains(log, want) {
+		t.Fatalf("wp log missing %q:\n%s", want, log)
+	}
+	if strings.Contains(log, "search-replace https://acme-group.de") {
+		t.Fatalf("wp log contains overlapping full-URL replacement:\n%s", log)
 	}
 }
 
