@@ -46,6 +46,16 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP
 	projectName := firstNonEmpty(os.Getenv("DDEV_PROJECT"), filepath.Base(projectRoot), "wordpress")
 	remoteDumpGZ := fmt.Sprintf("%s/ddev-%s-push-%s-%s.sql.gz", remoteTmp, projectName, time.Now().Format("20060102150405"), randomID())
 	remoteDump := strings.TrimSuffix(remoteDumpGZ, ".gz")
+	mariaDBSetup, mariaDBCleanup := remoteMariaDBCompatibilityCommands(remoteTmp, strings.TrimSuffix(filepath.Base(remoteDump), ".sql"), a.needsRemoteMariaDBCompatibility(target))
+	remoteDumpCleanupNeeded := true
+	defer func() {
+		if !remoteDumpCleanupNeeded {
+			return
+		}
+		if err := a.removeRemoteDatabaseDump(context.Background(), projectRoot, target, remoteDump, remoteDumpGZ); err != nil {
+			a.UI.Warning("Could not remove push target database transfer files: %s", err)
+		}
+	}()
 
 	if useSCP {
 		args := append(scpArgs(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
@@ -65,18 +75,24 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP
 
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
-		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
+		fmt.Sprintf("cleanup() { rm -f %s %s || true; %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ), mariaDBCleanup),
 		"trap cleanup INT TERM HUP EXIT;",
 		"cd " + shellQuote(trimTrailingSlash(target.RemotePath)) + ";",
 		remoteWPCLIPrelude(target),
+		mariaDBSetup,
 		fmt.Sprintf("gzip -dc %s > %s;", shellQuote(remoteDumpGZ), shellQuote(remoteDump)),
 		fmt.Sprintf("wp_ssh_wp --allow-root db import %s;", shellQuote(remoteDump)),
+		mariaDBCleanup + ";",
 		"trap - EXIT;",
 		fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 	}, " ")
-	return a.runStep("Importing database on push target", "Push target database imported", func() error {
+	if err := a.runStep("Importing database on push target", "Push target database imported", func() error {
 		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
-	})
+	}); err != nil {
+		return err
+	}
+	remoteDumpCleanupNeeded = false
+	return nil
 }
 
 // filesPush syncs the complete local WordPress app to the push target.

@@ -47,6 +47,38 @@ func TestPushURLCacheIsTargetSpecific(t *testing.T) {
 	}
 }
 
+func TestDBPushCleansRemoteDumpAfterUploadFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(downloadsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(downloadsDir(dir), "db.sql.gz"), []byte("dump"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "ssh.log")
+	installFakeSSH(t, dir, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\n")
+	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nexit 1\n")
+
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := app.dbPush(context.Background(), dir, Config{
+		PushUser:       "deploy",
+		PushHost:       "example.com",
+		PushRemotePath: "/var/www/html",
+		PushURL:        "https://example.com",
+	}, false)
+	if err == nil {
+		t.Fatal("dbPush() succeeded despite a failed database upload")
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "rm -f '/tmp/ddev-") {
+		t.Fatalf("push should remove the remote dump after upload failure:\n%s", log)
+	}
+}
+
 func TestPostPushWarnsWhenPushURLMissing(t *testing.T) {
 	dir := t.TempDir()
 	installFakeCommand(t, dir, "wp", `#!/bin/sh

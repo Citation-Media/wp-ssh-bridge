@@ -176,6 +176,18 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` to the ta
 
 In standalone mode, a missing or unusable local `wp` is handled the same way by downloading a managed fallback phar into the project downloads directory.
 
+### Netcup MariaDB client compatibility
+
+Some Netcup/Plesk hosts report MariaDB through `mysql --version` but expose only the legacy `mysql` and `mysqldump` executable names. Current WP-CLI then looks for `mariadb` and `mariadb-dump`, which would otherwise make `wp db export` fail.
+
+When this layout is found during database preflight, the CLI reports it and creates temporary remote aliases only for the database operation:
+
+```text
+✓ Pull source MariaDB client compatibility enabled (temporary mysql/mysqldump aliases)
+```
+
+The temporary aliases are removed on success and by the remote cleanup trap on failure. Remote database transfer files are also removed after download/import and are retried during error cleanup. The SCP/tar file fallback streams its archive over SSH, so it does not leave a remote tar file behind.
+
 ## Configuration
 
 Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in standalone mode.
