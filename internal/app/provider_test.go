@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,69 @@ func TestProviderYAMLQuotesBinaryPathWithSpaces(t *testing.T) {
 	want := `command: "'/Users/me/My Tools/wp-ssh-bridge' provider auth"`
 	if !strings.Contains(body, want) {
 		t.Fatalf("provider YAML did not quote binary path with spaces; missing %q:\n%s", want, body)
+	}
+}
+
+func TestProviderDBPullFallsBackToSCPWhenRemoteRsyncIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", configFileName), []byte("pull_user: deploy\npull_host: example.com\npull_remote_path: /var/www/html\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	installFakeCommand(t, dir, "ddev", "#!/bin/sh\nif [ \"$1\" = describe ] && [ \"$2\" = -j ]; then\n  printf '%s\\n' "+shellQuote(`{"type":"wordpress","app_root":"`+dir+`"}`)+"\nfi\n")
+	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *'command -v rsync'*) exit 1 ;;\nesac\n")
+
+	scpLog := filepath.Join(dir, "scp.log")
+	rsyncLog := filepath.Join(dir, "rsync.log")
+	installFakeCommand(t, dir, "scp", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+shellQuote(scpLog)+"\n")
+	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+shellQuote(rsyncLog)+"\nexit 1\n")
+
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+	if err := app.commandProviderRuntime("db-pull", []string{"--project-root", dir}); err != nil {
+		t.Fatalf("provider db-pull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(scpLog); err != nil {
+		t.Fatalf("provider db-pull did not use scp fallback: %v", err)
+	}
+	if _, err := os.Stat(rsyncLog); !os.IsNotExist(err) {
+		t.Fatalf("provider db-pull should not use rsync when remote rsync is missing, got err: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Remote rsync not available — falling back to scp/tar transfer") {
+		t.Fatalf("provider db-pull did not report fallback:\n%s", stderr.String())
+	}
+}
+
+func TestProviderAuthAllowsMissingLocalRsync(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", "config.yaml"), []byte("type: wordpress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ddev", configFileName), []byte("pull_user: deploy\npull_host: example.com\npull_remote_path: /var/www/html\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	installFakeCommand(t, dir, "ddev", "#!/bin/sh\nif [ \"$1\" = describe ] && [ \"$2\" = -j ]; then\n  printf '%s\\n' "+shellQuote(`{"type":"wordpress","app_root":"`+dir+`"}`)+"\nfi\n")
+	installFakeSSH(t, dir, "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", dir)
+
+	stdout := bytes.Buffer{}
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.WorkDir = dir
+	if err := app.commandProviderRuntime("auth", []string{"--project-root", dir}); err != nil {
+		t.Fatalf("provider auth() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
 }
 

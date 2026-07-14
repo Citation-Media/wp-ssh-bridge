@@ -388,12 +388,14 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
-		return a.dbPull(ctx, runtime.Root, cfg, false)
+		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pullTarget(), false)
+		return a.dbPull(ctx, runtime.Root, cfg, useSCP)
 	case "files-pull":
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
 			return err
 		}
-		return a.filesPull(ctx, runtime.Root, cfg, false, false, false, false)
+		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pullTarget(), false)
+		return a.filesPull(ctx, runtime.Root, cfg, false, false, false, useSCP)
 	case "files-import":
 		a.filesImport()
 		return nil
@@ -403,12 +405,14 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
-		return a.dbPush(ctx, runtime.Root, cfg, false)
+		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pushTarget(), false)
+		return a.dbPush(ctx, runtime.Root, cfg, useSCP)
 	case "files-push":
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipDB: true}); err != nil {
 			return err
 		}
-		return a.filesPush(ctx, runtime.Root, cfg, false)
+		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pushTarget(), false)
+		return a.filesPush(ctx, runtime.Root, cfg, useSCP)
 	case "post-push":
 		return a.postPush(ctx, runtime.Root, cfg)
 	case "sanitize-config":

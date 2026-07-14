@@ -36,6 +36,8 @@ ddev push <provider> -y
 
 DDEV owns the lifecycle output for authentication, database import, file import, and hooks. Do not manually reproduce provider steps.
 
+Native DDEV provider callbacks use the same automatic rsync detection and scp/tar fallback as direct pulls and pushes. If either the DDEV host or remote host lacks rsync, the database transfer uses scp and file transfer uses tar over SSH.
+
 ## Values Users Provide
 
 The CLI handles DDEV detection and provider command wiring. Focus on values DDEV cannot infer:

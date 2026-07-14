@@ -138,7 +138,7 @@ func (a *App) preflightProviderAuth(ctx context.Context, projectRoot string, cfg
 		ProjectRoot:    projectRoot,
 		Mode:           modeDDEV,
 		NeedSSH:        true,
-		NeedRsync:      true,
+		NeedRsync:      false, // provider callbacks select rsync or scp/tar after authentication
 		NeedLocalWPCLI: true,
 		Remotes:        remotes,
 	}, cfg)
