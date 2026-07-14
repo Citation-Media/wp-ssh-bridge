@@ -49,16 +49,19 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	dumpID := randomID()
 	remoteDump := fmt.Sprintf("%s/ddev-%s-%s-%s.sql", remoteTmp, projectName, time.Now().Format("20060102150405"), dumpID)
 	remoteDumpGZ := remoteDump + ".gz"
+	mariaDBSetup, mariaDBCleanup := remoteMariaDBCompatibilityCommands(remoteTmp, dumpID, a.needsRemoteMariaDBCompatibility(target))
 
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
-		fmt.Sprintf("cleanup() { rm -f %s %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
+		fmt.Sprintf("cleanup() { rm -f %s %s || true; %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ), mariaDBCleanup),
 		"trap cleanup INT TERM HUP EXIT;",
 		"cd " + shellQuote(remoteWP) + ";",
 		remoteWPCLIPrelude(target),
+		mariaDBSetup,
 		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 		fmt.Sprintf("wp_ssh_wp --allow-root db export %s;", shellQuote(remoteDump)),
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
+		mariaDBCleanup + ";",
 		"trap - EXIT",
 	}, " ")
 	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
@@ -66,8 +69,26 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	}); err != nil {
 		return err
 	}
+	remoteDumpCleanupNeeded := true
+	defer func() {
+		if !remoteDumpCleanupNeeded {
+			return
+		}
+		if err := a.removeRemoteDatabaseDump(context.Background(), projectRoot, target, remoteDump, remoteDumpGZ); err != nil {
+			a.UI.Warning("Could not remove remote database export: %s", err)
+		}
+	}()
 
 	localDump := filepath.Join(downloadDir, "db.sql.gz")
+	if err := os.Remove(localDump); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	localDumpDownloadComplete := false
+	defer func() {
+		if !localDumpDownloadComplete {
+			_ = os.Remove(localDump)
+		}
+	}()
 	if useSCP {
 		args := append(scpArgs(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
 		if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
@@ -83,10 +104,21 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 			return err
 		}
 	}
+	localDumpDownloadComplete = true
 
-	return a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
-		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
-	})
+	if err := a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
+		return a.removeRemoteDatabaseDump(ctx, projectRoot, target, remoteDump, remoteDumpGZ)
+	}); err != nil {
+		return err
+	}
+	remoteDumpCleanupNeeded = false
+	return nil
+}
+
+// removeRemoteDatabaseDump deletes the unique transfer files without relying on
+// a successful export, upload, or download path.
+func (a *App) removeRemoteDatabaseDump(ctx context.Context, projectRoot string, target RemoteTarget, remoteDump string, remoteDumpGZ string) error {
+	return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, fmt.Sprintf("rm -f %s %s", shellQuote(remoteDump), shellQuote(remoteDumpGZ)))
 }
 
 // filesPull syncs the remote WordPress tree into the local project.

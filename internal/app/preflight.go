@@ -11,13 +11,14 @@ import (
 )
 
 type preflightRemoteNeeds struct {
-	Label            string
-	Target           RemoteTarget
-	NeedWPCLI        bool
-	NeedPathReadable bool
-	NeedPathWritable bool
-	AllowCreatePath  bool
-	NeedTmpWritable  bool
+	Label                         string
+	Target                        RemoteTarget
+	NeedWPCLI                     bool
+	NeedMariaDBCompatibilityCheck bool
+	NeedPathReadable              bool
+	NeedPathWritable              bool
+	AllowCreatePath               bool
+	NeedTmpWritable               bool
 }
 
 type preflightPlan struct {
@@ -50,11 +51,12 @@ func (a *App) preflightPull(ctx context.Context, adapter runtimeAdapter, cfg Con
 		NeedLocalWPCLI: shouldImportDB,
 		Remotes: []preflightRemoteNeeds{
 			{
-				Label:            "pull source",
-				Target:           cfg.pullTarget(),
-				NeedWPCLI:        !opts.SkipDB,
-				NeedPathReadable: true,
-				NeedTmpWritable:  !opts.SkipDB,
+				Label:                         "pull source",
+				Target:                        cfg.pullTarget(),
+				NeedWPCLI:                     !opts.SkipDB,
+				NeedMariaDBCompatibilityCheck: !opts.SkipDB,
+				NeedPathReadable:              true,
+				NeedTmpWritable:               !opts.SkipDB,
 			},
 		},
 	}
@@ -73,10 +75,11 @@ func (a *App) preflightPush(ctx context.Context, root string, mode runtimeMode, 
 	}
 
 	remote := preflightRemoteNeeds{
-		Label:           "push target",
-		Target:          cfg.pushTarget(),
-		NeedWPCLI:       !opts.SkipDB,
-		NeedTmpWritable: !opts.SkipDB,
+		Label:                         "push target",
+		Target:                        cfg.pushTarget(),
+		NeedWPCLI:                     !opts.SkipDB,
+		NeedMariaDBCompatibilityCheck: !opts.SkipDB,
+		NeedTmpWritable:               !opts.SkipDB,
 	}
 	if !opts.SkipDB {
 		remote.NeedPathReadable = true
@@ -154,6 +157,16 @@ func (a *App) runPreflight(ctx context.Context, plan preflightPlan, cfg Config) 
 				return err
 			}
 		}
+		if remote.NeedMariaDBCompatibilityCheck {
+			needsCompatibility, err := a.detectRemoteMariaDBCompatibility(ctx, plan.ProjectRoot, remote.Target)
+			if err != nil {
+				return fmt.Errorf("fatal: %s database client compatibility check failed: %w", remote.Label, err)
+			}
+			a.setRemoteMariaDBCompatibility(remote.Target, needsCompatibility)
+			if needsCompatibility {
+				a.UI.Success("%s MariaDB client compatibility enabled (temporary mysql/mysqldump aliases)", sentenceCase(remote.Label))
+			}
+		}
 	}
 	if plan.NeedLocalWPCLI {
 		if err := a.ensureLocalWPCLI(ctx, plan.ProjectRoot, cfg); err != nil {
@@ -161,6 +174,47 @@ func (a *App) runPreflight(ctx context.Context, plan preflightPlan, cfg Config) 
 		}
 	}
 	return nil
+}
+
+// detectRemoteMariaDBCompatibility identifies hosts that expose MariaDB through the
+// legacy mysql and mysqldump names only. Current WP-CLI selects the MariaDB names on
+// these hosts, so database commands need temporary compatibility symlinks.
+func (a *App) detectRemoteMariaDBCompatibility(ctx context.Context, projectRoot string, target RemoteTarget) (bool, error) {
+	output, err := a.outputSSHSilent(ctx, projectRoot, target, remoteMariaDBCompatibilityCheckCommand())
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(output) == "required", nil
+}
+
+// remoteMariaDBCompatibilityCheckCommand prints a marker only for the client
+// layout where WP-CLI needs MariaDB compatibility aliases.
+func remoteMariaDBCompatibilityCheckCommand() string {
+	return strings.Join([]string{
+		"set -eu;",
+		"if command -v mysql >/dev/null 2>&1 && mysql --version 2>/dev/null | grep -qi 'MariaDB' && { ! command -v mariadb >/dev/null 2>&1 || { ! command -v mariadb-dump >/dev/null 2>&1 && command -v mysqldump >/dev/null 2>&1; }; }; then",
+		"printf 'required\\n';",
+		"fi",
+	}, " ")
+}
+
+// setRemoteMariaDBCompatibility preserves the preflight result for the database
+// operation that follows in the same CLI process.
+func (a *App) setRemoteMariaDBCompatibility(target RemoteTarget, required bool) {
+	if a.remoteMariaDBCompatibility == nil {
+		a.remoteMariaDBCompatibility = map[string]bool{}
+	}
+	a.remoteMariaDBCompatibility[remoteTargetKey(target)] = required
+}
+
+// needsRemoteMariaDBCompatibility returns the preflight result for this SSH target.
+func (a *App) needsRemoteMariaDBCompatibility(target RemoteTarget) bool {
+	return a.remoteMariaDBCompatibility[remoteTargetKey(target)]
+}
+
+// remoteTargetKey distinguishes cached capability checks for separate SSH targets.
+func remoteTargetKey(target RemoteTarget) string {
+	return strings.Join([]string{target.User, target.Host, target.Port, target.RemotePath, target.RemoteTmpDir}, "\x00")
 }
 
 func (a *App) checkLocalEnvironment(plan preflightPlan) error {
