@@ -70,6 +70,13 @@ push_url: "https://staging.example.com"
 local_wp_path: "."
 clone_images: false
 skip_search_replace: false
+
+# Optional. Pins the runtime instead of detecting it: ddev, wp-env, or standalone.
+# Also available as --integration and WP_SSH_INTEGRATION. A pin is strict and fails
+# rather than silently falling back, so use it when a repo is ambiguous. A one-shot
+# --integration flag on pull/push is not persisted; only `init --integration` writes
+# this key.
+integration: "standalone"
 ```
 
 Config is the base layer. Environment variables override config. CLI flags override both.

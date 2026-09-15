@@ -27,8 +27,13 @@ func (a *App) ensureLocalWPCLI(ctx context.Context, projectRoot string, cfg Conf
 }
 
 func (a *App) ensureLocalWPCLIAvailable(ctx context.Context, projectRoot string, cfg Config) error {
-	if _, ok := ddevDescribe(projectRoot); ok {
+	if isDDEVRoot(projectRoot) {
 		return a.runExternal(ctx, projectRoot, "ddev", "wp", "--allow-root", "cli", "version")
+	}
+
+	if isWPEnvRoot(projectRoot) {
+		name, base := wpEnvCommand(projectRoot)
+		return a.runExternal(ctx, projectRoot, name, wpEnvArgs(base, "run", "cli", "wp", "--allow-root", "cli", "version")...)
 	}
 
 	phar := localWPCLIPharPath(projectRoot)

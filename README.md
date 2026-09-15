@@ -2,7 +2,9 @@
 
 `wp-ssh-bridge` is a Go CLI for pulling and pushing WordPress databases and full application files through SSH-only environments. It runs as a standalone host-side binary and uses a generated DDEV provider layer only when it detects a DDEV project.
 
-The CLI detects DDEV mode by running `ddev describe -j` from the current directory. If that succeeds, `pull` and `push` refresh generated provider files and run the same direct Go pipeline used by standalone mode, using `ddev wp` only for local WP-CLI operations. The generated provider remains available for explicit `ddev pull` and `ddev push` usage.
+The CLI detects DDEV mode by finding `.ddev/config.yaml` above the current directory and confirming it with `ddev describe -j`. If that succeeds, `pull` and `push` refresh generated provider files and run the same direct Go pipeline used by standalone mode, using `ddev wp` only for local WP-CLI operations. The generated provider remains available for explicit `ddev pull` and `ddev push` usage.
+
+If DDEV detection fails and the project has a `.wp-env.json` or `.wp-env.override.json`, the CLI reads `wp-env status --json` and runs in wp-env mode. A `node_modules/.bin/wp-env` alone is not a marker — many DDEV and standalone repos carry `@wordpress/env` as a dev dependency. See [wp-env mode](#wp-env-mode). Otherwise it runs in standalone mode against the local host.
 
 ## Use Per Project
 
@@ -49,7 +51,7 @@ Run this from a DDEV WordPress project to create provider files:
 wp-ssh-bridge init
 ```
 
-The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
+The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In wp-env and standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
 
 When it runs inside a DDEV project, it reads `ddev describe -j` and `.ddev/config.yaml` to default the provider name, local URL, docroot, and temp directories before writing config.
 
@@ -127,7 +129,7 @@ wp-ssh-bridge pull --silent --user deploy --host example.com --remote-path /home
 
 Use `migrate` when pulling a WordPress site as a migration target instead of a local development copy. Migration mode still exports/imports the database, syncs files, and runs configured URL search-replace, but it skips DDEV/dev rewrites and blocked-plugin cleanup.
 
-Migration is standalone-only: it moves a live site host-to-host into a plain target directory. `migrate` exits with an error when run against a DDEV project root — use the normal DDEV pull for local DDEV onboarding.
+Migration is standalone-only: it moves a live site host-to-host into a plain target directory. `migrate` exits with an error when run against a DDEV or wp-env project root — use the normal pull for local onboarding.
 
 ```bash
 wp-ssh-bridge migrate --silent \
@@ -168,9 +170,98 @@ wp-ssh-bridge push --silent \
 
 Push uploads/imports the local database with WP-CLI and rsyncs the full local WordPress app to the target. It excludes `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and the CLI scratch directory (`.wp-ssh/`) so local-only state and the downloaded database dump are never pushed.
 
+## wp-env Mode
+
+[`@wordpress/env`](https://developer.wordpress.org/block-editor/reference-guides/packages/packages-env/) keeps WordPress and MySQL inside Docker. The database is reachable only from the container network and the host MySQL port is randomized on every start, so local WP-CLI runs through `wp-env run cli` instead of a host `wp`.
+
+Run setup and pull from the wp-env project root:
+
+```bash
+wp-ssh-bridge init
+```
+
+```bash
+wp-ssh-bridge pull --silent
+```
+
+The environment must be started first (`wp-env start`); preflight fails with an actionable message when it is stopped.
+
+What differs from standalone mode:
+
+- Local WP-CLI runs as `wp-env run cli wp --path=/var/www/html`. wp-env writes its progress banners to stderr, so WP-CLI output stays parseable.
+- The local WordPress root and URL are read from `wp-env status --json` on demand. The install path contains a machine-specific hash, so it is never written into `.wp-ssh.yaml`, which stays safe to commit.
+- The database dump is written into `<install path>/WordPress/.wp-ssh/.downloads/` because that tree is what wp-env mounts at `/var/www/html`. The import then runs in the container against the mapped path.
+- `wp-config.php` is preserved, not pulled. wp-env generates it with working local database credentials and rewrites it on every start, so the CLI leaves its URL constants alone.
+- The experimental Playground runtime (`wp-env start --runtime=playground`) has no `wp-env run` command, so preflight rejects it. Use the Docker runtime.
+- `migrate` is rejected in wp-env projects for the same reason as in DDEV projects: the import would go to the container database instead of the migration target.
+- `push` is rejected in wp-env projects. The local tree is a wp-env-managed core install, uploads are excluded from pulls by default, and every mounted `plugins`/`themes`/`mappings` path is empty on the host — pushing it with `rsync --delete` would erase those files on the target. Push from a standalone checkout instead.
+- Blocked-plugin cleanup is skipped when `.wp-env.json` declares mounts, because `wp plugin delete` runs inside the container where those mounts are your working tree.
+- The staged database dump is removed after a successful import and a deny-all `.htaccess` is written beside it, because the scratch directory is inside the tree wp-env serves over HTTP.
+
+If `.wp-env.json` declares `plugins`, `themes`, or `mappings`, wp-env bind-mounts those source directories over `wp-content`. File pulls exclude those mounted paths automatically — they would be shadowed by the mounts, and `rsync --delete` against a live mountpoint can fail — and the CLI warns before pulling. Use `--skip-files` to sync only the database:
+
+```bash
+wp-ssh-bridge pull --silent --skip-files
+```
+
+### Persisting Configuration
+
+`wp-ssh-bridge init` writes `.wp-ssh.yaml` at the wp-env project root. This is the wp-env equivalent of `.ddev/wp-ssh.yaml` and uses the same precedence: config file, then environment variables, then CLI flags. Because the wp-env install path and URL are resolved at run time, the file holds only portable values and can be committed:
+
+```yaml
+pull_user: "deploy"
+pull_host: "production.example.com"
+pull_remote_path: "/home/production/public_html"
+clone_images: false
+```
+
+With that in place, `wp-ssh-bridge pull --silent` needs no arguments. Set `local_wp_path` or `local_url` only to override the values wp-env reports.
+
+### Pinning The Integration
+
+Runtime detection is automatic, but it can be pinned when a project is ambiguous — for example a repository that carries both `.ddev/config.yaml` and `.wp-env.json` — or when a silent fallback to standalone mode would be wrong:
+
+```yaml
+integration: "wp-env"
+```
+
+The same value is available as `--integration` and `WP_SSH_INTEGRATION`, in the usual precedence order (flag, environment, config file). Valid values are `ddev`, `wp-env`, and `standalone`.
+
+A pin is strict. If it names a runtime that cannot be resolved, the CLI fails instead of quietly falling back to standalone mode and syncing into a different local WordPress root:
+
+```text
+Error: integration is pinned to wp-env, but no .wp-env.json was found above the working directory
+```
+
+Pinning is about determinism, not speed. `integration: standalone` does skip both probes (roughly 0.6s to 0.03s per invocation), but `integration: wp-env` is no faster than auto-detection, because `wp-env status --json` is still needed for the install path and to confirm the environment is running.
+
+### Faster Invocations
+
+The CLI resolves wp-env through a project-local `node_modules/.bin/wp-env` when present, then `wp-env` on `PATH`, then `npx --yes @wordpress/env`. The `npx` fallback resolves the package on every run and roughly doubles startup time, so add wp-env as a dev dependency:
+
+```bash
+npm install --save-dev @wordpress/env
+```
+
+Runtime detection is gated on filesystem markers, so no `ddev describe` or `wp-env status` subprocess runs for a project that cannot be that kind of project. In a wp-env project the remaining startup cost is almost entirely `wp-env status --json` itself, which is Node.js start-up rather than anything the CLI controls.
+
+### Running Pull Automatically
+
+wp-env has no pull/push lifecycle to hook into the way DDEV does, so no provider files are generated. It does support [`lifecycleScripts`](https://developer.wordpress.org/block-editor/reference-guides/packages/packages-env/) — `afterStart`, `afterReset`, `afterCleanup`, and `afterDestroy` — which can run the CLI for you:
+
+```json
+{
+  "lifecycleScripts": {
+    "afterStart": "wp-ssh-bridge pull --silent --skip-files"
+  }
+}
+```
+
+Use this deliberately. `afterStart` runs on every start, not only on a fresh environment, so a full pull on each `wp-env start` is usually the wrong trade. Prefer `afterReset`, or keep the pull an explicit command.
+
 ## WP-CLI Compatibility
 
-Pull and push preflight checks verify WP-CLI before database or file changes start. The CLI checks the local host in standalone mode, the DDEV web container in DDEV mode, the pull source, and the push target when configured.
+Pull and push preflight checks verify WP-CLI before database or file changes start. The CLI checks the local host in standalone mode, the DDEV web container in DDEV mode, the wp-env `cli` container in wp-env mode, the pull source, and the push target when configured.
 
 If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` to the target's configured temporary directory as `wp-ssh-bridge-wp-cli.phar`, marks it executable, and tests it. If the fallback still cannot run directly or through `php`, the operation exits with a fatal error.
 
@@ -190,7 +281,7 @@ The temporary aliases are removed on success and by the remote cleanup trap on f
 
 ## Configuration
 
-Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in standalone mode.
+Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in wp-env and standalone mode.
 
 Configuration can come from three places, in this order:
 
@@ -292,7 +383,7 @@ Regenerate provider files after updating the CLI:
 wp-ssh-bridge provider install
 ```
 
-Provider generation is DDEV-only. Standalone mode uses the same Go implementation directly and does not need provider YAML.
+Provider generation is DDEV-only. wp-env and standalone mode use the same Go implementation directly and do not need provider YAML.
 
 Print generated YAML without writing files:
 

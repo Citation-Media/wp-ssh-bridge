@@ -42,6 +42,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	if err := os.MkdirAll(downloadDir, 0o755); err != nil {
 		return err
 	}
+	if err := protectDownloadsDir(projectRoot, downloadDir); err != nil {
+		return err
+	}
 
 	remoteTmp := trimTrailingSlash(defaultString(target.RemoteTmpDir, "/tmp"))
 	remoteWP := trimTrailingSlash(target.RemotePath)
@@ -354,6 +357,15 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		excludes = append(excludes, "wp-content/uploads/")
 	}
 
+	// wp-env bind-mounts plugins/themes/mappings entries over wp-content. Pulled files in
+	// those paths would be shadowed by the mounts, and rsync --delete against a live
+	// mountpoint directory can fail with EBUSY, so both transports skip them.
+	if isWPEnvRoot(projectRoot) {
+		if status, ok := wpEnvStatus(projectRoot); ok {
+			excludes = append(excludes, wpEnvContainerMounts(status.InstallPath)...)
+		}
+	}
+
 	if migrate {
 		return excludes, nil
 	}
@@ -386,6 +398,13 @@ func rsyncArchiveArgs() []string {
 
 // updateWPConfigURLConstants keeps hardcoded WordPress URL constants from overriding local URLs.
 func (a *App) updateWPConfigURLConstants(projectRoot string, cfg Config, mode runtimeMode) error {
+	// wp-env generates wp-config.php with WP_HOME and WP_SITEURL already pointing at the
+	// local environment, and rewrites the file on every start, so edits here are both
+	// unnecessary and discarded.
+	if mode == modeWPEnv {
+		return nil
+	}
+
 	wpConfig := filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")
 	contents, err := os.ReadFile(wpConfig)
 	if errors.Is(err, os.ErrNotExist) {
@@ -976,6 +995,18 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		}
 	}
 
+	// WP-CLI runs inside the wp-env container, where only the mounted WordPress tree is
+	// visible. A local root outside that tree cannot be mapped, and the container-path
+	// fallback would silently delete plugins from the wp-env install instead.
+	if isWPEnvRoot(projectRoot) {
+		if status, ok := wpEnvStatus(projectRoot); ok {
+			local := localWPRoot(projectRoot, cfg)
+			if _, ok := wpEnvContainerPath(status, local); !ok {
+				return fmt.Errorf("local WordPress path %s is outside the wp-env tree at %s; wp plugin commands would run against the wp-env install instead. Clear the WordPress root override, or pass --integration standalone to use a host WP-CLI", local, status.wordPressRoot())
+			}
+		}
+	}
+
 	return a.runStepResult("Cleaning up local-only blocked plugins", func() (string, error) {
 		plugins, err := readPluginList(projectRoot, cfg)
 		if err != nil {
@@ -993,6 +1024,16 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		targets := blockedPluginRemovalTargets(plugins, statuses)
 		if len(targets) == 0 {
 			return "No local-only blocked plugins found", nil
+		}
+
+		// In wp-env, mounted plugin and theme directories are the developer's own working
+		// tree, and `wp plugin delete` runs inside the container where those mounts live.
+		// Deleting through it would remove host source files, so skip the step entirely.
+		if isWPEnvRoot(projectRoot) {
+			if mounts := wpEnvMountedSources(projectRoot); len(mounts) > 0 {
+				a.UI.Warning("Skipping blocked-plugin removal: wp-env mounts %s over wp-content, and deleting through the container could remove your source files.", strings.Join(mounts, " and "))
+				return "Blocked-plugin removal skipped for mounted wp-env sources", nil
+			}
 		}
 
 		if err := a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses); err != nil {
@@ -1033,14 +1074,34 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error 
 	}
 
 	importPath := tempPath
-	if _, ok := ddevDescribe(root); ok {
+	if isDDEVRoot(root) {
 		if containerPath, ok := containerProjectPath(root, tempPath); ok {
 			importPath = containerPath
 		}
+	} else if isWPEnvRoot(root) {
+		status, ok := wpEnvStatus(root)
+		if !ok {
+			return errors.New("wp-env status is unavailable, so the database dump cannot be mapped into the container; start the environment with wp-env start")
+		}
+		// Handing a host path to a command that runs inside the container yields a bare
+		// file-not-found after the whole database has already been downloaded.
+		containerPath, ok := wpEnvContainerPath(status, tempPath)
+		if !ok {
+			return fmt.Errorf("database dump at %s is outside the wp-env WordPress tree at %s, so the container cannot read it", tempPath, status.wordPressRoot())
+		}
+		importPath = containerPath
 	}
-	return a.runStep("Importing database into local WordPress", "Local database imported", func() error {
+	if err := a.runStep("Importing database into local WordPress", "Local database imported", func() error {
 		return a.runWPWithFilteredWarnings(ctx, root, cfg, "db", "import", importPath)
-	})
+	}); err != nil {
+		return err
+	}
+	// The dump is a full production database. Do not leave it behind after a successful
+	// import; in wp-env mode the scratch directory is inside the served document root.
+	if err := os.Remove(dumpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		a.UI.Warning("Could not remove local database export: %s", err)
+	}
+	return nil
 }
 
 // readPluginList returns embedded default plugins plus an optional custom block list.
@@ -1238,11 +1299,22 @@ func (a *App) wpOutputSilent(ctx context.Context, projectRoot string, cfg Config
 	return a.outputExternalWithStderr(ctx, projectRoot, name, io.Discard, fullArgs...)
 }
 
-// localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds.
+// localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds, and
+// wp-env's cli container when the project is a wp-env project.
 func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []string) {
-	if _, ok := ddevDescribe(projectRoot); ok {
+	if isDDEVRoot(projectRoot) {
 		fullArgs := append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
 		return "ddev", fullArgs
+	}
+	if isWPEnvRoot(projectRoot) {
+		if status, ok := wpEnvStatus(projectRoot); ok {
+			name, base := wpEnvCommand(projectRoot)
+			containerPath := wpEnvContainerRoot
+			if mapped, ok := wpEnvContainerPath(status, localWPRoot(projectRoot, cfg)); ok {
+				containerPath = mapped
+			}
+			return name, wpEnvRunCLIArgs(base, containerPath, args...)
+		}
 	}
 	name, baseArgs := localWPCLICommand(projectRoot)
 	fullArgs := append(baseArgs, "--path="+localWPRoot(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes")
@@ -1298,6 +1370,8 @@ func commandLabel(name string) string {
 		return "rsync"
 	case "ddev":
 		return "ddev"
+	case "wp-env", "npx":
+		return "wp-env"
 	case "wp":
 		return "wp"
 	case "php", wpCLIPharName:

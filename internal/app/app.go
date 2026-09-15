@@ -88,6 +88,7 @@ Common flags:
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
+  --integration string       Pin the runtime: ddev, wp-env, or standalone
 
 Migration flags:
   --db-host string           Migration target DB host
@@ -127,7 +128,10 @@ func (a *App) commandInit(args []string) error {
 		return err
 	}
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 
 	if runtime.Mode == modeDDEV && runtime.DDEV.Type != "" && runtime.DDEV.Type != "wordpress" {
@@ -145,6 +149,9 @@ func (a *App) commandInit(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
+	if opts.Integration != "" {
+		cfg.Integration = opts.Integration
+	}
 
 	if !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
@@ -175,7 +182,10 @@ func (a *App) commandPull(args []string) error {
 		return err
 	}
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
@@ -183,7 +193,7 @@ func (a *App) commandPull(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
-	if adapter.Mode() == modeStandalone && !opts.Silent {
+	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPullConfig(&cfg); err != nil {
 			return err
@@ -207,7 +217,10 @@ func (a *App) commandMigrate(args []string) error {
 	}
 	opts.Migrate = true
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 	if err := ensureMigrateAdapterSupported(adapter); err != nil {
 		return err
@@ -218,7 +231,7 @@ func (a *App) commandMigrate(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
-	if adapter.Mode() == modeStandalone && !opts.Silent {
+	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPullConfig(&cfg); err != nil {
 			return err
@@ -237,13 +250,28 @@ func (a *App) commandMigrate(args []string) error {
 	return a.runPullPipeline(context.Background(), adapter, cfg, opts)
 }
 
-// ensureMigrateAdapterSupported blocks migrate in DDEV projects. migrate is a live
-// host-to-host move into a standalone target: the DDEV adapter would route the
-// database import through `ddev wp` into the local container DB instead of the
+// ensurePushAdapterSupported blocks push in wp-env projects. The local WordPress tree is a
+// wp-env-managed core install, not a copy of the target: uploads are excluded from pulls by
+// default, and every plugins/themes/mappings entry in .wp-env.json is a Docker bind mount
+// that exists on the host only as an empty directory. Pushing that tree with rsync --delete
+// would erase those paths on the remote.
+func ensurePushAdapterSupported(adapter runtimeAdapter) error {
+	if adapter.Mode() == modeWPEnv {
+		return errors.New("push does not support wp-env projects; the local WordPress tree is managed by wp-env and its mounted plugin, theme, and upload directories are empty on the host, so pushing it would delete those files on the target. Push from a standalone checkout instead")
+	}
+	return nil
+}
+
+// ensureMigrateAdapterSupported blocks migrate in DDEV and wp-env projects. migrate is a
+// live host-to-host move into a standalone target: those adapters would route the database
+// import through `ddev wp` or `wp-env run cli` into the local container DB instead of the
 // injected target credentials, silently migrating to the wrong database.
 func ensureMigrateAdapterSupported(adapter runtimeAdapter) error {
-	if adapter.Mode() == modeDDEV {
+	switch adapter.Mode() {
+	case modeDDEV:
 		return errors.New("migrate does not support DDEV projects; it moves a live WordPress site host-to-host into a standalone target. Run migrate against a plain destination directory, not a DDEV project root")
+	case modeWPEnv:
+		return errors.New("migrate does not support wp-env projects; it moves a live WordPress site host-to-host into a standalone target. Run migrate against a plain destination directory, not a wp-env project root")
 	}
 	return nil
 }
@@ -258,8 +286,14 @@ func (a *App) commandPush(args []string) error {
 		return errors.New("--skip-import only applies to pull")
 	}
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
+	if err := ensurePushAdapterSupported(adapter); err != nil {
+		return err
+	}
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
 	if err != nil {
 		return err
@@ -267,7 +301,7 @@ func (a *App) commandPush(args []string) error {
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
 	cfg = opts.applyGenericAsPush(cfg)
-	if adapter.Mode() == modeStandalone && !opts.Silent {
+	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPushConfig(&cfg); err != nil {
 			return err
@@ -311,7 +345,10 @@ func (a *App) commandProviderInstall(args []string) error {
 		return err
 	}
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, "", opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider install requires DDEV mode; `ddev describe -j` did not succeed")
@@ -367,7 +404,10 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		return err
 	}
 
-	runtime := a.resolveRuntime(opts.ProjectRoot)
+	runtime, err := a.resolveRuntime(opts.ProjectRoot, "", opts.ConfigFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 	if runtime.Mode != modeDDEV {
 		return errors.New("provider runtime commands require DDEV mode; `ddev describe -j` did not succeed")
@@ -436,11 +476,11 @@ func (a *App) commandPlugins(args []string) error {
 		return err
 	}
 
-	projectRoot, err := a.resolveProjectRoot(opts.ProjectRoot)
+	projectRoot, err := a.resolveProjectRoot(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
-	cfg, err := loadConfigFromRoot(projectRoot, opts.ConfigFile)
+	cfg, err := loadConfigFromRoot(projectRoot, opts.ConfigFile, opts.Integration)
 	if err != nil {
 		return err
 	}
@@ -471,6 +511,7 @@ func (a *App) commandDomainsAdd(args []string) error {
 	newValue := fs.String("new", "", "target domain or URL")
 	direction := fs.String("direction", "both", "pull, push, or both")
 	binary := fs.String("binary", defaultBinaryPath(), "binary path used by generated provider files")
+	integration := fs.String("integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -480,7 +521,10 @@ func (a *App) commandDomainsAdd(args []string) error {
 		return err
 	}
 
-	runtime := a.resolveRuntime(*projectRoot)
+	runtime, err := a.resolveRuntime(*projectRoot, *integration, *configFile)
+	if err != nil {
+		return err
+	}
 	adapter := adapterForRuntime(runtime)
 	cfg, err := loadConfigForRuntime(runtime, *configFile)
 	if err != nil {
@@ -517,11 +561,15 @@ func (a *App) commandDomainsList(args []string) error {
 	fs.SetOutput(a.Stderr)
 	projectRoot := fs.String("project-root", "", "DDEV project root")
 	configFile := fs.String("config-file", "", "YAML config file path")
+	integration := fs.String("integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	runtime := a.resolveRuntime(*projectRoot)
+	runtime, err := a.resolveRuntime(*projectRoot, *integration, *configFile)
+	if err != nil {
+		return err
+	}
 	cfg, err := loadConfigForRuntime(runtime, *configFile)
 	if err != nil {
 		return err
@@ -565,21 +613,31 @@ func printDomainReplacements(writer io.Writer, label string, replacements []Doma
 	}
 }
 
-// resolveProjectRoot handles explicit roots and DDEV upward discovery.
-func (a *App) resolveProjectRoot(explicit string) (string, error) {
+// resolveProjectRoot handles explicit roots and upward discovery. Discovery goes through
+// detectRuntime so the resolved root can never diverge from the root every other command
+// resolves for the same working directory.
+func (a *App) resolveProjectRoot(explicit string, integration string, configFile string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
 	}
-	return findProjectRoot(a.WorkDir)
+	runtime, err := detectRuntime(a.WorkDir, integration, configFile)
+	if err != nil {
+		return "", err
+	}
+	if runtime.Mode != modeStandalone {
+		return runtime.Root, nil
+	}
+	return "", errors.New("no DDEV or wp-env project found; run from inside a project or pass --project-root")
 }
 
-// resolveRuntime chooses DDEV provider mode only when `ddev describe -j` succeeds.
-func (a *App) resolveRuntime(explicit string) runtimeContext {
+// resolveRuntime chooses the runtime mode, honoring an explicitly pinned integration and
+// reading a pinned integration from the explicitly selected config file.
+func (a *App) resolveRuntime(explicit string, integration string, configFile string) (runtimeContext, error) {
 	start := a.WorkDir
 	if explicit != "" {
 		start = explicit
 	}
-	return detectRuntime(start)
+	return detectRuntime(start, integration, configFile)
 }
 
 // loadConfigForRuntime reads the correct config source for DDEV or standalone mode.
@@ -597,8 +655,11 @@ func writeConfigForRuntime(runtime runtimeContext, explicitPath string, cfg Conf
 	return writeConfigFile(configPathForRuntime(runtime, explicitPath), cfg, defaults)
 }
 
-func loadConfigFromRoot(root string, explicitPath string) (Config, error) {
-	runtime := detectRuntime(root)
+func loadConfigFromRoot(root string, explicitPath string, integration string) (Config, error) {
+	runtime, err := detectRuntime(root, integration, explicitPath)
+	if err != nil {
+		return Config{}, err
+	}
 	return loadConfigForRuntime(runtime, explicitPath)
 }
 
@@ -694,7 +755,10 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 				return err
 			}
 		}
-		preserveLocalWPConfig := adapter.Mode() == modeStandalone && !opts.Migrate
+		// Only DDEV replaces wp-config.php from the remote and sanitizes it afterwards.
+		// Standalone and wp-env keep the local file, which already carries working local
+		// database credentials.
+		preserveLocalWPConfig := adapter.Mode() != modeDDEV && !opts.Migrate
 		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Migrate, opts.CleanTarget, useSCP); err != nil {
 			return err
 		}
@@ -796,6 +860,7 @@ type configOptions struct {
 	MigrateDBUser       string
 	MigrateDBPassword   string
 	MigrateDBPrefix     string
+	Integration         string
 }
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
@@ -830,6 +895,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.BoolVar(&opts.CloneImages, "clone-images", false, "include wp-content/uploads")
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
+	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	if name == "migrate" {
 		fs.StringVar(&opts.MigrateDBHost, "db-host", "", "migration target DB host")
@@ -901,6 +967,9 @@ func parseProviderInstallCommand(args []string, stderr io.Writer) (providerInsta
 
 // apply overlays command-line flags onto config values.
 func (opts configOptions) apply(cfg Config) Config {
+	// Integration is deliberately not copied into cfg here: apply runs on every pull and
+	// push, and those write the config back, which would silently persist a one-shot
+	// --integration flag. commandInit sets it explicitly instead.
 	if opts.Provider != "" {
 		cfg.Provider = opts.Provider
 	}
@@ -995,6 +1064,7 @@ type runtimeOptions struct {
 	ProjectRoot   string
 	ConfigFile    string
 	WordPressRoot string
+	Integration   string
 }
 
 // parseRuntimeCommand accepts a project root and optional WordPress root argument.
@@ -1004,6 +1074,7 @@ func parseRuntimeCommand(name string, args []string, stderr io.Writer) (runtimeO
 	fs.SetOutput(stderr)
 	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
+	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
