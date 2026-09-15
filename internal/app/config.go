@@ -36,6 +36,7 @@ type Config struct {
 	MigrateDBUser          string
 	MigrateDBPassword      string
 	MigrateDBPrefix        string
+	Integration            string
 }
 
 // DomainReplacement stores an old-to-new WordPress URL/domain replacement pair.
@@ -168,6 +169,8 @@ func readConfigFile(path string) (Config, error) {
 			cfg.PluginRemoveFile = value
 		case "local_url":
 			cfg.LocalURL = value
+		case "integration":
+			cfg.Integration = value
 		case "skip_search_replace":
 			cfg.SkipSearchReplace = parseBool(value)
 		case "migrate_db_host":
@@ -300,6 +303,7 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeBoolValue(&body, "clone_images", cfg.CloneImages, defaults.CloneImages)
 	writeStringValue(&body, "plugin_remove_file", cfg.PluginRemoveFile, defaults.PluginRemoveFile)
 	writeStringValue(&body, "local_url", cfg.LocalURL, defaults.LocalURL)
+	writeStringValue(&body, "integration", cfg.Integration, defaults.Integration)
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
@@ -577,6 +581,9 @@ func (cfg Config) envArgs() string {
 
 // mergeConfig overlays non-zero values while preserving explicit false booleans from the base.
 func mergeConfig(base Config, overlay Config) Config {
+	if overlay.Integration != "" {
+		base.Integration = overlay.Integration
+	}
 	if overlay.Provider != "" {
 		base.Provider = overlay.Provider
 	}

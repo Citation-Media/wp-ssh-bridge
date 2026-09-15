@@ -16,10 +16,14 @@ type runtimeAdapter interface {
 }
 
 func adapterForRuntime(runtime runtimeContext) runtimeAdapter {
-	if runtime.Mode == modeDDEV {
+	switch runtime.Mode {
+	case modeDDEV:
 		return ddevAdapter{runtime: runtime}
+	case modeWPEnv:
+		return wpEnvAdapter{standaloneAdapter{runtime: runtime}}
+	default:
+		return standaloneAdapter{runtime: runtime}
 	}
-	return standaloneAdapter{runtime: runtime}
 }
 
 type standaloneAdapter struct {
@@ -50,6 +54,19 @@ func (adapter standaloneAdapter) PreparePush(app *App, cfg Config, opts configOp
 
 func (adapter standaloneAdapter) PostPullHooks() []operationHook {
 	return nil
+}
+
+// wpEnvAdapter runs local WP-CLI through `wp-env run cli` because wp-env keeps the
+// database inside its Docker network, unreachable from the host. It behaves like the
+// standalone adapter apart from the mounted-sources warning; push never reaches
+// PreparePush because commandPush rejects wp-env via ensurePushAdapterSupported first.
+type wpEnvAdapter struct {
+	standaloneAdapter
+}
+
+func (adapter wpEnvAdapter) PreparePull(app *App, cfg Config, opts configOptions) error {
+	app.warnWPEnvMountedSources(adapter.runtime.Root, opts)
+	return writeConfigForRuntime(adapter.runtime, opts.ConfigFile, cfg)
 }
 
 type ddevAdapter struct {

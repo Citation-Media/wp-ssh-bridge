@@ -1,6 +1,6 @@
 ---
 name: wp-ssh-bridge-cli
-description: Guide for using the wp-ssh-bridge CLI to pull, migrate, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, migration mode, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, migrate, and push workflows.
+description: Guide for using the wp-ssh-bridge CLI to pull, migrate, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, wp-env (@wordpress/env) local environments, migration mode, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, migrate, and push workflows.
 ---
 
 # wp-ssh-bridge CLI
@@ -26,7 +26,7 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
    - Config mode for versioned project defaults.
 5. For push operations, explicitly verify the target host, remote path, and URL. Push overwrites the target database and files.
 
-Do not ask the user to choose DDEV mode versus standalone mode unless they are explicitly asking about mode behavior. The CLI detects that automatically. When working inside this repository, prefer checking the current `README.md`, `VERSION`, and `wp-ssh-bridge --help` output before giving version-specific commands.
+Do not ask the user to choose DDEV, wp-env, or standalone mode unless they are explicitly asking about mode behavior. The CLI detects that automatically. When working inside this repository, prefer checking the current `README.md`, `VERSION`, and `wp-ssh-bridge --help` output before giving version-specific commands.
 
 ## Install Or Update wp-ssh-bridge
 
@@ -46,12 +46,16 @@ Read the most specific workflow reference first. Read only one reference unless 
 | --- | --- |
 | Site migration, `wp-ssh-bridge migrate`, target DB credential injection, or host-to-host migration questions | `references/migration.md` |
 | DDEV projects, generated provider files, `ddev pull`, `ddev push`, or DDEV debugging | `references/ddev.md` |
+| wp-env / `@wordpress/env` projects, `.wp-env.json`, or `wp-env run cli` troubleshooting | `references/wp-env.md` |
 | Standalone usage, direct CLI commands, args/env/config mode, or non-DDEV troubleshooting | `references/general-usage.md` |
 
 ## Default Recommendations
 
 - For DDEV projects, always guide the user through the DDEV provider workflow: run `wp-ssh-bridge init` from the DDEV project root first, then run `ddev pull <provider> -y` or, after explicit push confirmation, `ddev push <provider> -y`. The default provider is `wp-ssh` unless the user chose another provider name during setup.
-- Use `wp-ssh-bridge pull --silent` and `wp-ssh-bridge push --silent` only for standalone workflows or when the user explicitly asks to bypass DDEV's native provider lifecycle.
+- Use `wp-ssh-bridge pull --silent` for wp-env and standalone workflows, and `wp-ssh-bridge push --silent` for standalone workflows or when the user explicitly asks to bypass DDEV's native provider lifecycle.
+- Never recommend push in a wp-env project: the CLI rejects it because the local tree is wp-env-managed and mounted plugin/theme/upload paths are empty on the host. Do not suggest `--integration standalone` to bypass that rejection — it would push those empty directories over the target. Read `references/wp-env.md`.
+- For wp-env projects, the environment must be started (`wp-env start`) before pull, and the Docker runtime is required. Read `references/wp-env.md` before recommending commands.
+- Runtime detection is automatic. Recommend the `integration` config key, `--integration` flag, or `WP_SSH_INTEGRATION` only to resolve ambiguity (a repo with both DDEV and wp-env config) or to make a wrong-mode fallback fail loudly. It is not a speed optimization except for `standalone`.
 - Prefer config mode for repeatable project setup, args mode for one-off overrides, and env mode for automation or secrets-adjacent values.
 - Keep project-local paths relative in config files so DDEV config can be versioned.
 - For multisite/custom domains, prefer `wp-ssh-bridge domains add --old production.example.com --new local.ddev.site` over manual YAML edits. This writes `pull_domain_replacements` and inverse `push_domain_replacements` by default.

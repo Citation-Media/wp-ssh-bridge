@@ -85,7 +85,7 @@ Safety:
 
 ## DDEV Projects
 
-`wp-ssh-bridge migrate` does not support DDEV projects and exits with an error when the project root is a DDEV project. Migration is a live host-to-host move into a standalone target, so it must run against a plain (non-DDEV) destination directory. Routing the database import through `ddev wp` would import into the local DDEV container database instead of the injected target credentials.
+`wp-ssh-bridge migrate` does not support DDEV or wp-env projects and exits with an error when the project root is either. Migration is a live host-to-host move into a standalone target, so it must run against a plain (non-DDEV) destination directory. Routing the database import through `ddev wp` or `wp-env run cli` would import into the local container database instead of the injected target credentials.
 
 If the user wants a DDEV development copy, use the normal DDEV pull workflow in `references/ddev.md`. Reserve `migrate` for standalone target directories. Do not recommend native `ddev pull <provider> --migrate`; migration is intentionally exposed only as the standalone `wp-ssh-bridge migrate` command.
 

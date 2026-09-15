@@ -30,6 +30,7 @@ type preflightPlan struct {
 	NeedLocalWPCLI        bool
 	NeedLocalPathReadable string
 	NeedLocalPathWritable string
+	Config                Config
 	Remotes               []preflightRemoteNeeds
 }
 
@@ -145,6 +146,7 @@ func (a *App) preflightProviderAuth(ctx context.Context, projectRoot string, cfg
 }
 
 func (a *App) runPreflight(ctx context.Context, plan preflightPlan, cfg Config) error {
+	plan.Config = cfg
 	if err := a.checkLocalEnvironment(plan); err != nil {
 		return err
 	}
@@ -233,6 +235,11 @@ func (a *App) checkLocalEnvironment(plan preflightPlan) error {
 			return err
 		}
 	}
+	if plan.Mode == modeWPEnv {
+		if err := a.checkWPEnvEnvironment(plan.ProjectRoot, plan.Config); err != nil {
+			return err
+		}
+	}
 	if plan.NeedLocalPathReadable != "" {
 		if err := a.checkLocalReadableDirectory(plan.NeedLocalPathReadable, plan.Operation); err != nil {
 			return err
@@ -264,6 +271,40 @@ func (a *App) checkDDEVEnvironment(projectRoot string) error {
 			return nil
 		}
 		return errors.New("ddev describe failed; run this command from a DDEV project root or start the project with ddev start")
+	})
+}
+
+// checkWPEnvEnvironment verifies the wp-env environment can run WP-CLI before any
+// database or file changes start.
+func (a *App) checkWPEnvEnvironment(projectRoot string, cfg Config) error {
+	return a.runStep("Checking wp-env project", "wp-env project available", func() error {
+		status, ok := wpEnvStatus(projectRoot)
+		if !ok {
+			return errors.New("wp-env status failed; run this command from a wp-env project root and start it with wp-env start")
+		}
+		if !status.supportsRun() {
+			return fmt.Errorf("wp-env is using the %q runtime, which does not support `wp-env run`; restart with the Docker runtime using wp-env start --runtime=docker", status.Runtime)
+		}
+		if !status.running() {
+			return fmt.Errorf("wp-env environment is %q; start it with wp-env start", defaultString(status.Status, "not running"))
+		}
+		root := status.wordPressRoot()
+		if root == "" {
+			return errors.New("wp-env did not report an install path; start the environment with wp-env start")
+		}
+		// wp-env mounts a `core` source in place of <installPath>/WordPress, so confirm the
+		// resolved mount actually exists before anything writes into it.
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			return fmt.Errorf("wp-env reported WordPress at %s, but that directory is not readable; run wp-env start to create it", root)
+		}
+		// Files sync to localWPRoot while WP-CLI runs against the mapped container path. If
+		// the configured root is outside the mounted tree those are two different WordPress
+		// installs, and every later step would silently operate on the wrong one.
+		local := localWPRoot(projectRoot, cfg)
+		if _, ok := wpEnvContainerPath(status, local); !ok {
+			return fmt.Errorf("local WordPress path %s is outside the wp-env tree at %s, so files and WP-CLI would target different installs; clear local_wp_path to use the wp-env root", local, root)
+		}
+		return nil
 	})
 }
 
