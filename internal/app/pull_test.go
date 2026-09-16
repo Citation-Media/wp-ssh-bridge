@@ -153,11 +153,11 @@ require_once ABSPATH . 'wp-settings.php';
 `
 
 	got := updateWPConfigDBCredentialsContents(input, Config{
-		MigrateDBName:     "target",
-		MigrateDBUser:     "target_user",
-		MigrateDBPassword: `pa'ss\word`,
-		MigrateDBHost:     "target-db:3306",
-		MigrateDBPrefix:   "wp_",
+		CloneDBName:     "target",
+		CloneDBUser:     "target_user",
+		CloneDBPassword: `pa'ss\word`,
+		CloneDBHost:     "target-db:3306",
+		CloneDBPrefix:   "wp_",
 	})
 	for _, want := range []string{
 		"define('DB_NAME', 'target');",
@@ -192,10 +192,10 @@ require_once ABSPATH . 'wp-settings.php';
 	// A "$"-bearing password must be written verbatim; the regex replacement must
 	// not treat "$k9" or "${x}" as capture-group references.
 	got := updateWPConfigDBCredentialsContents(input, Config{
-		MigrateDBName:     "target",
-		MigrateDBUser:     "target_user",
-		MigrateDBPassword: `xY$k9${x}Az`,
-		MigrateDBHost:     "target-db",
+		CloneDBName:     "target",
+		CloneDBUser:     "target_user",
+		CloneDBPassword: `xY$k9${x}Az`,
+		CloneDBHost:     "target-db",
 	})
 	if !strings.Contains(got, `define('DB_PASSWORD', 'xY$k9${x}Az');`) {
 		t.Fatalf("password with $ was corrupted:\n%s", got)
@@ -209,10 +209,10 @@ func TestUpdateWPConfigDBCredentialsContentsInsertsMissingValues(t *testing.T) {
 `
 
 	got := updateWPConfigDBCredentialsContents(input, Config{
-		MigrateDBName:     "target",
-		MigrateDBUser:     "target_user",
-		MigrateDBPassword: "secret",
-		MigrateDBHost:     "target-db",
+		CloneDBName:     "target",
+		CloneDBUser:     "target_user",
+		CloneDBPassword: "secret",
+		CloneDBHost:     "target-db",
 	})
 	if strings.Index(got, "define('DB_NAME'") > strings.Index(got, "stop editing") {
 		t.Fatalf("DB constants should be inserted before stop-editing marker:\n%s", got)
@@ -345,7 +345,7 @@ func TestBuildRsyncExcludesPreservesStandaloneWPConfig(t *testing.T) {
 	}
 }
 
-func TestBuildRsyncExcludesKeepsPluginsAndUploadsForMigration(t *testing.T) {
+func TestBuildRsyncExcludesKeepsPluginsAndUploadsForClone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".ddev"), 0o755); err != nil {
@@ -366,12 +366,12 @@ func TestBuildRsyncExcludesKeepsPluginsAndUploadsForMigration(t *testing.T) {
 		"wp-content/plugins/wpallexport/",
 	} {
 		if strings.Contains(excludes, unwanted) {
-			t.Fatalf("migration excludes should not contain %q:\n%s", unwanted, excludes)
+			t.Fatalf("clone excludes should not contain %q:\n%s", unwanted, excludes)
 		}
 	}
 	for _, want := range []string{".git/", ".ddev/", "wp-content/cache/"} {
 		if !strings.Contains(excludes, want) {
-			t.Fatalf("migration excludes missing safe local-only rule %q:\n%s", want, excludes)
+			t.Fatalf("clone excludes missing safe local-only rule %q:\n%s", want, excludes)
 		}
 	}
 }

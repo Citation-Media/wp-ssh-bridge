@@ -99,7 +99,7 @@ wp-ssh-bridge pull --silent --skip-files
 
 Blocked-plugin cleanup is skipped automatically when `.wp-env.json` declares mounts, because `wp plugin delete` runs inside the container where those mounts are the user's own source tree.
 
-`wp-ssh-bridge migrate` exits with an error in wp-env projects. Migration injects target DB credentials and writes to a plain directory, but wp-env mode routes the import through the container database. Use the normal pull for local onboarding, and run `migrate` against a standalone target directory.
+`wp-ssh-bridge clone` exits with an error in wp-env projects. Clone injects target DB credentials and writes to a plain directory, but wp-env mode routes the import through the container database. Use the normal pull for local onboarding, and run `clone` against a standalone target directory.
 
 ## Verification
 

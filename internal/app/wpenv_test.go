@@ -349,19 +349,19 @@ func TestWPEnvSkipsWPConfigURLConstants(t *testing.T) {
 	}
 }
 
-func TestMigrateRejectsWPEnvProjects(t *testing.T) {
+func TestCloneRejectsWPEnvProjects(t *testing.T) {
 	t.Parallel()
 
-	err := ensureMigrateAdapterSupported(wpEnvAdapter{standaloneAdapter{runtime: runtimeContext{Mode: modeWPEnv}}})
+	err := ensureCloneAdapterSupported(wpEnvAdapter{standaloneAdapter{runtime: runtimeContext{Mode: modeWPEnv}}})
 	if err == nil {
-		t.Fatal("ensureMigrateAdapterSupported() allowed migrate in a wp-env project")
+		t.Fatal("ensureCloneAdapterSupported() allowed clone in a wp-env project")
 	}
 	if !strings.Contains(err.Error(), "wp-env") {
-		t.Fatalf("ensureMigrateAdapterSupported() error = %q, want it to name wp-env", err)
+		t.Fatalf("ensureCloneAdapterSupported() error = %q, want it to name wp-env", err)
 	}
 
-	if err := ensureMigrateAdapterSupported(standaloneAdapter{}); err != nil {
-		t.Fatalf("ensureMigrateAdapterSupported() rejected standalone mode: %v", err)
+	if err := ensureCloneAdapterSupported(standaloneAdapter{}); err != nil {
+		t.Fatalf("ensureCloneAdapterSupported() rejected standalone mode: %v", err)
 	}
 }
 

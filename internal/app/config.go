@@ -31,11 +31,11 @@ type Config struct {
 	PullDomainReplacements []DomainReplacement
 	PushDomainReplacements []DomainReplacement
 	SkipSearchReplace      bool
-	MigrateDBHost          string
-	MigrateDBName          string
-	MigrateDBUser          string
-	MigrateDBPassword      string
-	MigrateDBPrefix        string
+	CloneDBHost            string
+	CloneDBName            string
+	CloneDBUser            string
+	CloneDBPassword        string
+	CloneDBPrefix          string
 	Integration            string
 }
 
@@ -173,16 +173,16 @@ func readConfigFile(path string) (Config, error) {
 			cfg.Integration = value
 		case "skip_search_replace":
 			cfg.SkipSearchReplace = parseBool(value)
-		case "migrate_db_host":
-			cfg.MigrateDBHost = value
-		case "migrate_db_name":
-			cfg.MigrateDBName = value
-		case "migrate_db_user":
-			cfg.MigrateDBUser = value
-		case "migrate_db_password":
-			cfg.MigrateDBPassword = value
-		case "migrate_db_prefix":
-			cfg.MigrateDBPrefix = value
+		case "clone_db_host":
+			cfg.CloneDBHost = value
+		case "clone_db_name":
+			cfg.CloneDBName = value
+		case "clone_db_user":
+			cfg.CloneDBUser = value
+		case "clone_db_password":
+			cfg.CloneDBPassword = value
+		case "clone_db_prefix":
+			cfg.CloneDBPrefix = value
 		default:
 			return cfg, fmt.Errorf("unknown config key %q in %s", key, path)
 		}
@@ -307,11 +307,11 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
-	writeStringValue(&body, "migrate_db_host", cfg.MigrateDBHost, defaults.MigrateDBHost)
-	writeStringValue(&body, "migrate_db_name", cfg.MigrateDBName, defaults.MigrateDBName)
-	writeStringValue(&body, "migrate_db_user", cfg.MigrateDBUser, defaults.MigrateDBUser)
-	writeStringValue(&body, "migrate_db_password", cfg.MigrateDBPassword, defaults.MigrateDBPassword)
-	writeStringValue(&body, "migrate_db_prefix", cfg.MigrateDBPrefix, defaults.MigrateDBPrefix)
+	writeStringValue(&body, "clone_db_host", cfg.CloneDBHost, defaults.CloneDBHost)
+	writeStringValue(&body, "clone_db_name", cfg.CloneDBName, defaults.CloneDBName)
+	writeStringValue(&body, "clone_db_user", cfg.CloneDBUser, defaults.CloneDBUser)
+	writeStringValue(&body, "clone_db_password", cfg.CloneDBPassword, defaults.CloneDBPassword)
+	writeStringValue(&body, "clone_db_prefix", cfg.CloneDBPrefix, defaults.CloneDBPrefix)
 
 	return os.WriteFile(path, []byte(body.String()), 0o644)
 }
@@ -362,11 +362,11 @@ func (cfg *Config) applyEnv(env []string) {
 	cfg.PluginRemoveFile = firstNonEmpty(values["WP_SSH_PULL_PLUGIN_REMOVE_FILE"], cfg.PluginRemoveFile)
 	cfg.LocalURL = firstNonEmpty(values["WP_SSH_PULL_LOCAL_URL"], cfg.LocalURL)
 	cfg.Provider = firstNonEmpty(values["WP_SSH_PROVIDER"], cfg.Provider)
-	cfg.MigrateDBHost = firstNonEmpty(values["WP_SSH_MIGRATE_DB_HOST"], cfg.MigrateDBHost)
-	cfg.MigrateDBName = firstNonEmpty(values["WP_SSH_MIGRATE_DB_NAME"], cfg.MigrateDBName)
-	cfg.MigrateDBUser = firstNonEmpty(values["WP_SSH_MIGRATE_DB_USER"], cfg.MigrateDBUser)
-	cfg.MigrateDBPassword = firstNonEmpty(values["WP_SSH_MIGRATE_DB_PASSWORD"], cfg.MigrateDBPassword)
-	cfg.MigrateDBPrefix = firstNonEmpty(values["WP_SSH_MIGRATE_DB_PREFIX"], cfg.MigrateDBPrefix)
+	cfg.CloneDBHost = firstNonEmpty(values["WP_SSH_CLONE_DB_HOST"], cfg.CloneDBHost)
+	cfg.CloneDBName = firstNonEmpty(values["WP_SSH_CLONE_DB_NAME"], cfg.CloneDBName)
+	cfg.CloneDBUser = firstNonEmpty(values["WP_SSH_CLONE_DB_USER"], cfg.CloneDBUser)
+	cfg.CloneDBPassword = firstNonEmpty(values["WP_SSH_CLONE_DB_PASSWORD"], cfg.CloneDBPassword)
+	cfg.CloneDBPrefix = firstNonEmpty(values["WP_SSH_CLONE_DB_PREFIX"], cfg.CloneDBPrefix)
 
 	if value, ok := values["WP_SSH_PULL_CLONE_IMAGES"]; ok {
 		cfg.CloneImages = parseBool(value)
@@ -483,52 +483,52 @@ func (target RemoteTarget) configured() bool {
 	return target.User != "" || target.Host != "" || target.Port != "" || target.RemotePath != ""
 }
 
-// validateMigrationDBCredentials catches unsafe or incomplete target wp-config.php values.
-func (cfg Config) validateMigrationDBCredentials(required bool) error {
+// validateCloneDBCredentials catches unsafe or incomplete target wp-config.php values.
+func (cfg Config) validateCloneDBCredentials(required bool) error {
 	missing := []string{}
-	if cfg.MigrateDBHost == "" {
-		missing = append(missing, "--db-host or migrate_db_host")
+	if cfg.CloneDBHost == "" {
+		missing = append(missing, "--db-host or clone_db_host")
 	}
-	if cfg.MigrateDBName == "" {
-		missing = append(missing, "--db-name or migrate_db_name")
+	if cfg.CloneDBName == "" {
+		missing = append(missing, "--db-name or clone_db_name")
 	}
-	if cfg.MigrateDBUser == "" {
-		missing = append(missing, "--db-user or migrate_db_user")
+	if cfg.CloneDBUser == "" {
+		missing = append(missing, "--db-user or clone_db_user")
 	}
-	if cfg.MigrateDBPassword == "" {
-		missing = append(missing, "--db-password or migrate_db_password")
+	if cfg.CloneDBPassword == "" {
+		missing = append(missing, "--db-password or clone_db_password")
 	}
 	if required && len(missing) > 0 {
-		return fmt.Errorf("migrate requires target database credentials: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("clone requires target database credentials: %s", strings.Join(missing, ", "))
 	}
-	if !required && len(missing) > 0 && cfg.hasAnyMigrationDBCredential() {
-		return fmt.Errorf("migration database credentials are incomplete; provide %s", strings.Join(missing, ", "))
+	if !required && len(missing) > 0 && cfg.hasAnyCloneDBCredential() {
+		return fmt.Errorf("clone database credentials are incomplete; provide %s", strings.Join(missing, ", "))
 	}
 
 	values := map[string]string{
-		"migrate_db_host":     cfg.MigrateDBHost,
-		"migrate_db_name":     cfg.MigrateDBName,
-		"migrate_db_user":     cfg.MigrateDBUser,
-		"migrate_db_password": cfg.MigrateDBPassword,
-		"migrate_db_prefix":   cfg.MigrateDBPrefix,
+		"clone_db_host":     cfg.CloneDBHost,
+		"clone_db_name":     cfg.CloneDBName,
+		"clone_db_user":     cfg.CloneDBUser,
+		"clone_db_password": cfg.CloneDBPassword,
+		"clone_db_prefix":   cfg.CloneDBPrefix,
 	}
 	for key, value := range values {
 		if strings.ContainsAny(value, "\r\n") {
 			return fmt.Errorf("%s must not contain newlines", key)
 		}
 	}
-	if cfg.MigrateDBPrefix != "" && regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(cfg.MigrateDBPrefix) {
-		return fmt.Errorf("migrate_db_prefix must contain only letters, numbers, and underscores")
+	if cfg.CloneDBPrefix != "" && regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(cfg.CloneDBPrefix) {
+		return fmt.Errorf("clone_db_prefix must contain only letters, numbers, and underscores")
 	}
 	return nil
 }
 
-func (cfg Config) hasAnyMigrationDBCredential() bool {
-	return cfg.MigrateDBHost != "" ||
-		cfg.MigrateDBName != "" ||
-		cfg.MigrateDBUser != "" ||
-		cfg.MigrateDBPassword != "" ||
-		cfg.MigrateDBPrefix != ""
+func (cfg Config) hasAnyCloneDBCredential() bool {
+	return cfg.CloneDBHost != "" ||
+		cfg.CloneDBName != "" ||
+		cfg.CloneDBUser != "" ||
+		cfg.CloneDBPassword != "" ||
+		cfg.CloneDBPrefix != ""
 }
 
 // validateProviderName protects generated provider paths and DDEV command names.
@@ -567,11 +567,11 @@ func (cfg Config) envArgs() string {
 	add("WP_SSH_PULL_PLUGIN_REMOVE_FILE", cfg.PluginRemoveFile)
 	add("WP_SSH_PULL_LOCAL_URL", cfg.LocalURL)
 	add("WP_SSH_PROVIDER", cfg.Provider)
-	add("WP_SSH_MIGRATE_DB_HOST", cfg.MigrateDBHost)
-	add("WP_SSH_MIGRATE_DB_NAME", cfg.MigrateDBName)
-	add("WP_SSH_MIGRATE_DB_USER", cfg.MigrateDBUser)
-	add("WP_SSH_MIGRATE_DB_PASSWORD", cfg.MigrateDBPassword)
-	add("WP_SSH_MIGRATE_DB_PREFIX", cfg.MigrateDBPrefix)
+	add("WP_SSH_CLONE_DB_HOST", cfg.CloneDBHost)
+	add("WP_SSH_CLONE_DB_NAME", cfg.CloneDBName)
+	add("WP_SSH_CLONE_DB_USER", cfg.CloneDBUser)
+	add("WP_SSH_CLONE_DB_PASSWORD", cfg.CloneDBPassword)
+	add("WP_SSH_CLONE_DB_PREFIX", cfg.CloneDBPrefix)
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_CLONE_IMAGES=%t", cfg.CloneImages))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
@@ -635,20 +635,20 @@ func mergeConfig(base Config, overlay Config) Config {
 	if len(overlay.PushDomainReplacements) > 0 {
 		base.PushDomainReplacements = overlay.PushDomainReplacements
 	}
-	if overlay.MigrateDBHost != "" {
-		base.MigrateDBHost = overlay.MigrateDBHost
+	if overlay.CloneDBHost != "" {
+		base.CloneDBHost = overlay.CloneDBHost
 	}
-	if overlay.MigrateDBName != "" {
-		base.MigrateDBName = overlay.MigrateDBName
+	if overlay.CloneDBName != "" {
+		base.CloneDBName = overlay.CloneDBName
 	}
-	if overlay.MigrateDBUser != "" {
-		base.MigrateDBUser = overlay.MigrateDBUser
+	if overlay.CloneDBUser != "" {
+		base.CloneDBUser = overlay.CloneDBUser
 	}
-	if overlay.MigrateDBPassword != "" {
-		base.MigrateDBPassword = overlay.MigrateDBPassword
+	if overlay.CloneDBPassword != "" {
+		base.CloneDBPassword = overlay.CloneDBPassword
 	}
-	if overlay.MigrateDBPrefix != "" {
-		base.MigrateDBPrefix = overlay.MigrateDBPrefix
+	if overlay.CloneDBPrefix != "" {
+		base.CloneDBPrefix = overlay.CloneDBPrefix
 	}
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace
