@@ -1,0 +1,115 @@
+---
+title: Troubleshooting
+description: The failures people actually hit with wp-ssh-bridge, what causes them, and the smallest change that fixes each one.
+---
+
+Start with the exact error text. The CLI names the failing stage and, where it can, the path or value that caused it. The tables below map the common messages to a fix.
+
+## SSH and connectivity
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `Permission denied (publickey)` | Your key is not accepted by the host. | Test `ssh user@host` first. The CLI uses your normal OpenSSH configuration, so if that fails, this will too. |
+| `Host key verification failed` | The host is not in `known_hosts`. | Connect once manually and accept the key. |
+| Connection times out | Wrong port or a firewall. | Set `pull_port` or `push_port`, or add a `Host` block in `~/.ssh/config` and use the alias as the host. |
+| Remote path errors | The remote WordPress root is wrong. | `pull_remote_path` must be absolute and contain `wp-config.php`. |
+
+:::note[Private keys stay out of the CLI]
+There is no key or password option, by design. Configure access in `~/.ssh/config`, your agent, or an identity file, exactly as for any other SSH client.
+:::
+
+## WP-CLI and the database
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| Remote `wp` missing or unusable | No WP-CLI on the host. | Handled automatically: a temporary `wp-cli.phar` is downloaded to the remote temp directory and removed afterwards. The run only fails if that phar cannot execute either, directly or through `php`. |
+| `mariadb-dump` not found | A host exposing only the legacy MySQL client names. | Handled automatically. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
+| Remote temp directory not writable | `/tmp` is restricted. | Point `pull_remote_tmp_dir` or `push_remote_tmp_dir` at a writable directory inside the account. |
+| The import fails halfway | Usually a database size or timeout limit. | Try `--skip-files` to isolate the database step, and check the remote error in full. |
+
+## Local files
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `local WordPress files are not writable at …` | Ownership or permissions on the local WordPress directory. | The error prints the path and, on Linux and WSL, the `chown` command that fixes it. |
+| `local WordPress path … is outside the wp-env tree` | `local_wp_path` points outside the mounted tree, so files and WP-CLI would target different installs. | Clear `local_wp_path` and let wp-env report the root. |
+| Files pulled but the site does not see them | In wp-env, a bind mount is shadowing the pulled path. | Expected. Those paths are excluded; see the wp-env section below. |
+
+## Transports
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Warning that stale files are not removed | rsync is missing on one side, so the tar-over-SSH fallback is in use. | Install rsync on both machines, or accept that deleted files remain. |
+| Transfers are slow on a large site | Media is being copied. | Leave `clone_images` off for day-to-day pulls; you rarely need production uploads to write code. |
+| You want to reproduce the fallback | Debugging a transport issue. | Force it with `--force-scp`. |
+
+## Runtime detection
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `integration is pinned to wp-env, but no .wp-env.json was found …` | A strict pin that cannot be resolved. | Remove the pin, or run from the correct project root. The strictness is the point: it prevents syncing into the wrong local WordPress root. |
+| The CLI picked the wrong runtime | The repository carries markers for two runtimes. | Pin it: `integration: "ddev"` in the config, or `--integration ddev` for one run. |
+| `ddev describe failed` | The project is not started. | `ddev start`, then run again. |
+
+## wp-env
+
+| Message | Fix |
+| --- | --- |
+| `wp-env environment is "stopped"` | Run `wp-env start`, then retry. |
+| `wp-env is using the "playground" runtime` | Playground has no `wp-env run`. Restart with `wp-env start --runtime=docker`. |
+| `wp-env status failed` | Run from the wp-env project root and make sure wp-env is installed, either as a project dependency, on `PATH`, or reachable through `npx`. |
+| `this is a wp-env project but wp-env status --json did not succeed` | Start or install the environment. Do not reach for `--integration standalone` as a workaround for anything that leads to a push; see below. |
+| Push is rejected | Expected and deliberate. Push from a standalone checkout instead; see [Push](/docs/commands/push). |
+| A warning about mounted plugins or themes before a pull | Expected. Those paths are excluded because the mounts would shadow them. Use `--skip-files` for a database-only sync. |
+
+:::tip[Make wp-env runs faster]
+When wp-env is resolved through `npx`, the package is looked up on every invocation, which roughly doubles startup time. Add it as a dev dependency instead:
+
+```bash
+npm install --save-dev @wordpress/env
+```
+:::
+
+## DDEV
+
+| Symptom | Fix |
+| --- | --- |
+| `.ddev/bin/wp-ssh-bridge: No such file or directory` during a provider callback | The project-local binary is missing. Reinstall it, then run `./.ddev/bin/wp-ssh-bridge init` or `provider install`. |
+| `ddev pull wp-ssh --user deploy` is rejected | Native DDEV pull takes no CLI flags. Use `--environment=WP_SSH_PULL_USER=deploy` instead. |
+| Local multisite domains do not resolve | The mappings are missing. Add them with `domains add`, then run `provider install` so `additional_hostnames` is refreshed. |
+| The provider behaves oddly after an update | Regenerate it: `./.ddev/bin/wp-ssh-bridge provider install`. |
+
+## URLs after a pull or push
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| The site still shows the production domain | Search-replace was skipped, or no mapping is configured. | Check `skip_search_replace` and `pull_domain_replacements`. |
+| Some multisite subsites point at production | Only the main domain is mapped. | Add a mapping per subsite domain, protocol-less. |
+| Redirects to production on every request | A hard-coded constant in `wp-config.php` survived. | The post-pull step rewrites `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE`. If a plugin or a `sunrise.php` sets its own, handle that file by hand. |
+| The pushed target shows the local domain | `push_url` was missing and the target's home URL was unusable. | Set `push_url`, then rerun the push with `--skip-files`. |
+
+## Command names after the rename
+
+The `migrate` command became [`clone`](/docs/commands/clone).
+
+| Message | Fix |
+| --- | --- |
+| `unknown command "clone"` | The binary predates the rename. [Update it](/docs/installation#updating). |
+| An error saying `migrate` was renamed | Use `wp-ssh-bridge clone` with the same flags. |
+| `unknown config key "migrate_db_host"` | Rename `migrate_db_*` keys to `clone_db_*`. |
+| Target DB credentials reported as missing | `WP_SSH_MIGRATE_DB_*` variables are ignored silently. Rename them to `WP_SSH_CLONE_DB_*`. |
+
+## Still stuck
+
+Collect these before asking for help; they answer most follow-up questions immediately:
+
+```bash
+wp-ssh-bridge version
+```
+
+```bash
+# The exact failing command, without --silent so prompts and output are visible
+wp-ssh-bridge pull
+```
+
+Then note which runtime you are in, whether rsync is available on both sides, and the full error text rather than a summary of it.

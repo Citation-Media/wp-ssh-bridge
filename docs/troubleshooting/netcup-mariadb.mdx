@@ -1,0 +1,83 @@
+---
+title: Netcup and MariaDB clients
+description: Why WP-CLI database exports fail on Netcup and Plesk hosts that ship only the legacy mysql client names, and how wp-ssh-bridge works around it automatically.
+sidebar:
+  label: Netcup workaround
+---
+
+Some hosts, Netcup and Plesk installations in particular, report MariaDB through `mysql --version` but install only the legacy executable names `mysql` and `mysqldump`. Current WP-CLI looks for `mariadb` and `mariadb-dump` when it detects MariaDB, finds neither, and the database export fails before a pull can start.
+
+`wp-ssh-bridge` detects this during preflight and works around it for the duration of the database operation. **You do not have to configure anything.**
+
+## What you see
+
+When the workaround engages, preflight says so:
+
+```text
+✓ Pull source MariaDB client compatibility enabled (temporary mysql/mysqldump aliases)
+```
+
+Without the workaround, the same host produces a WP-CLI failure that names the missing binary:
+
+```text
+Error: Failed to get current SQL modes. Reason: sh: mariadb-dump: command not found
+```
+
+## What the CLI does
+
+<Steps>
+  <Step title="Detect the layout">
+    During database preflight, the CLI checks the remote host for the MariaDB client names WP-CLI expects and for the legacy ones it can substitute.
+  </Step>
+  <Step title="Create a private shim directory">
+    A directory such as `/tmp/.wp-ssh-bridge-mariadb-<id>` is created with mode 700 in the configured remote temp directory. It belongs to your SSH user and nobody else can read it.
+  </Step>
+  <Step title="Link the legacy binaries under the expected names">
+    `mariadb` is symlinked to the host's `mysql`, and `mariadb-dump` to its `mysqldump`, but only for names that are genuinely missing. A host that already has a real `mariadb` keeps it.
+  </Step>
+  <Step title="Prepend the directory to PATH">
+    The shim directory is put in front of `PATH` for the database command only. WP-CLI then finds what it is looking for and the export runs normally.
+  </Step>
+  <Step title="Remove it again">
+    The symlinks and the directory are deleted when the operation finishes, and the remote cleanup trap removes them if the run fails. The remote database transfer file is removed the same way.
+  </Step>
+</Steps>
+
+Nothing outside that one command sees a changed `PATH`, and nothing is installed on the host. The workaround leaves no trace after the run.
+
+:::note[Scope]
+The shim applies to pull, clone, and push database operations, on whichever side needs it. The push target is checked separately from the pull source, so a run between two such hosts is handled on both ends.
+:::
+
+## Requirements on the host
+
+| Needed | Why |
+| --- | --- |
+| `mysql` on `PATH` | Aliased to `mariadb` for the client commands. |
+| `mysqldump` on `PATH` | Aliased to `mariadb-dump` for the export. |
+| A writable temp directory | Holds the shim and the dump. Defaults to `/tmp`; override with `pull_remote_tmp_dir` or `push_remote_tmp_dir`. |
+
+If the host has neither `mysqldump` nor `mariadb-dump`, there is nothing to alias and the export cannot run. That is a hosting limitation, not something the CLI can route around. Ask the provider to install the MariaDB or MySQL client tools.
+
+## When it still fails
+
+| Message | Meaning | Fix |
+| --- | --- | --- |
+| `mariadb-dump: command not found` and no compatibility line in preflight | The installed binary predates the workaround. | [Update wp-ssh-bridge](/docs/installation#updating). |
+| The compatibility line appears, but the export still fails for a missing `mysqldump` | The host has neither name. | Ask the provider to install the client tools. |
+| Preflight cannot create the shim directory | The remote temp directory is not writable. | Point `pull_remote_tmp_dir` at a writable path inside the account, for example `/home/example/tmp`. |
+| A leftover `.wp-ssh-bridge-mariadb-*` directory | A run was killed before cleanup. | Safe to delete: `rm -rf /tmp/.wp-ssh-bridge-mariadb-*` on that host. |
+
+## Checking a host yourself
+
+```bash title="What the host actually provides"
+ssh deploy@example.com 'command -v mysql mysqldump mariadb mariadb-dump; mysql --version'
+```
+
+Output like this is the case the workaround exists for. The legacy names are present, the MariaDB names are not, and the version string still says MariaDB:
+
+```text
+/usr/bin/mysql
+/usr/bin/mysqldump
+mysql  Ver 15.1 Distrib 10.11.6-MariaDB, for Linux (x86_64)
+```

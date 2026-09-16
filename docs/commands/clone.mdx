@@ -1,0 +1,223 @@
+---
+title: Clone
+description: Copy a live WordPress site host to host with wp-ssh-bridge clone, keeping uploads, plugins, and wp-config.php while writing the target database credentials for you.
+sidebar:
+  icon: copy
+---
+
+`clone` copies a site as a site, not as a development copy. Use it when the result should keep running as a real WordPress install: a migration to a new host, a production-shaped staging box, or a one-off duplicate.
+
+The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clone skips the development rewrites and keeps everything a live site needs.
+
+| | `pull` | `clone` |
+| --- | --- | --- |
+| Uploads and media | Only with `--clone-images` | Always included |
+| `wp-config.php` | Sanitised for DDEV, preserved elsewhere | Copied, then target DB credentials written in |
+| Production plugins | Deactivated and deleted | Kept |
+| Development rewrites | Yes, including `WP_ENVIRONMENT_TYPE=development` | No |
+| URL search-replace | Yes | Yes, from your configured mappings |
+| Pre-existing target files | Mirrored with `--delete` | Kept, unless `--clean-target` |
+
+:::warning[Standalone only]
+`clone` refuses to run in a DDEV or wp-env project root. Both route WP-CLI through a container, so the import would land in the container database instead of the target you specified. Run it against a plain directory. For local onboarding, use [`pull`](/docs/commands/pull) instead.
+:::
+
+## Run it
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    This is the only supported runtime for `clone`. Run it from the directory that should become the new WordPress root, or point at one with `--project-root`.
+
+    ```bash
+    wp-ssh-bridge clone --silent \
+      --user deploy \
+      --host source.example.com \
+      --remote-path /home/source/public_html \
+      --db-host db.example.com \
+      --db-name target_db \
+      --db-user target_user \
+      --db-password target_password
+    ```
+
+    The source flags describe where to read from. The `--db-*` flags describe the database the cloned site will use once it lives on its new host. They are written into the copied `wp-config.php` before the database is imported, so the import and the finished site agree on the same credentials.
+
+    Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`.
+
+  </Tab>
+  <Tab title="DDEV">
+
+    **Clone is rejected in DDEV projects.**
+
+    ```text
+    Error: clone is not supported in DDEV projects
+    ```
+
+    Local WP-CLI runs as `ddev wp` in DDEV mode, so the database import would go into the DDEV container, not into the target database whose credentials you passed. The copied `wp-config.php` and the imported data would describe two different databases.
+
+    **What to do instead:**
+
+    - For a local development copy, use [`pull`](/docs/commands/pull), which is what DDEV mode is built for.
+    - For a real migration, run `clone` from a plain directory outside the DDEV project. It can be anywhere on your machine; the result is a standalone WordPress tree you then move to the new host.
+
+  </Tab>
+  <Tab title="wp-env">
+
+    **Clone is rejected in wp-env projects**, for the same reason as DDEV.
+
+    ```text
+    Error: clone is not supported in wp-env projects
+    ```
+
+    wp-env routes WP-CLI through `wp-env run cli`, so the import would target the container database rather than the credentials you passed with `--db-*`.
+
+    **What to do instead:** use [`pull`](/docs/commands/pull) for local work, and run `clone` against a standalone target directory outside the wp-env project when you actually need a host-to-host copy.
+
+  </Tab>
+</Tabs>
+
+## Required values
+
+Source, exactly as for a pull:
+
+| Flag | Config key | Environment variable |
+| --- | --- | --- |
+| `--user` | `pull_user` | `WP_SSH_PULL_USER` |
+| `--host` | `pull_host` | `WP_SSH_PULL_HOST` |
+| `--remote-path` | `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` |
+
+Target database, written into `wp-config.php`:
+
+| Flag | Config key | Environment variable |
+| --- | --- | --- |
+| `--db-host` | `clone_db_host` | `WP_SSH_CLONE_DB_HOST` |
+| `--db-name` | `clone_db_name` | `WP_SSH_CLONE_DB_NAME` |
+| `--db-user` | `clone_db_user` | `WP_SSH_CLONE_DB_USER` |
+| `--db-password` | `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` |
+| `--db-prefix` (optional) | `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` |
+
+:::tip[Keep the password out of version control]
+Put the source and the non-secret target values in the config file, and pass the password through the environment:
+
+```bash
+export WP_SSH_CLONE_DB_PASSWORD='…'
+wp-ssh-bridge clone --silent
+```
+:::
+
+## Config mode
+
+For a migration you run more than once, keep it in a file:
+
+```yaml title=".wp-ssh.yaml"
+pull_user: "deploy"
+pull_host: "source.example.com"
+pull_remote_path: "/home/source/public_html"
+
+clone_db_host: "db.example.com"
+clone_db_name: "target_db"
+clone_db_user: "target_user"
+clone_db_prefix: "wp_"
+
+# The new site answers under a different domain, so rewrite it during the clone.
+pull_domain_replacements:
+  - old: "source.example.com"
+    new: "target.example.com"
+```
+
+```bash
+export WP_SSH_CLONE_DB_PASSWORD='…'
+wp-ssh-bridge clone --silent
+```
+
+## Emptying the target first
+
+A clone is **additive** by default. Files are added and updated, but whatever was already in the target directory stays: a hosting provider's placeholder `index.html`, a starter theme, an old install. On the rsync transport that means no `--delete`; the tar transport has no equivalent at all.
+
+Pass `--clean-target` to start from an empty tree:
+
+```bash
+wp-ssh-bridge clone --silent --clean-target
+```
+
+:::danger[`--clean-target` deletes data]
+It removes pre-existing content in the resolved target directory before the sync and cannot be undone. Print the resolved path and check it before you run this. On the rsync transport it adds `--delete`, keeping configured exclusions; on the tar transport it empties the target WordPress directory, preserving only operational entries such as `.git`, `.ddev`, `.wp-ssh`, `wp-config-ddev.php`, `.wp-ssh.yaml`, and the `wp-ssh-bridge` binary, and refusing to run against a filesystem root or a home directory.
+:::
+
+`--clean-target` exists only on `clone`. It is rejected on `pull` and `push`.
+
+## Migration walkthrough
+
+<Steps>
+  <Step title="Prepare the target database">
+
+    Create the database and user on the new host, and note the credentials. The CLI writes them into `wp-config.php`; it does not create them.
+
+  </Step>
+  <Step title="Configure the domain rewrite">
+
+    If the new site answers under a different domain, add the mapping before you clone, so URLs are rewritten during the import instead of in a second pass.
+
+    ```bash
+    wp-ssh-bridge domains add --old source.example.com --new target.example.com --direction pull
+    ```
+
+  </Step>
+  <Step title="Clone into a working directory">
+
+    ```bash
+    mkdir -p ~/migrations/example && cd ~/migrations/example
+    wp-ssh-bridge clone --silent \
+      --user deploy \
+      --host source.example.com \
+      --remote-path /home/source/public_html \
+      --db-host db.example.com \
+      --db-name target_db \
+      --db-user target_user \
+      --db-password "$TARGET_DB_PASSWORD"
+    ```
+
+  </Step>
+  <Step title="Verify the copy">
+
+    ```bash
+    wp config get DB_HOST --path=.
+    wp config get DB_NAME --path=.
+    wp option get home --path=.
+    wp plugin list --path=.
+    ```
+
+    Use a plain `wp` against the target path, not `ddev wp`. The target is a standalone install.
+
+  </Step>
+  <Step title="Move it to the new host">
+
+    Upload the tree to the new host's web root, point DNS at it, and load the site. The database is already imported and `wp-config.php` already has the right credentials.
+
+  </Step>
+</Steps>
+
+## Server-to-server transfers
+
+The implemented path is local-orchestrated: source host, to your machine, to the target tree. A direct server-to-server copy can be faster, but it changes what has to be true:
+
+- the source server needs SSH reachability to the target server
+- the source server needs target credentials or forwarded agent access
+- the target host keys must be trusted from the source server
+- many shared hosts block outbound SSH or ship minimal transfer tooling
+- failures are harder to diagnose with two remote hosts in play
+
+Unless you accept all of that, stay on the local-orchestrated path.
+
+## When something fails
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| `clone is not supported in DDEV projects` | You are inside a DDEV or wp-env project. Run it from a plain directory. |
+| `unknown command "clone"` | The binary predates the rename from `migrate`. [Update it](/docs/installation#updating). |
+| `unknown config key "migrate_db_host"` | Old config keys. Rename `migrate_db_*` to `clone_db_*`. |
+| Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
+| The cloned site shows the source domain | No domain mapping was configured, or `--skip-search-replace` was set. Add the mapping and rerun. |
+| Old files from the previous install remain | Clones are additive. Use `--clean-target` if that is what you want. |
+
+More in [Troubleshooting](/docs/troubleshooting).

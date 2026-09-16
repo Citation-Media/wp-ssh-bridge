@@ -6,6 +6,27 @@ The CLI detects DDEV mode by finding `.ddev/config.yaml` above the current direc
 
 If DDEV detection fails and the project has a `.wp-env.json` or `.wp-env.override.json`, the CLI reads `wp-env status --json` and runs in wp-env mode. A `node_modules/.bin/wp-env` alone is not a marker — many DDEV and standalone repos carry `@wordpress/env` as a dev dependency. See [wp-env mode](#wp-env-mode). Otherwise it runs in standalone mode against the local host.
 
+## Documentation
+
+Full documentation, including per-command guides, configuration reference, and troubleshooting, is published at **https://wp-ssh-bridge.citation.media**.
+
+This repository is a monorepo. The Go CLI lives at the root; the documentation pages live in [`docs/`](docs/) and the Blume site that renders them in [`packages/documentation/`](packages/documentation/). The release and deploy pipeline is described in [`AGENTS.md`](AGENTS.md).
+
+```bash
+npm install
+npm run docs:dev
+```
+
+## Install
+
+The install script needs no access to this repository. It picks the right build for the machine, verifies the SHA-256 checksum, and installs into `.ddev/bin/` inside a DDEV project or the current directory otherwise:
+
+```bash
+curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh
+```
+
+Use `--dir <path>` for another destination, `--global` for `/usr/local/bin`, or `--version <tag>` to pin a release.
+
 ## Use Per Project
 
 Download the release artifact into each project and run it from there. This keeps the CLI scoped to the project and lets generated DDEV provider files point at that project-local binary.

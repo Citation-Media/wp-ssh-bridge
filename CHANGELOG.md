@@ -44,7 +44,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Fixed
 
-- Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#13]).
+- Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
 [0.5.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.4.1...v0.5.0
-[#13]: https://github.com/Citation-Media/wp-ssh-bridge/issues/13
+[#7]: https://github.com/Citation-Media/wp-ssh-bridge/issues/7

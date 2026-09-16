@@ -1,0 +1,89 @@
+name: docs
+
+# Builds the documentation site from packages/documentation and deploys it to
+# Cloudflare Workers. The MDX pages it renders live in docs/ at the repository
+# root, so both paths trigger this workflow.
+#
+# It also runs whenever a release is published, because the changelog is sourced
+# from this repository's GitHub Releases at build time.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "packages/documentation/**"
+      # The build bundles the agent skill into /.well-known/agent-skills/,
+      # so editing it has to redeploy the site.
+      - "skills/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/docs.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: docs
+    defaults:
+      run:
+        working-directory: packages/documentation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the "last updated" dates come from real commits.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12"
+          cache: npm
+
+      # Installs the whole workspace from the repository root, so the docs
+      # package resolves its dependencies through npm workspaces.
+      - name: Install dependencies
+        working-directory: .
+        run: npm install --no-audit --no-fund
+
+      # Open Graph cards are expensive to render and keyed by their content,
+      # so restoring a stale cache only ever saves work.
+      - name: Restore Open Graph card cache
+        uses: actions/cache@v4
+        with:
+          path: packages/documentation/.blume/.cache/og
+          key: blume-og-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: blume-og-${{ runner.os }}-
+
+      - name: Build
+        env:
+          # Reads this repository's releases for the changelog. The default
+          # token is enough because the docs live in the same repository.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set DOCS_SITE_URL as a repository variable to override the origin
+          # configured in blume.config.ts.
+          SITE_URL: ${{ vars.DOCS_SITE_URL }}
+        run: npm run build
+
+      - name: Check links
+        run: npm run validate
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: packages/documentation
+          # Blume writes the adapter's Wrangler config next to the built Worker.
+          # The Worker name is pinned here so the custom domain configured for
+          # it in Cloudflare survives every deploy.
+          command: deploy --config dist/server/wrangler.json --name wp-ssh-bridge-docs

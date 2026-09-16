@@ -7,3 +7,16 @@ node_modules/
 /wp-ssh-bridge
 /dist/
 /coverage.out
+
+# Documentation site (packages/documentation)
+.blume/
+.blume-verify/
+.wrangler/
+packages/documentation/dist/
+.env
+.env.*
+
+# Agent Package Manager build output
+.claude-plugin/
+apm_modules/
+apm.lock.yaml

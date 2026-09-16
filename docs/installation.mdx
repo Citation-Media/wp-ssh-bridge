@@ -1,0 +1,257 @@
+---
+title: Installation
+description: Install wp-ssh-bridge as an npm dev dependency, with the one-line script, or by downloading a release archive, and learn where the binary should live in a project.
+sidebar:
+  order: 2
+  icon: download
+---
+
+`wp-ssh-bridge` is a single static binary for macOS and Linux on Intel and ARM. There are no runtime dependencies beyond the tools it drives: `ssh`, `rsync` when available, and WP-CLI.
+
+## npm
+
+For a project, this is the least friction. The package carries no binary of its own: it downloads the build for the machine it is installed on, so a team on mixed macOS and Linux shares one dependency line.
+
+```bash
+npm install --save-dev @citation-media/wp-ssh-bridge
+```
+
+```bash
+npx wp-ssh-bridge init
+npx wp-ssh-bridge pull --silent
+```
+
+Three things follow from that, and they are the reason to prefer it:
+
+- **One setup step.** A plain `npm install` brings the tool with everything else. Nobody has to run a separate installer.
+- **A pinned version.** `package.json` records the version and your lockfile pins it exactly, so two developers cannot quietly run different builds against the same site.
+- **It is written down.** The version the project expects lives in the repository instead of in everyone's memory.
+
+The download is verified against the release's SHA-256 checksum, and it happens during `postinstall` or on first use when install scripts were skipped, which pnpm does by default.
+
+| Variable | Effect |
+| --- | --- |
+| `WP_SSH_BRIDGE_BINARY` | Use this binary instead of downloading one, for a local build. |
+| `WP_SSH_BRIDGE_SKIP_DOWNLOAD` | Skip the `postinstall` download. |
+
+## Install script
+
+Use this when a project has no Node toolchain, or for a machine-wide install.
+
+<include>/_snippets/install.mdx</include>
+
+The script always installs the newest release. It downloads through GitHub's permanent link for the latest release, so there is no version to look up and nothing to update when a release ships. It checks the archive against the published SHA-256 checksums and unpacks the binary. Pass options after `sh -s --`:
+
+```bash title="Script options"
+# Install into a specific directory
+curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh -s -- --dir .ddev/bin
+
+# Install into /usr/local/bin for every project (asks for sudo when needed)
+curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh -s -- --global
+
+# Pin a release
+curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh -s -- --version v0.5.2
+```
+
+| Option | Effect |
+| --- | --- |
+| `--dir <path>` | Target directory. Defaults to `.ddev/bin` inside a DDEV project and to the current directory elsewhere. |
+| `--global` | Installs to `/usr/local/bin`. |
+| `--version <tag>` | Installs that release instead of the newest one. `WP_SSH_BRIDGE_VERSION` does the same, and the leading `v` is optional. |
+
+Releases live on the project's GitHub releases page, which is where the script reads them from.
+
+| Variable | Effect |
+| --- | --- |
+| `WP_SSH_BRIDGE_REPO` | Read releases from another GitHub repository, for a fork. |
+| `WP_SSH_BRIDGE_VERSION` | Same as `--version`. |
+
+Prefer to read before you run? The script is plain POSIX shell: [install.sh](https://wp-ssh-bridge.citation.media/install.sh).
+
+## Manual download
+
+Every release attaches each archive twice, once under its versioned name and once under a version-free one. The version-free links below always serve the newest release, so they are safe to bookmark or put in a setup script.
+
+| Platform | Download |
+| --- | --- |
+| macOS, Apple Silicon | [wp-ssh-bridge_darwin_arm64.tar.gz](https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download/wp-ssh-bridge_darwin_arm64.tar.gz) |
+| macOS, Intel | [wp-ssh-bridge_darwin_amd64.tar.gz](https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download/wp-ssh-bridge_darwin_amd64.tar.gz) |
+| Linux, x86-64 | [wp-ssh-bridge_linux_amd64.tar.gz](https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download/wp-ssh-bridge_linux_amd64.tar.gz) |
+| Linux, ARM64 | [wp-ssh-bridge_linux_arm64.tar.gz](https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download/wp-ssh-bridge_linux_arm64.tar.gz) |
+| Checksums | [checksums.txt](https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download/checksums.txt) |
+
+```bash title="Verify and unpack by hand"
+base=https://github.com/Citation-Media/wp-ssh-bridge/releases/latest/download
+curl -fsSLO "$base/wp-ssh-bridge_darwin_arm64.tar.gz"
+curl -fsSLO "$base/checksums.txt"
+
+# checksums.txt lists both name forms, so --ignore-missing checks what you have.
+# On Linux: sha256sum -c --ignore-missing checksums.txt
+shasum -a 256 -c --ignore-missing checksums.txt
+
+tar -xzf wp-ssh-bridge_darwin_arm64.tar.gz
+./wp-ssh-bridge version
+```
+
+Older releases keep their versioned names under their own tag, for example `releases/download/v0.5.2/wp-ssh-bridge_v0.5.2_darwin_arm64.tar.gz`. The [releases page](https://github.com/Citation-Media/wp-ssh-bridge/releases) lists every one of them.
+
+## Where the binary should live
+
+<Tabs inline>
+  <Tab title="npm (recommended)">
+
+    A dev dependency keeps the binary in `node_modules`, pins its version in your lockfile, and installs itself with everything else. Commands run through `npx wp-ssh-bridge`.
+
+    ```bash
+    npm install --save-dev @citation-media/wp-ssh-bridge
+    npx wp-ssh-bridge init
+    ```
+
+  </Tab>
+  <Tab title="Per project, no Node">
+
+    Keep the binary inside the project. In a DDEV project that is `.ddev/bin/wp-ssh-bridge`, which the generated provider files reference as a relative `./.ddev/bin/wp-ssh-bridge` command, so nothing machine-specific ends up in versioned files. Add `.ddev/bin/` to `.gitignore` and let every developer run the install script once.
+
+    ```bash
+    curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh
+    ./.ddev/bin/wp-ssh-bridge init
+    ```
+
+  </Tab>
+  <Tab title="Global">
+
+    A global install is a convenience for people who work across many projects. Provider files generated by `init` then point at `wp-ssh-bridge` on `PATH`.
+
+    ```bash
+    curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh -s -- --global
+    wp-ssh-bridge version
+    ```
+
+  </Tab>
+</Tabs>
+
+## Updating
+
+With npm, bump the dependency and the matching binary follows:
+
+```bash
+npm install --save-dev @citation-media/wp-ssh-bridge@latest
+```
+
+Otherwise run the install script again; it always fetches the latest release. In a DDEV project, regenerate the provider files afterwards so they match the new binary:
+
+```bash
+./.ddev/bin/wp-ssh-bridge provider install
+```
+
+Check what you have with:
+
+```bash
+wp-ssh-bridge version
+```
+
+New releases are announced in the [changelog](/changelog), which also publishes an RSS feed.
+
+## Building from source
+
+The source repository is private. Team members with access can build the current `main` with Go 1.24 or newer:
+
+```bash
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@latest
+```
+
+## AI and agents
+
+The site ships more than prose. It publishes the project's **agent skill**, a playbook that teaches a coding assistant how to operate and troubleshoot this CLI: which values it cannot infer, the workflow per runtime, and the fix for each common failure. Install it once and your assistant stops guessing at flags.
+
+<Tabs inline param="skill-install" syncKey="skill-install">
+  <Tab title="apm">
+
+    [Agent Package Manager](https://microsoft.github.io/apm/) is the recommended route. It resolves dependencies, writes a lockfile, and deploys the skill to whichever assistant you use, so a team gets the same skill on every machine.
+
+    This site publishes an APM marketplace, so you can register the documentation itself as a catalogue:
+
+    ```bash title="Register the catalogue, then install"
+    apm marketplace add https://wp-ssh-bridge.citation.media/marketplace.json --name wp-ssh-bridge
+    apm install wp-ssh-bridge-cli@wp-ssh-bridge
+    ```
+
+    Browse what the catalogue offers before installing anything:
+
+    ```bash
+    apm marketplace browse wp-ssh-bridge
+    ```
+
+    Skipping the catalogue works too, since the repository is an APM package in its own right:
+
+    ```bash
+    apm install Citation-Media/wp-ssh-bridge
+    ```
+
+    APM writes the skill into your assistant's directory, records it in `apm.yml` and `apm.lock.yaml`, and `apm update` refreshes it later. Pick a target explicitly when your project has no assistant configured yet:
+
+    ```bash
+    apm install wp-ssh-bridge-cli@wp-ssh-bridge --target claude
+    ```
+
+    Both forms read the repository over Git, so a pinned tag or branch works the same way it does for any other APM package.
+
+  </Tab>
+  <Tab title="skills">
+
+    [`skills`](https://github.com/vercel-labs/skills) installs straight from this domain. It reads the discovery index the site publishes, so there is nothing to register and no repository access involved.
+
+    ```bash title="Install from the documentation site"
+    npx skills add https://wp-ssh-bridge.citation.media
+    ```
+
+    It detects your assistant, or you can name one:
+
+    ```bash
+    npx skills add https://wp-ssh-bridge.citation.media --agent claude-code
+    ```
+
+    The skill lands in your assistant's skills directory and a `skills-lock.json` records what was installed. This is the route to use when you have no access to the private repository.
+
+  </Tab>
+  <Tab title="Manual">
+
+    The skill is a plain archive with a published SHA-256 digest, so you can unpack it yourself. The digest lives in the discovery index at [`/.well-known/agent-skills/index.json`](https://wp-ssh-bridge.citation.media/.well-known/agent-skills/index.json).
+
+    ```bash title="Install for Claude Code"
+    mkdir -p ~/.claude/skills/wp-ssh-bridge-cli
+    curl -fsSL https://wp-ssh-bridge.citation.media/.well-known/agent-skills/wp-ssh-bridge-cli.tar.gz \
+      | tar -xz -C ~/.claude/skills/wp-ssh-bridge-cli
+    ```
+
+    Use `.claude/skills/` inside a project instead of `~/.claude/skills/` to scope it to that repository. Other assistants read other directories; the archive is the same either way, containing `SKILL.md` plus its reference pages and helper script.
+
+  </Tab>
+</Tabs>
+
+### Query the docs directly
+
+The documentation is also served over [Model Context Protocol](https://modelcontextprotocol.io), so an assistant can search and read these pages instead of scraping them:
+
+```bash title="Connect the docs to Claude Code"
+claude mcp add --transport http wp-ssh-bridge https://wp-ssh-bridge.citation.media/mcp
+```
+
+Every page additionally has a raw Markdown twin at its `.md` URL, and the whole corpus sits at [`/llms.txt`](https://wp-ssh-bridge.citation.media/llms.txt).
+
+## Requirements
+
+**On your machine**
+
+- `ssh` with key-based access to the hosts you pull from or push to.
+- `rsync`, optional. Without it the CLI streams a tar archive over SSH instead, with a warning that stale files are not deleted on that path.
+- WP-CLI for the Generic runtime. If `wp` is missing, a managed `wp-cli.phar` is downloaded into the project's scratch directory. DDEV and wp-env bring their own.
+- DDEV or `@wordpress/env` when you use those runtimes.
+
+**On the remote host**
+
+- SSH access to a shell that can run PHP.
+- WP-CLI, ideally. If it is missing or broken, the CLI uploads a temporary `wp-ssh-bridge-wp-cli.phar` to the remote temp directory, uses it, and removes it.
+- `mysqldump` or `mariadb-dump` for the database export. Hosts that ship only the legacy `mysql` names are handled automatically; see [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb).
+- `rsync`, optional, as above.

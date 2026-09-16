@@ -1,0 +1,377 @@
+---
+title: Configuration
+description: Every wp-ssh-bridge config key, environment variable, and CLI flag, plus domain mappings, the plugin block list, and how the three layers override each other.
+sidebar:
+  order: 4
+  icon: settings
+---
+
+Configuration comes from three layers. Each one overrides the last, so you keep shared defaults in a file and override only what is different for a run or a developer.
+
+<Steps>
+  <Step title="YAML config file">
+    `.ddev/wp-ssh.yaml` in DDEV projects, `.wp-ssh.yaml` in wp-env and Generic projects. Written by `init` and safe to commit, because generated files avoid machine-specific absolute paths.
+  </Step>
+  <Step title="Environment variables">
+    Every key has a `WP_SSH_*` twin. The right place for CI, per-developer SSH users, and passwords.
+  </Step>
+  <Step title="CLI flags">
+    One-shot overrides. A `--integration` flag passed to `pull` or `push` is never written back to the config; only `init --integration` persists it.
+  </Step>
+</Steps>
+
+Point at a different file with `--config-file` or `WP_SSH_CONFIG_FILE`. Relative paths resolve from the detected project root, which makes per-environment files practical:
+
+```bash
+wp-ssh-bridge pull --silent --config-file .wp-ssh.production.yaml
+```
+
+## A complete config file
+
+```yaml title=".wp-ssh.yaml"
+# --- Pull source: where a pull or clone reads from ---
+pull_user: "deploy"
+pull_host: "production.example.com"
+pull_port: "22"                                # optional, defaults to 22
+pull_remote_path: "/home/production/public_html"
+pull_remote_tmp_dir: "/tmp"                    # optional, defaults to /tmp
+
+# --- Push target: where a push writes to ---
+push_user: "deploy"
+push_host: "staging.example.com"
+push_remote_path: "/home/staging/public_html"
+push_url: "https://staging.example.com"        # strongly recommended
+
+# --- Local side ---
+local_wp_path: "."                             # relative to the project root
+local_url: "https://example.ddev.site"         # only to override what is detected
+clone_images: false                            # include wp-content/uploads on pull
+skip_search_replace: false
+plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
+
+# --- Domain rewrites, both directions ---
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+push_domain_replacements:
+  - old: "example.ddev.site"
+    new: "example.com"
+
+# --- Clone target database, written into wp-config.php ---
+clone_db_host: "db.example.com"
+clone_db_name: "target_db"
+clone_db_user: "target_user"
+clone_db_prefix: "wp_"                         # optional
+
+# --- Optional: pin the runtime instead of detecting it ---
+integration: "standalone"                      # ddev | wp-env | standalone
+```
+
+:::tip[Keep secrets out of the file]
+Never put `clone_db_password` in a committed config file, and never put private key material anywhere. SSH uses your normal OpenSSH setup: `~/.ssh/config`, loaded identities, and agent forwarding all work as they do in your terminal.
+:::
+
+## Key reference
+
+### Pull source
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `pull_user` | `WP_SSH_PULL_USER` | SSH user on the source host. |
+| `pull_host` | `WP_SSH_PULL_HOST` | SSH host. An alias from `~/.ssh/config` works. |
+| `pull_port` | `WP_SSH_PULL_PORT` | SSH port. Defaults to 22. |
+| `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Absolute path of the source WordPress root, containing `wp-config.php`. |
+| `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Where the database dump is written before download. Defaults to `/tmp`. |
+
+### Push target
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `push_user` | `WP_SSH_PUSH_USER` | SSH user on the target host. |
+| `push_host` | `WP_SSH_PUSH_HOST` | SSH host. |
+| `push_port` | `WP_SSH_PUSH_PORT` | SSH port. Defaults to 22. |
+| `push_remote_path` | `WP_SSH_PUSH_REMOTE_PATH` | Absolute path of the target WordPress root. |
+| `push_remote_tmp_dir` | `WP_SSH_PUSH_REMOTE_TMP_DIR` | Target temp directory. Defaults to `/tmp`. |
+| `push_url` | `WP_SSH_PUSH_URL` | Public URL of the target, used for the post-push search-replace. Without it, the CLI reads the target's current home URL before the import. |
+
+### Local
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `local_wp_path` | `WP_SSH_LOCAL_WP_PATH` or `WP_SSH_PULL_LOCAL_WP_PATH` | Local WordPress root, relative to the project. Set it when WordPress lives in `web`, `public`, or similar. |
+| `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for the post-pull search-replace. Only needed to override the detected value. |
+| `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
+| `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
+| `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |
+
+### Clone target database
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `clone_db_host` | `WP_SSH_CLONE_DB_HOST` | Database host written into the cloned `wp-config.php`. |
+| `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Database name. |
+| `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Database user. |
+| `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` | Database password. Prefer the environment variable. |
+| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Table prefix, when it should differ from the source. |
+
+### Runtime and files
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `integration` | `WP_SSH_INTEGRATION` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. Strict: it fails rather than falling back. |
+| `provider` | — | DDEV provider name. Defaults to `wp-ssh`. |
+| Config path | `WP_SSH_CONFIG_FILE` | Alternative YAML file. Relative paths resolve from the project root. |
+
+## Setting it up
+
+<Tabs inline>
+  <Tab title="Interactive">
+
+    ```bash
+    wp-ssh-bridge init
+    ```
+
+    Asks only for values it cannot infer. Inside DDEV it reads `ddev describe -j` and `.ddev/config.yaml` first, so the provider name, local URL, docroot, and temp directories are pre-filled.
+
+  </Tab>
+  <Tab title="Silent">
+
+    ```bash
+    wp-ssh-bridge init --silent \
+      --user deploy \
+      --host example.com \
+      --port 22 \
+      --remote-path /home/example/public_html \
+      --push-user deploy \
+      --push-host staging.example.com \
+      --push-remote-path /home/staging/public_html \
+      --push-url https://staging.example.com
+    ```
+
+    Repeatable, which makes it the right call for project bootstrap scripts.
+
+  </Tab>
+  <Tab title="Environment only">
+
+    No file at all, for CI or a throwaway run:
+
+    ```bash
+    export WP_SSH_PULL_USER=deploy
+    export WP_SSH_PULL_HOST=production.example.com
+    export WP_SSH_PULL_REMOTE_PATH=/home/production/public_html
+
+    wp-ssh-bridge pull --silent
+    ```
+
+  </Tab>
+</Tabs>
+
+## What `init` writes
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    ```text
+    .wp-ssh.yaml
+    ```
+
+  </Tab>
+  <Tab title="DDEV">
+
+    ```text
+    .ddev/wp-ssh.yaml            project config
+    .ddev/providers/wp-ssh.yaml  the DDEV provider
+    .ddev/config.wp-ssh.yaml     DDEV config additions
+    ```
+
+    The provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project. Project-local binary paths are written as relative `./...` commands, and local paths such as `local_wp_path` are stored relative to the project root when possible, so the files are safe to commit.
+
+    Regenerate them after updating the binary:
+
+    ```bash
+    ./.ddev/bin/wp-ssh-bridge provider install
+    ```
+
+    Print the generated YAML without writing anything:
+
+    ```bash
+    ./.ddev/bin/wp-ssh-bridge provider generate --kind all
+    ```
+
+  </Tab>
+  <Tab title="wp-env">
+
+    ```text
+    .wp-ssh.yaml
+    ```
+
+    No provider files: wp-env has no pull or push lifecycle to hook into. The file holds only portable values, because the install path and URL are resolved at run time, so it is safe to commit.
+
+    For automation, `.wp-env.json` supports lifecycle scripts:
+
+    ```json title=".wp-env.json"
+    {
+      "lifecycleScripts": {
+        "afterStart": "wp-ssh-bridge pull --silent --skip-files"
+      }
+    }
+    ```
+
+    Use that deliberately. `afterStart` runs on every start, not only on a fresh environment, so a full pull there is usually the wrong trade. `afterReset` is often the better hook.
+
+  </Tab>
+</Tabs>
+
+## Several sites in one repository [#monorepo]
+
+A monorepo with one WordPress site per folder needs no special support. Each folder is its own project with its own config, and three mechanisms cover the variations.
+
+**A config per folder.** In Generic mode the project root is the directory you run the command in, so a config file beside each site is all it takes.
+
+```text
+repo/
+├─ sites/
+│  ├─ alpha/
+│  │  ├─ .wp-ssh.yaml        pull source for alpha, local_wp_path: web
+│  │  └─ web/                the WordPress root
+│  └─ beta/
+│     ├─ .wp-ssh.yaml        pull source for beta, local_wp_path: public
+│     └─ public/
+└─ package.json
+```
+
+```bash
+cd sites/alpha && npx wp-ssh-bridge pull --silent
+```
+
+**Without changing directory.** `--project-root` selects the project, so a script at the repository root can drive any site:
+
+```bash
+npx wp-ssh-bridge pull --silent --project-root sites/alpha
+npx wp-ssh-bridge pull --silent --project-root sites/beta
+```
+
+**Several environments per site.** `--config-file` picks a named file, resolved from that project root, which is how one site keeps a production and a staging source side by side:
+
+```bash
+npx wp-ssh-bridge pull --silent \
+  --project-root sites/alpha \
+  --config-file .wp-ssh.staging.yaml
+```
+
+:::note[Where WordPress sits inside a folder]
+`local_wp_path` is relative to the project root, so a site whose WordPress lives in `web` or `public` sets it once in that folder's config. Leave it out when the project root is the WordPress root.
+:::
+
+:::tip[Wire it into npm scripts]
+With the package installed once at the repository root, each site becomes a named script and nobody has to remember paths:
+
+```json title="package.json"
+{
+  "scripts": {
+    "pull:alpha": "wp-ssh-bridge pull --silent --project-root sites/alpha",
+    "pull:beta": "wp-ssh-bridge pull --silent --project-root sites/beta"
+  }
+}
+```
+:::
+
+DDEV and wp-env projects resolve their root from their own marker file instead, walking up from the working directory. Detection stops at the first directory that is a project of its own, so a `.wp-env.json` or `.ddev/config.yaml` higher up in the monorepo cannot hijack a nested project.
+
+## Domain mappings [#domain-mappings]
+
+Use the CLI rather than hand-editing YAML. By default it writes both directions at once:
+
+```bash
+wp-ssh-bridge domains add --old example.com --new example.ddev.site
+```
+
+```yaml
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+push_domain_replacements:
+  - old: "example.ddev.site"
+    new: "example.com"
+```
+
+Use `--direction pull` or `--direction push` when only one side should change. List what is configured with:
+
+```bash
+wp-ssh-bridge domains list
+```
+
+**Prefer protocol-less domains.** Multisite network tables and constants such as `DOMAIN_CURRENT_SITE` store hosts without a scheme, so a protocol-less mapping catches both the bare host and the host inside complete URLs, exactly once, even when the local hostname contains the production hostname. Reach for full URLs only when a replacement has to be path-aware or scheme-specific.
+
+```yaml title="A multisite network"
+pull_domain_replacements:
+  - old: "example.com"
+    new: "example.ddev.site"
+  - old: "shop.example.com"
+    new: "shop.ddev.site"
+push_domain_replacements:
+  - old: "example.ddev.site"
+    new: "example.com"
+  - old: "shop.ddev.site"
+    new: "shop.example.com"
+```
+
+In DDEV mode, the local hosts from these mappings are persisted in `.ddev/config.yaml` as `additional_hostnames`, using DDEV's resolved TLD, so they actually resolve in your browser.
+
+## The plugin block list
+
+Pulls deactivate and delete production-only plugins that are actually installed. The default list is embedded in the binary; you do not have to configure anything for the common caching, security, and backup plugins.
+
+Add project-specific entries with a plain text file, one slug per line:
+
+```text title=".wp-ssh-plugins.txt"
+# One plugin slug per line. Everything after # is a comment.
+some-client-specific-monitoring
+another-production-only-plugin
+```
+
+```yaml title=".wp-ssh.yaml"
+plugin_remove_file: ".wp-ssh-plugins.txt"
+```
+
+Keep the path relative so the config stays portable. Your entries are added to the defaults, not a replacement for them.
+
+To run the cleanup on its own, against an already pulled site:
+
+```bash
+wp-ssh-bridge plugins remove
+```
+
+## Operation flags
+
+These apply to `pull`, `push`, and `clone` unless noted.
+
+| Flag | Effect |
+| --- | --- |
+| `--silent` | No prompts, no confirmation. Uses config, environment, and flags. |
+| `--yes`, `-y` | Confirm a direct operation without prompting. |
+| `--skip-db` | Files only. |
+| `--skip-files` | Database only. |
+| `--skip-import` | Pull only. Download the database without importing it. |
+| `--clone-images` | Include `wp-content/uploads` during a pull. |
+| `--skip-search-replace` | Skip URL replacement. |
+| `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during write operations. |
+| `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
+| `--clean-target` | Clone only. Remove pre-existing target content before syncing. Destructive. |
+| `--project-root` | Operate on another project directory. |
+| `--integration` | Pin the runtime for this run. |
+
+## Commands at a glance
+
+```text
+wp-ssh-bridge init [flags]                  Configure this project
+wp-ssh-bridge pull [flags]                  Pull database and files from the source host
+wp-ssh-bridge clone [flags]                 Pull as a site clone without dev-mode rewrites
+wp-ssh-bridge push [flags]                  Push database and files to the target host
+wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
+wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
+wp-ssh-bridge domains add --old A --new B   Add pull/push domain mappings
+wp-ssh-bridge domains list                  Show configured mappings
+wp-ssh-bridge plugins remove [wordpress-root]
+wp-ssh-bridge version [--short]
+```

@@ -103,10 +103,22 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Checksums
+      # Each archive is attached twice: under its versioned name, which is what
+      # a pinned install asks for, and under a version-free name, which makes
+      # github.com/<repo>/releases/latest/download/<name> a permanent link to
+      # the newest build. checksums.txt lists both names for the same digest,
+      # so `shasum -c --ignore-missing` verifies whichever file was fetched.
+      - name: Checksums and permanent-link copies
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
+          set -eu
           cd dist
+          for archive in *.tar.gz; do
+            cp "$archive" "$(echo "$archive" | sed "s/_${VERSION}_/_/")"
+          done
           sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -115,3 +127,56 @@ jobs:
             dist/*.tar.gz
             dist/checksums.txt
           generate_release_notes: true
+
+  # Publishes the npm wrapper. It carries no binary: its postinstall downloads
+  # the archive from the release this job runs after, which is why it needs the
+  # release to exist first and why its version must equal the tag.
+  npm:
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: npm
+    permissions:
+      contents: read
+      # Required for npm provenance, which signs the package with a short-lived
+      # OIDC token proving it was built from this workflow.
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12"
+          registry-url: https://registry.npmjs.org
+
+      - name: Match the package version to the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          npm version --no-git-tag-version --allow-same-version "${TAG#v}"
+          node -e "console.log('publishing', require('./package.json').name, require('./package.json').version)"
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Skip the download here: the runner does not need the binary, and the
+          # release assets may still be propagating.
+          WP_SSH_BRIDGE_SKIP_DOWNLOAD: "1"
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -eu
+          # Provenance requires a public repository, so it switches itself on
+          # once this one is public instead of failing the release before then.
+          if [ "${PRIVATE}" = "true" ]; then
+            echo "Repository is private; publishing without provenance."
+            npm publish --access public
+          else
+            npm publish --provenance --access public
+          fi
+

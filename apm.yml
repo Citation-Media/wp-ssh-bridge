@@ -1,0 +1,34 @@
+# Agent Package Manager manifest.
+#
+# This repository is an APM package so the wp-ssh-bridge skill can be installed
+# with `apm install Citation-Media/wp-ssh-bridge`. The skill itself lives in
+# skills/, the agentskills.io layout that `npx skills` understands as well, and
+# the documentation site publishes the same directory at
+# /.well-known/agent-skills/ for clients that need no repository access.
+name: wp-ssh-bridge
+version: 0.5.2
+description: Operate and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
+author: Citation Media
+license: MIT
+homepage: https://wp-ssh-bridge.citation.media
+repository: https://github.com/Citation-Media/wp-ssh-bridge
+keywords: [wordpress, ssh, wp-cli, ddev, wp-env, migration]
+type: skill
+includes: auto
+
+# Discovery catalogue served at https://wp-ssh-bridge.citation.media/marketplace.json.
+# `apm pack` regenerates .claude-plugin/marketplace.json from this block; the
+# copy under packages/documentation/public/ is what consumers register.
+marketplace:
+  owner:
+    name: Citation Media
+    url: https://github.com/Citation-Media
+  build:
+    tagPattern: "v{version}"
+  outputs:
+    claude: {}
+  packages:
+    - name: wp-ssh-bridge-cli
+      description: Operate and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
+      source: Citation-Media/wp-ssh-bridge
+      version: "^0.5.0"

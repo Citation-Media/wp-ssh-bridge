@@ -1,0 +1,265 @@
+---
+// Landing page. Uses PageLayout (header, theme, fonts, full-width slot) rather
+// than RootLayout, so there is no docs sidebar or table of contents here.
+import PageLayout from "blume/components/layout/PageLayout.astro";
+import CodeBlock from "blume/components/content/CodeBlock.astro";
+import data from "blume:data";
+import Footer from "./_home/Footer.astro";
+
+const { config } = data;
+
+const title = "Your local WordPress, as fresh as production";
+const description =
+  "wp-ssh-bridge pulls a live WordPress site into DDEV, wp-env, or any local checkout over plain SSH. Database, files, URL rewrites, and production-plugin cleanup in one command.";
+
+const capabilities = [
+  {
+    title: "Pull",
+    href: "/docs/commands/pull",
+    body: "Database and files from the live host into your local environment, with URLs rewritten and production-only plugins removed.",
+  },
+  {
+    title: "Push",
+    href: "/docs/commands/push",
+    body: "Send your local site to a staging target, with maintenance mode on the target and URL rewrites afterwards.",
+  },
+  {
+    title: "Clone",
+    href: "/docs/commands/clone",
+    body: "Copy a site host to host for a migration, keeping uploads, plugins, and wp-config.php, with the target credentials written in.",
+  },
+];
+
+const features = [
+  {
+    title: "Runs against SSH-only hosts",
+    body: "No agent, no plugin, no control panel. SSH access, PHP, and ideally WP-CLI. When WP-CLI is missing on the host, a temporary phar is downloaded, used, and removed.",
+  },
+  {
+    title: "Knows your environment",
+    body: "DDEV, wp-env, and plain checkouts are detected automatically. WP-CLI runs in the right place, and the config file stays portable enough to commit.",
+  },
+  {
+    title: "URLs that actually work",
+    body: "Search-replace through WP-CLI, multisite domain tables included, plus the hard-coded constants in wp-config.php that otherwise override the imported database.",
+  },
+  {
+    title: "Leaves production alone",
+    body: "A pull only reads. The temporary remote dump is deleted again, on success and on failure, and maintenance mode wraps every database import.",
+  },
+  {
+    title: "Fails before it breaks things",
+    body: "Preflight checks SSH, paths, permissions, and WP-CLI on both sides before any data moves, so a bad run stops at the start rather than halfway through an import.",
+  },
+  {
+    title: "Works when rsync does not",
+    body: "Missing rsync falls back to a tar stream over SSH, with a clear warning that stale files are not deleted on that path.",
+  },
+];
+
+const pullExample = `# Once per project
+wp-ssh-bridge init
+
+# Every time you need a current copy
+wp-ssh-bridge pull --silent`;
+
+const pipelineOutput = `✓ Pull source database exported
+✓ Database export downloaded
+✓ Remote database export removed
+✓ WordPress files synced
+✓ Local maintenance mode enabled
+✓ Local database imported
+✓ Local WordPress URL constants updated
+✓ URL replacement finished
+✓ Removed 3 blocked plugins
+✓ Local maintenance mode disabled`;
+---
+
+<PageLayout
+  site={{ title: config.title, description: config.description }}
+  logo={config.logo}
+  banner={config.banner}
+  analytics={config.analytics}
+  navigation={data.navigation}
+  favicon={config.favicon}
+  fontCssVars={data.fontCssVars}
+  themeMode={config.theme.mode}
+  searchEnabled={config.search.enabled}
+  siteUrl={config.site}
+  ogEnabled={config.og.enabled}
+  structuredDataEnabled={config.structuredData}
+  page={{ title: `${config.title} — ${title}`, description }}
+>
+  <!-- Hero -->
+  <section class="mx-auto max-w-6xl px-6 pt-20 pb-16 sm:pt-28 sm:pb-24">
+    <p
+      class="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground"
+    >
+      <span class="size-1.5 rounded-full bg-accent"></span>
+      A single binary for macOS and Linux
+    </p>
+    <h1
+      class="mt-6 max-w-3xl font-display text-4xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
+    >
+      {title}
+    </h1>
+    <p class="mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
+      {description}
+    </p>
+    <div class="mt-10 flex flex-wrap items-center gap-3">
+      <a
+        href="/docs/quickstart"
+        class="rounded-blume bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90"
+      >
+        Start in five minutes
+      </a>
+      <a
+        href="/docs"
+        class="rounded-blume border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        Read the docs
+      </a>
+    </div>
+    <div class="mt-12 max-w-2xl">
+      <CodeBlock lang="bash" code={pullExample} />
+    </div>
+  </section>
+
+  <!-- Who it is for -->
+  <section class="border-y border-border bg-muted/40">
+    <div class="mx-auto max-w-6xl px-6 py-16 sm:py-20">
+      <h2 class="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+        Built for the people who do this weekly
+      </h2>
+      <p class="mt-4 max-w-2xl text-muted-foreground">
+        If your work depends on a current copy of a live site, or you move sites between hosts, this replaces the
+        twenty-minute ritual of exports, uploads, search-replace, and plugin cleanup.
+      </p>
+      <div class="mt-10 grid gap-6 sm:grid-cols-2">
+        <div class="rounded-blume border border-border bg-background p-6">
+          <h3 class="font-display text-lg font-semibold text-foreground">Agency and product developers</h3>
+          <p class="mt-2 text-sm text-muted-foreground">
+            Refresh your DDEV or wp-env project from production before every feature, bugfix, or client demo. The
+            defaults are the ones you would have picked: no media, no caching plugins, URLs already rewritten.
+          </p>
+        </div>
+        <div class="rounded-blume border border-border bg-background p-6">
+          <h3 class="font-display text-lg font-semibold text-foreground">Anyone migrating a site</h3>
+          <p class="mt-2 text-sm text-muted-foreground">
+            Copy a live site host to host, uploads and plugins included, with the new database credentials written
+            into wp-config.php before the import so the result is ready to serve.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Three commands -->
+  <section class="mx-auto max-w-6xl px-6 py-16 sm:py-20">
+    <h2 class="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+      Three commands
+    </h2>
+    <div class="mt-10 grid gap-6 sm:grid-cols-3">
+      {
+        capabilities.map((item) => (
+          <a
+            href={item.href}
+            class="group rounded-blume border border-border p-6 transition-colors hover:border-accent"
+          >
+            <h3 class="font-display text-lg font-semibold text-foreground">
+              <code class="font-mono">{item.title.toLowerCase()}</code>
+            </h3>
+            <p class="mt-2 text-sm text-muted-foreground">{item.body}</p>
+            <span class="mt-4 inline-block text-sm font-medium text-accent">
+              Read the guide
+              <span class="transition-transform group-hover:translate-x-0.5 inline-block">→</span>
+            </span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Pipeline -->
+  <section class="border-y border-border bg-muted/40">
+    <div class="mx-auto grid max-w-6xl gap-10 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:items-center">
+      <div>
+        <h2 class="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          One command, the whole chore
+        </h2>
+        <p class="mt-4 text-muted-foreground">
+          Export, download, sync, import, rewrite, clean up. Every step is checked before it runs and cleaned up
+          afterwards, including when something fails halfway.
+        </p>
+        <ul class="mt-6 space-y-3 text-sm text-muted-foreground">
+          <li class="flex gap-3">
+            <span class="mt-2 size-1.5 shrink-0 rounded-full bg-accent"></span>
+            Caches, backups, logs, and uploads stay on the server unless you ask for them.
+          </li>
+          <li class="flex gap-3">
+            <span class="mt-2 size-1.5 shrink-0 rounded-full bg-accent"></span>
+            Multisite domains are rewritten per blog, in the site and blogs tables too.
+          </li>
+          <li class="flex gap-3">
+            <span class="mt-2 size-1.5 shrink-0 rounded-full bg-accent"></span>
+            Hosts with unusual MariaDB client layouts are handled automatically.
+          </li>
+        </ul>
+        <a href="/docs/how-it-works" class="mt-8 inline-block text-sm font-medium text-accent">
+          See the full pipeline →
+        </a>
+      </div>
+      <div>
+        <CodeBlock lang="text" code={pipelineOutput} />
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="mx-auto max-w-6xl px-6 py-16 sm:py-20">
+    <h2 class="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+      What you get
+    </h2>
+    <div class="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        features.map((feature) => (
+          <div>
+            <h3 class="font-display text-base font-semibold text-foreground">{feature.title}</h3>
+            <p class="mt-2 text-sm text-muted-foreground">{feature.body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Closing call to action -->
+  <section class="border-t border-border">
+    <div class="mx-auto max-w-6xl px-6 py-16 sm:py-24">
+      <div class="rounded-blume border border-border bg-muted/40 p-8 sm:p-12">
+        <h2 class="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          Pull your first site
+        </h2>
+        <p class="mt-3 max-w-2xl text-muted-foreground">
+          Install the binary, answer three questions about the source host, and run a pull. The quickstart covers
+          DDEV, wp-env, and plain checkouts side by side.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <a
+            href="/docs/quickstart"
+            class="rounded-blume bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90"
+          >
+            Quickstart
+          </a>
+          <a
+            href="/docs/installation"
+            class="rounded-blume border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Installation options
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <Footer slot="footer" />
+</PageLayout>

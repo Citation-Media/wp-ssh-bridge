@@ -1,0 +1,27 @@
+---
+// Marketing footer for the landing page. Docs pages use the standard chrome.
+import data from "blume:data";
+
+const { config } = data;
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-border">
+  <div class="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-10 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p class="font-display text-sm font-semibold text-foreground">{config.title}</p>
+      <p class="mt-1 text-sm text-muted-foreground">
+        WordPress sync over plain SSH, built and maintained by Citation Media.
+      </p>
+    </div>
+    <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
+      <a class="transition-colors hover:text-foreground" href="/docs">Documentation</a>
+      <a class="transition-colors hover:text-foreground" href="/docs/quickstart">Quickstart</a>
+      <a class="transition-colors hover:text-foreground" href="/changelog">Changelog</a>
+      <a class="transition-colors hover:text-foreground" href="/changelog/rss.xml">RSS</a>
+    </nav>
+  </div>
+  <div class="mx-auto max-w-6xl px-6 pb-10 text-xs text-muted-foreground">
+    © {year} Citation Media
+  </div>
+</footer>

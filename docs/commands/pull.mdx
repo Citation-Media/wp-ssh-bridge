@@ -1,0 +1,223 @@
+---
+title: Pull
+description: Copy a live WordPress site into your local environment with wp-ssh-bridge pull, for DDEV, wp-env, or a plain checkout, including URL rewrites and production-plugin cleanup.
+sidebar:
+  icon: download
+---
+
+`pull` brings the remote site to you. It exports the source database with WP-CLI, downloads it, syncs the files, imports the database locally, rewrites every URL for your environment, and removes plugins that only belong on production.
+
+It is the command you run before you start working, and again whenever the local copy has gone stale.
+
+:::note[Reads from the source, writes locally]
+A pull never modifies the remote site. It creates a temporary database dump in the remote temp directory and deletes it again, including on failure. Everything else it changes is on your machine.
+:::
+
+## Run it
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    In a plain WordPress checkout, `pull` uses the local `wp` binary. If none is available, a managed `wp-cli.phar` is downloaded into the project's scratch directory and used instead.
+
+    ```bash
+    wp-ssh-bridge pull --silent
+    ```
+
+    Everything the command needs comes from `.wp-ssh.yaml`, which [`init`](/docs/quickstart) writes. For a one-off source, pass it inline:
+
+    ```bash
+    wp-ssh-bridge pull --silent \
+      --user deploy \
+      --host example.com \
+      --remote-path /home/example/public_html
+    ```
+
+    The local WordPress root defaults to the project directory. Set `local_wp_path` when WordPress lives in a subdirectory such as `web` or `public`.
+
+  </Tab>
+  <Tab title="DDEV">
+
+    In a DDEV project you have two equivalent paths. Both run the same Go pipeline; they differ only in who prints the lifecycle output.
+
+    ```bash title="Native DDEV lifecycle"
+    ddev pull wp-ssh -y
+    ```
+
+    ```bash title="Direct, easier to script"
+    ./.ddev/bin/wp-ssh-bridge pull --silent
+    ```
+
+    Local WP-CLI runs as `ddev wp` inside the web container. The docroot, project URL, and temp directories come from `ddev describe`, so `init` fills them in for you.
+
+    Native `ddev pull` does not accept CLI flags such as `--user`. Use DDEV's inline environment for one-off overrides:
+
+    ```bash
+    # Per-developer SSH user without putting it in the versioned config
+    ddev pull wp-ssh --environment=WP_SSH_PULL_USER=your-ssh-user -y
+    ```
+
+    ```bash
+    # A complete one-off source
+    ddev pull wp-ssh \
+      --environment=WP_SSH_PULL_USER=deploy,WP_SSH_PULL_HOST=example.com,WP_SSH_PULL_REMOTE_PATH=/home/example/public_html \
+      -y
+    ```
+
+    :::tip[Teams with individual SSH users]
+    Leave `pull_user` out of the versioned `.ddev/wp-ssh.yaml` and let each developer supply it through `WP_SSH_PULL_USER`. Everything else stays shared.
+    :::
+
+    After a pull, DDEV also learns the local hostnames derived from your domain mappings. They are written into `.ddev/config.yaml` as `additional_hostnames`, using DDEV's resolved TLD, so multisite domains resolve locally.
+
+  </Tab>
+  <Tab title="wp-env">
+
+    The environment must be running, because the CLI reads the install path and URL from `wp-env status --json` and runs WP-CLI inside the `cli` container.
+
+    ```bash
+    npx wp-env start
+    wp-ssh-bridge pull --silent
+    ```
+
+    Three things work differently here, all handled automatically:
+
+    - Local WP-CLI runs as `wp-env run cli wp --path=/var/www/html`. A host `wp` cannot reach the container database, whose port changes on every start.
+    - The database dump is staged inside the tree wp-env mounts at `/var/www/html`, so the import runs against the container database. After a successful import the dump is deleted and a deny-all `.htaccess` is written beside it, because that directory is served over HTTP.
+    - `wp-config.php` is preserved, never pulled. wp-env regenerates it with working local credentials on every start.
+
+    :::warning[Mounted plugins and themes are skipped]
+    If `.wp-env.json` declares `plugins`, `themes`, or `mappings`, wp-env bind-mounts those directories over `wp-content`. Files pulled into them would be shadowed by the mounts, and deleting a live mountpoint can fail, so those paths are excluded and the CLI warns before it starts. For production content only, sync the database alone:
+
+    ```bash
+    wp-ssh-bridge pull --silent --skip-files
+    ```
+    :::
+
+    The Docker runtime is required. The experimental Playground runtime has no `wp-env run`, so preflight rejects it with a message telling you to restart with `--runtime=docker`.
+
+  </Tab>
+</Tabs>
+
+## What happens, in order
+
+<Steps>
+  <Step title="Preflight">
+    Local `ssh`, the runtime (DDEV or wp-env) when applicable, local WP-CLI when the database is involved, local path readable and writable, SSH access to the source, remote path readable, remote temp directory writable, and remote WP-CLI. Failures stop the run before anything changes.
+  </Step>
+  <Step title="Database export and download">
+    `wp db export` on the source writes a gzipped dump into the remote temp directory. It is downloaded, then removed remotely, and the cleanup is retried if the run fails.
+  </Step>
+  <Step title="File sync">
+    rsync mirrors the remote WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
+  </Step>
+  <Step title="Maintenance mode and import">
+    The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`.
+  </Step>
+  <Step title="URL rewrites">
+    A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database.
+  </Step>
+  <Step title="Plugin cleanup">
+    Plugins on the block list that are actually installed are deactivated and deleted through WP-CLI. Skipped in wp-env projects with mounts, where those directories are your own working tree.
+  </Step>
+</Steps>
+
+## What is excluded
+
+File pulls skip paths that are either local-only or pointless to copy:
+
+```text
+.git/                              your repository
+.ddev/                             local DDEV state, including its logs
+.wp-ssh/                           the CLI's scratch directory
+wp-config-ddev.php                 DDEV's generated config
+wp-content/cache/                  page and object caches
+wp-content/upgrade/                WordPress update staging
+wp-content/updraft/                UpdraftPlus backups
+wp-content/ai1wm-backups/          All-in-One WP Migration backups
+wp-content/languages/wpml/queue/   WPML translation queue
+wp-content/uploads/                unless --clone-images
+*.log                              at any depth in the WordPress tree
+blocked plugin directories         from the block list
+```
+
+`wp-config.php` is pulled and sanitised in DDEV mode, and preserved in Generic and wp-env mode, where the local file already carries working database credentials.
+
+## Flags
+
+| Flag | Effect |
+| --- | --- |
+| `--silent` | No prompts and no confirmation. Uses config, environment, and flags. The flag for scripts. |
+| `--skip-files` | Database only. Useful when you just want fresh content. |
+| `--skip-db` | Files only. |
+| `--skip-import` | Downloads the database without importing it. Search-replace is skipped too. |
+| `--clone-images` | Include `wp-content/uploads`. Off by default because media is usually the bulk of a site. |
+| `--skip-search-replace` | Leave URLs untouched after the import. |
+| `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
+| `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
+| `--user`, `--host`, `--port`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. |
+| `--local-wp-path`, `--local-url` | Override the local WordPress root and URL. |
+| `--config-file` | Read another YAML file, for example `.wp-ssh.production.yaml`. |
+| `--integration` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. |
+
+## Common variations
+
+```bash title="Just the content, no files"
+wp-ssh-bridge pull --silent --skip-files
+```
+
+```bash title="A full copy including media"
+wp-ssh-bridge pull --silent --clone-images
+```
+
+```bash title="A second source, such as staging"
+# Keep a separate config file per source and select it per run.
+wp-ssh-bridge pull --silent --config-file .wp-ssh.staging.yaml
+```
+
+```bash title="Inspect the dump before importing"
+wp-ssh-bridge pull --silent --skip-files --skip-import
+```
+
+## Verify
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    ```bash
+    wp option get home
+    wp plugin list
+    ```
+
+  </Tab>
+  <Tab title="DDEV">
+
+    ```bash
+    ddev wp option get home
+    ddev wp plugin list
+    ```
+
+  </Tab>
+  <Tab title="wp-env">
+
+    ```bash
+    npx wp-env run cli wp option get home
+    npx wp-env run cli wp plugin list
+    ```
+
+  </Tab>
+</Tabs>
+
+The home URL should be local, and production-only plugins should be gone.
+
+## When something fails
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| `Permission denied (publickey)` | Your key is not accepted by the source host. Test with `ssh user@host` first; the CLI uses the same OpenSSH configuration. |
+| Remote path errors | `pull_remote_path` must be absolute and contain `wp-config.php`. |
+| `mariadb-dump` not found | A host that ships only the legacy MySQL client names. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
+| Local files not writable | Fix ownership on the local WordPress directory, then run again. The error names the exact path. |
+| Warning about stale files | The tar fallback is in use because rsync is missing on one side. Install rsync, or accept that removed files stay behind. |
+
+More in [Troubleshooting](/docs/troubleshooting).

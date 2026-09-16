@@ -1,0 +1,51 @@
+{
+  "name": "@citation-media/wp-ssh-bridge",
+  "version": "0.5.2",
+  "description": "Pull, push, and clone WordPress databases and files over SSH. Installs the wp-ssh-bridge binary for your platform.",
+  "license": "MIT",
+  "homepage": "https://wp-ssh-bridge.citation.media",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Citation-Media/wp-ssh-bridge.git",
+    "directory": "packages/npm"
+  },
+  "bugs": "https://github.com/Citation-Media/wp-ssh-bridge/issues",
+  "keywords": [
+    "wordpress",
+    "ssh",
+    "wp-cli",
+    "ddev",
+    "wp-env",
+    "rsync",
+    "migration",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "wp-ssh-bridge": "bin/wp-ssh-bridge.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "scripts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "prepublishOnly": "node scripts/check-release.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

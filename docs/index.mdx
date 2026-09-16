@@ -1,0 +1,74 @@
+---
+title: Introduction
+description: wp-ssh-bridge is a single binary that pulls, pushes, and clones WordPress databases and files over plain SSH, so you get a fresh copy of the live site whenever you need one.
+sidebar:
+  icon: book-open
+---
+
+`wp-ssh-bridge` moves a WordPress site between an SSH host and your machine. It exports the database with WP-CLI, syncs the files with rsync, rewrites URLs for the new environment, and strips what should never leave production. It runs from your laptop or a CI runner and needs nothing installed on the server beyond SSH and PHP.
+
+It exists for one recurring chore: **getting a current copy of the live site into a local environment, again and again**, without a ritual of manual exports, plugin uninstalls, and search-replace commands.
+
+## Who it is for
+
+<CardGroup cols={3}>
+  <Card title="Daily clones" icon="refresh-cw">
+    Refresh your DDEV or wp-env project from production before every feature, bugfix, or client demo. One command, a coffee, done.
+  </Card>
+  <Card title="Site migrations" icon="truck">
+    Move a site from one host to another with `clone`. Uploads, plugins, and `wp-config.php` come along, and the target database credentials are written for you.
+  </Card>
+  <Card title="Staging pushes" icon="upload">
+    Push a local database and file tree to a staging server, with URL rewrites on the target and maintenance mode while it runs.
+  </Card>
+</CardGroup>
+
+:::tip[Nothing to install on the server]
+The remote host needs SSH key access, PHP, and ideally WP-CLI. If `wp` is missing or broken there, the CLI downloads a temporary `wp-cli.phar`, uses it for the job, and removes it again.
+:::
+
+## What a pull does for you
+
+- Runs preflight checks before touching anything: SSH access, remote path, temp directory, WP-CLI on both sides, and whether the local files are writable.
+- Exports the remote database with WP-CLI, downloads it, imports it locally, and removes the remote dump.
+- Mirrors the WordPress files with rsync, or a tar-over-SSH fallback when rsync is missing, while skipping caches, backups, logs, `.git`, and uploads unless you ask for media.
+- Rewrites the site URL, multisite domains, and hard-coded `wp-config.php` constants for the local environment.
+- Deactivates and deletes plugins that only belong on production, such as caching, security, and backup tools, using a built-in block list you can extend.
+- Puts the local site into maintenance mode while the database is imported, and takes it out again even when something fails.
+
+See [How it works](/docs/how-it-works) for the full pipeline and the safety rules behind it.
+
+## Three commands
+
+| Command | What it does | Runs in |
+| --- | --- | --- |
+| [`pull`](/docs/commands/pull) | Copies the remote site into your local environment as a development copy. | Generic, DDEV, wp-env |
+| [`push`](/docs/commands/push) | Uploads your local database and files to a remote target and rewrites URLs there. | Generic, DDEV |
+| [`clone`](/docs/commands/clone) | Copies a live site into a plain directory as a site-like install, ready to become the new host. | Generic only |
+
+## Three runtimes, one binary
+
+The CLI detects where it runs and adapts. You never pick a mode by hand unless a project is ambiguous.
+
+| Runtime | Detected by | Config file | Local WP-CLI |
+| --- | --- | --- | --- |
+| **Generic** (standalone) | Neither marker below is present | `.wp-ssh.yaml` | Host `wp`, or a managed phar downloaded on demand |
+| **DDEV** | `.ddev/config.yaml` plus a working `ddev describe` | `.ddev/wp-ssh.yaml` and generated provider files | `ddev wp` |
+| **wp-env** | `.wp-env.json` or `.wp-env.override.json` plus `wp-env status` | `.wp-ssh.yaml` | `wp-env run cli wp` |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" href="/docs/quickstart" icon="rocket">
+    From zero to a pulled site in five minutes.
+  </Card>
+  <Card title="Installation" href="/docs/installation" icon="download">
+    Install script, manual downloads, per-project versus global installs.
+  </Card>
+  <Card title="How it works" href="/docs/how-it-works" icon="layers">
+    Runtimes, the pipeline, transports, and safety rules.
+  </Card>
+  <Card title="Configuration" href="/docs/configuration" icon="settings">
+    Every config key, environment variable, and flag in one place.
+  </Card>
+</CardGroup>

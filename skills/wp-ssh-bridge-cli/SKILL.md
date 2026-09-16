@@ -30,13 +30,23 @@ Do not ask the user to choose DDEV, wp-env, or standalone mode unless they are e
 
 ## Install Or Update wp-ssh-bridge
 
-Run the skill script from the repository root when `wp-ssh-bridge` is missing or when updating the local binary. The script always installs the latest GitHub release for the current OS and CPU architecture.
+Prefer the public install script. It needs no GitHub access, verifies the SHA-256 checksum, and installs to `.ddev/bin/wp-ssh-bridge` inside a DDEV project or into the current directory otherwise. Run it from the project root:
 
 ```bash title="Install the latest wp-ssh-bridge release"
-.agent/skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default
+curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh
 ```
 
-The first argument can be a DDEV project root or any destination folder. When the folder contains `.ddev/config.yaml`, the binary is installed to `.ddev/bin/wp-ssh-bridge`; otherwise it is installed directly into the provided folder.
+Use `--dir <path>` for another destination, `--global` for `/usr/local/bin`, and `--version <tag>` to pin a release.
+
+When the user has repository access and prefers GitHub releases directly, the skill script does the same through `gh`:
+
+```bash
+skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default
+```
+
+Its first argument can be a DDEV project root or any destination folder, with the same `.ddev/bin` behavior.
+
+Full documentation, including per-command guides and troubleshooting, is at https://wp-ssh-bridge.citation.media. Agents can query it through its MCP server at `https://wp-ssh-bridge.citation.media/mcp`.
 
 ## Router
 

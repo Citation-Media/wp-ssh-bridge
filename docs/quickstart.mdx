@@ -1,0 +1,211 @@
+---
+title: Quickstart
+description: Install wp-ssh-bridge, point it at a live site over SSH, and pull a fresh copy into DDEV, wp-env, or a plain checkout in five minutes.
+sidebar:
+  order: 1
+  icon: rocket
+---
+
+This guide takes you from nothing to a working local copy of a live WordPress site. Pick your local environment once in the tabs below; every tab group on this page switches together.
+
+## Before you start
+
+- **SSH key access** to the live host. The CLI uses your normal OpenSSH setup, including `~/.ssh/config` and keys loaded in your agent. It never asks for a password or a private key.
+- **The absolute path** of the remote WordPress root, meaning the directory that contains `wp-config.php`, for example `/home/example/public_html`.
+- **A local project**: a DDEV project, a running wp-env project, or a plain WordPress checkout.
+
+:::note[Safe to run against production]
+`pull` only reads from the source host. The one write operation, `push`, is covered in [its own guide](/docs/commands/push) and asks for confirmation before it touches the target.
+:::
+
+<Steps>
+  <Step title="Install the CLI">
+
+    <Tabs inline param="install" syncKey="install">
+      <Tab title="npm">
+
+        For a project, a dev dependency is the least friction: it installs with everything else and your lockfile pins the version, so the whole team runs the same build.
+
+        ```bash
+        npm install --save-dev @citation-media/wp-ssh-bridge
+        ```
+
+        Commands then run through `npx`, as in `npx wp-ssh-bridge pull --silent`. The rest of this guide writes them without the prefix; add it if you installed this way.
+
+      </Tab>
+      <Tab title="Install script">
+
+        Use this when the project has no Node toolchain, or for a machine-wide install.
+
+        <include>/_snippets/install.mdx</include>
+
+      </Tab>
+    </Tabs>
+
+    Manual downloads and checksum verification are on the [Installation](/docs/installation) page.
+
+  </Step>
+  <Step title="Initialise the project">
+
+    Run `init` from the project root. It asks only for values it cannot infer, then writes a config file you can commit.
+
+    <Tabs inline param="integration" syncKey="integration">
+      <Tab title="Generic">
+
+        ```bash
+        wp-ssh-bridge init
+        ```
+
+        Writes `.wp-ssh.yaml` next to your WordPress root.
+
+      </Tab>
+      <Tab title="DDEV">
+
+        ```bash
+        ./.ddev/bin/wp-ssh-bridge init
+        ```
+
+        Reads `ddev describe` for the docroot and URL, then writes `.ddev/wp-ssh.yaml` plus the provider files that make `ddev pull wp-ssh` work.
+
+      </Tab>
+      <Tab title="wp-env">
+
+        ```bash
+        # The environment must be running so the CLI can read its install path.
+        npx wp-env start
+        wp-ssh-bridge init
+        ```
+
+        Writes `.wp-ssh.yaml`. The install path and URL come from `wp-env status` at run time, so the file stays portable and safe to commit.
+
+      </Tab>
+    </Tabs>
+
+    Prefer no prompts? Answer everything up front. The three flags below are the minimum for a pull.
+
+    ```bash title="Silent setup"
+    # --user         SSH user on the live host
+    # --host         SSH host (an alias from ~/.ssh/config works too)
+    # --remote-path  the directory that contains wp-config.php
+    wp-ssh-bridge init --silent \
+      --user deploy \
+      --host example.com \
+      --remote-path /home/example/public_html
+    ```
+
+  </Step>
+  <Step title="Pull the site">
+
+    <Tabs inline param="integration" syncKey="integration">
+      <Tab title="Generic">
+
+        ```bash
+        wp-ssh-bridge pull --silent
+        ```
+
+        Uses the host `wp` for the import. If `wp` is missing, a managed `wp-cli.phar` is downloaded into the project's scratch directory.
+
+      </Tab>
+      <Tab title="DDEV">
+
+        ```bash
+        # Native DDEV lifecycle, with DDEV's own output and hooks
+        ddev pull wp-ssh -y
+        ```
+
+        The same pipeline is also available directly, which is handy in scripts:
+
+        ```bash
+        ./.ddev/bin/wp-ssh-bridge pull --silent
+        ```
+
+      </Tab>
+      <Tab title="wp-env">
+
+        ```bash
+        wp-ssh-bridge pull --silent
+        ```
+
+        If `.wp-env.json` mounts your own `plugins`, `themes`, or `mappings`, those paths are skipped automatically because the mounts would shadow them. For content only, sync just the database:
+
+        ```bash
+        wp-ssh-bridge pull --silent --skip-files
+        ```
+
+      </Tab>
+    </Tabs>
+
+    A successful pull looks like this:
+
+    ```text
+    ✓ Pull source database exported
+    ✓ Database export downloaded
+    ✓ Remote database export removed
+    ✓ WordPress files synced
+    ✓ Local maintenance mode enabled
+    ✓ Local database imported
+    ✓ Local WordPress URL constants updated
+    ✓ URL replacement finished
+    ✓ Removed 3 blocked plugins
+    ✓ Local maintenance mode disabled
+    ```
+
+  </Step>
+  <Step title="Verify">
+
+    <Tabs inline param="integration" syncKey="integration">
+      <Tab title="Generic">
+
+        ```bash
+        wp option get home
+        wp plugin list
+        ```
+
+      </Tab>
+      <Tab title="DDEV">
+
+        ```bash
+        ddev wp option get home
+        ddev wp plugin list
+        ```
+
+      </Tab>
+      <Tab title="wp-env">
+
+        ```bash
+        npx wp-env run cli wp option get home
+        npx wp-env run cli wp plugin list
+        ```
+
+      </Tab>
+    </Tabs>
+
+    The home URL should be your local URL, and production-only plugins such as caching or security tools should be gone from the list.
+
+  </Step>
+</Steps>
+
+## Want the media too?
+
+Uploads are skipped by default because they are usually the largest part of a site and rarely needed for development. Include them once, or set `clone_images: true` in the config file to make it permanent:
+
+```bash
+wp-ssh-bridge pull --silent --clone-images
+```
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Pull in depth" href="/docs/commands/pull" icon="download">
+    Every flag, what is excluded, and what happens after the import.
+  </Card>
+  <Card title="Configuration" href="/docs/configuration" icon="settings">
+    Config file, environment variables, domain mappings, and the plugin block list.
+  </Card>
+  <Card title="Push to staging" href="/docs/commands/push" icon="upload">
+    Send your local site to a remote target, safely.
+  </Card>
+  <Card title="Clone a site" href="/docs/commands/clone" icon="copy">
+    Host-to-host copies for migrations.
+  </Card>
+</CardGroup>
