@@ -178,7 +178,7 @@ Use these only when the user needs a partial or special operation:
 --silent               reduce output and skip direct confirmation
 ```
 
-For migration pulls, use `references/migration.md` instead of this general workflow.
+For clone pulls (host-to-host site migrations), use `references/clone.md` instead of this general workflow.
 
 ## Verification
 

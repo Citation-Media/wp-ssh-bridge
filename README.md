@@ -125,14 +125,14 @@ One-shot overrides are supported:
 wp-ssh-bridge pull --silent --user deploy --host example.com --remote-path /home/example/public_html
 ```
 
-### Migration
+### Clone
 
-Use `migrate` when pulling a WordPress site as a migration target instead of a local development copy. Migration mode still exports/imports the database, syncs files, and runs configured URL search-replace, but it skips DDEV/dev rewrites and blocked-plugin cleanup.
+Use `clone` when pulling a WordPress site as a standalone copy, for example when migrating it to a new host, instead of a local development copy. Clone mode still exports/imports the database, syncs files, and runs configured URL search-replace, but it skips DDEV/dev rewrites and blocked-plugin cleanup.
 
-Migration is standalone-only: it moves a live site host-to-host into a plain target directory. `migrate` exits with an error when run against a DDEV or wp-env project root — use the normal pull for local onboarding.
+Clone is standalone-only: it copies a live site host-to-host into a plain target directory. `clone` exits with an error when run against a DDEV or wp-env project root — use the normal pull for local onboarding.
 
 ```bash
-wp-ssh-bridge migrate --silent \
+wp-ssh-bridge clone --silent \
   --user deploy \
   --host source.example.com \
   --remote-path /home/source/public_html \
@@ -142,7 +142,7 @@ wp-ssh-bridge migrate --silent \
   --db-password target_password
 ```
 
-Migration pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. There is no `push --migrate`; remote migration needs a separate target `wp-config.php` rewrite design.
+Clone pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. There is no `push --clone`; cloning to a remote target needs a separate target `wp-config.php` rewrite design.
 
 ## Push
 
@@ -193,7 +193,7 @@ What differs from standalone mode:
 - The database dump is written into `<install path>/WordPress/.wp-ssh/.downloads/` because that tree is what wp-env mounts at `/var/www/html`. The import then runs in the container against the mapped path.
 - `wp-config.php` is preserved, not pulled. wp-env generates it with working local database credentials and rewrites it on every start, so the CLI leaves its URL constants alone.
 - The experimental Playground runtime (`wp-env start --runtime=playground`) has no `wp-env run` command, so preflight rejects it. Use the Docker runtime.
-- `migrate` is rejected in wp-env projects for the same reason as in DDEV projects: the import would go to the container database instead of the migration target.
+- `clone` is rejected in wp-env projects for the same reason as in DDEV projects: the import would go to the container database instead of the clone target.
 - `push` is rejected in wp-env projects. The local tree is a wp-env-managed core install, uploads are excluded from pulls by default, and every mounted `plugins`/`themes`/`mappings` path is empty on the host — pushing it with `rsync --delete` would erase those files on the target. Push from a standalone checkout instead.
 - Blocked-plugin cleanup is skipped when `.wp-env.json` declares mounts, because `wp plugin delete` runs inside the container where those mounts are your working tree.
 - The staged database dump is removed after a successful import and a deny-all `.htaccess` is written beside it, because the scratch directory is inside the tree wp-env serves over HTTP.
@@ -327,11 +327,11 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `pull_domain_replacements` | - | Optional pull-time old-to-new domain/URL replacements. Prefer protocol-less domains for multisite mappings. |
 | `push_domain_replacements` | - | Optional push-time old-to-new domain/URL replacements. Usually the inverse of pull replacements. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
-| `migrate_db_host` | `WP_SSH_MIGRATE_DB_HOST` | Target DB host written to `wp-config.php` during `migrate`. |
-| `migrate_db_name` | `WP_SSH_MIGRATE_DB_NAME` | Target DB name written to `wp-config.php` during `migrate`. |
-| `migrate_db_user` | `WP_SSH_MIGRATE_DB_USER` | Target DB user written to `wp-config.php` during `migrate`. |
-| `migrate_db_password` | `WP_SSH_MIGRATE_DB_PASSWORD` | Target DB password written to `wp-config.php` during `migrate`. |
-| `migrate_db_prefix` | `WP_SSH_MIGRATE_DB_PREFIX` | Optional target table prefix written to `wp-config.php` during `migrate`. |
+| `clone_db_host` | `WP_SSH_CLONE_DB_HOST` | Target DB host written to `wp-config.php` during `clone`. |
+| `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Target DB name written to `wp-config.php` during `clone`. |
+| `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Target DB user written to `wp-config.php` during `clone`. |
+| `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` | Target DB password written to `wp-config.php` during `clone`. |
+| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Optional target table prefix written to `wp-config.php` during `clone`. |
 
 Add mappings to an already configured project with the CLI:
 

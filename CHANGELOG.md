@@ -11,6 +11,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Changed
 
+- Rename the `migrate` command to `clone`. The target database settings move with it: the config keys `migrate_db_host`, `migrate_db_name`, `migrate_db_user`, `migrate_db_password`, and `migrate_db_prefix` become `clone_db_*`, and the `WP_SSH_MIGRATE_DB_*` environment variables become `WP_SSH_CLONE_DB_*`. The old command name, keys, and variables are no longer accepted; running `migrate` prints a hint pointing to `clone`. Update saved `.wp-ssh.yaml` files and automation.
 - Preserve the local `wp-config.php` during pulls in wp-env mode, as in standalone mode. wp-env generates it with working local database credentials and rewrites it on every start, so its URL constants are left untouched.
 - Reject `migrate` in wp-env projects, matching the existing DDEV restriction. The import would otherwise go to the container database instead of the injected target credentials.
 - Resolve the project root for `plugins remove` in wp-env projects instead of failing with a DDEV-only lookup error.

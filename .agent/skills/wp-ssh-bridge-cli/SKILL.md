@@ -1,6 +1,6 @@
 ---
 name: wp-ssh-bridge-cli
-description: Guide for using the wp-ssh-bridge CLI to pull, migrate, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, wp-env (@wordpress/env) local environments, migration mode, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, migrate, and push workflows.
+description: Guide for using the wp-ssh-bridge CLI to pull, clone, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, wp-env (@wordpress/env) local environments, clone mode for host-to-host site migrations, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, clone, and push workflows.
 ---
 
 # wp-ssh-bridge CLI
@@ -19,7 +19,7 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
    - Whether URL search-replace should be skipped.
    - Multisite/custom domain mappings, when production domains must be rewritten locally or pushed back remotely.
    - Any project-specific blocked-plugin list.
-   - For `migrate`, the target DB host, name, user, password, and optional table prefix.
+   - For `clone`, the target DB host, name, user, password, and optional table prefix.
 4. Confirm which configuration mode the user wants:
    - Args mode for one-shot commands.
    - Env mode for CI, shells, or temporary overrides.
@@ -44,7 +44,7 @@ Read the most specific workflow reference first. Read only one reference unless 
 
 | User intent | Reference |
 | --- | --- |
-| Site migration, `wp-ssh-bridge migrate`, target DB credential injection, or host-to-host migration questions | `references/migration.md` |
+| Cloning a site to a standalone host (site migration), `wp-ssh-bridge clone`, target DB credential injection, or host-to-host copy questions | `references/clone.md` |
 | DDEV projects, generated provider files, `ddev pull`, `ddev push`, or DDEV debugging | `references/ddev.md` |
 | wp-env / `@wordpress/env` projects, `.wp-env.json`, or `wp-env run cli` troubleshooting | `references/wp-env.md` |
 | Standalone usage, direct CLI commands, args/env/config mode, or non-DDEV troubleshooting | `references/general-usage.md` |
@@ -63,12 +63,12 @@ Read the most specific workflow reference first. Read only one reference unless 
 - Protocol-less mappings replace the hostname once in both full URLs and bare multisite domain values, including targets that contain the source hostname such as `example.com.ddev.site`. DDEV's resolved `DDEV_TLD` is used for custom TLDs; `DDEV_HOSTNAME` lists all routed FQDNs, but explicit domain mappings determine production-to-local pairing.
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
-- For migration-style pulls, read `references/migration.md` before recommending commands. Recommend `wp-ssh-bridge migrate`; do not recommend `pull --migrate` or `push --migrate`.
+- For clone-style pulls (host-to-host site migrations), read `references/clone.md` before recommending commands. Recommend `wp-ssh-bridge clone`; do not recommend `pull --clone`, `push --clone`, or the former `migrate` command name.
 - The CLI runs preflight checks before pull/push work: local `ssh`, DDEV when applicable, local WP-CLI when DB work needs it, local path readability/writeability, SSH access, remote path access, remote temp writeability, and remote WP-CLI when DB work needs it.
 - Netcup/Plesk hosts may report MariaDB through `mysql --version` while exposing only `mysql` and `mysqldump`. The CLI reports `MariaDB client compatibility enabled`, creates temporary remote `mariadb`/`mariadb-dump` aliases for database work, and removes aliases plus remote database transfer files on success or error. A failure mentioning missing `mariadb-dump` indicates an older CLI that needs updating or a host missing `mysqldump` too.
 - File pulls use plain rsync `--delete` for stale synced paths and a sender-side `*.log` hide rule so WordPress-tree log files at any depth are not copied and are deleted locally, while local-only `.ddev/` including DDEV logs, `.git/`, config files, uploads when media cloning is off, and blocked-plugin paths are preserved for later CLI cleanup.
 - When `rsync` is unavailable locally or on the remote host, the CLI automatically falls back to a tar-pipe-over-SSH transport for file and database transfers. Use `--force-scp` to force this fallback even when rsync is available. The scp/tar transport does not remove stale files (no `--delete` equivalent); the CLI emits a warning when it uses this path.
-- Migrations are additive by default on both transports (pre-existing target content is kept). For `migrate` only, `--clean-target` removes pre-existing target content before syncing so it does not survive: on rsync it adds `--delete`, on scp/tar it empties the target WordPress directory first. It is destructive and rejected on `pull`/`push`; see `references/migration.md`. Normal (non-migration) pulls still mirror the source with rsync `--delete`.
+- Clones are additive by default on both transports (pre-existing target content is kept). For `clone` only, `--clean-target` removes pre-existing target content before syncing so it does not survive: on rsync it adds `--delete`, on scp/tar it empties the target WordPress directory first. It is destructive and rejected on `pull`/`push`; see `references/clone.md`. Normal (non-clone) pulls still mirror the source with rsync `--delete`.
 - Do not instruct the AI to run lower-level provider callbacks, hand-written rsync commands, direct WP-CLI repair commands, or manual file edits as the normal DDEV workflow. If DDEV setup or pull fails, show the exact error, ask the user to confirm debugging, and suggest the smallest next debugging step.
 
 ## Response Shape

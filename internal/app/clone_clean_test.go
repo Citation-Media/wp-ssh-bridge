@@ -63,8 +63,8 @@ func TestEmptyDirExceptRefusesHomeDirectory(t *testing.T) {
 	}
 }
 
-func TestMigrationCleanKeepIncludesToolFilesAndBinary(t *testing.T) {
-	keep := migrationCleanKeep("/opt/bin/wp-ssh-bridge")
+func TestCloneCleanKeepIncludesToolFilesAndBinary(t *testing.T) {
+	keep := cloneCleanKeep("/opt/bin/wp-ssh-bridge")
 	for _, name := range []string{".git", ".ddev", ".wp-ssh", ".wp-ssh.yaml", "wp-config-ddev.php", "wp-ssh-bridge"} {
 		if !keep[name] {
 			t.Errorf("expected %q in the preserved set", name)
@@ -75,27 +75,27 @@ func TestMigrationCleanKeepIncludesToolFilesAndBinary(t *testing.T) {
 	}
 }
 
-func TestCleanTargetFlagIsMigrateOnly(t *testing.T) {
-	opts, err := parseConfigCommand("migrate", []string{"--clean-target"}, io.Discard)
+func TestCleanTargetFlagIsCloneOnly(t *testing.T) {
+	opts, err := parseConfigCommand("clone", []string{"--clean-target"}, io.Discard)
 	if err != nil {
-		t.Fatalf("migrate should accept --clean-target: %v", err)
+		t.Fatalf("clone should accept --clean-target: %v", err)
 	}
 	if !opts.CleanTarget {
-		t.Error("expected CleanTarget to be set for migrate")
+		t.Error("expected CleanTarget to be set for clone")
 	}
 
 	for _, name := range []string{"pull", "push", "init"} {
 		if _, err := parseConfigCommand(name, []string{"--clean-target"}, io.Discard); err == nil {
-			t.Errorf("expected %q to reject --clean-target (migrate-only)", name)
+			t.Errorf("expected %q to reject --clean-target (clone-only)", name)
 		}
 	}
 }
 
-// TestFilesPullMigrateRsyncGatesDeleteOnCleanTarget verifies the rsync side of the flag:
-// a migration is additive (no --delete) unless --clean-target is set, while --safe-links is
-// always present. Normal (non-migrate) pulls keep --delete unconditionally, covered by
+// TestFilesPullCloneRsyncGatesDeleteOnCleanTarget verifies the rsync side of the flag:
+// a clone is additive (no --delete) unless --clean-target is set, while --safe-links is
+// always present. Normal (non-clone) pulls keep --delete unconditionally, covered by
 // TestFilesPullRsyncUsesDeleteAndHideRuleForRecursiveLogs.
-func TestFilesPullMigrateRsyncGatesDeleteOnCleanTarget(t *testing.T) {
+func TestFilesPullCloneRsyncGatesDeleteOnCleanTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		cleanTarget bool
@@ -127,7 +127,7 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 				t.Fatal(err)
 			}
 			if got := strings.Contains(string(args), "--delete"); got != tc.wantDelete {
-				t.Fatalf("migrate rsync --delete present = %v, want %v\nargs:\n%s", got, tc.wantDelete, args)
+				t.Fatalf("clone rsync --delete present = %v, want %v\nargs:\n%s", got, tc.wantDelete, args)
 			}
 			if !strings.Contains(string(args), "--safe-links") {
 				t.Errorf("expected --safe-links in rsync args regardless of --clean-target:\n%s", args)
@@ -136,7 +136,7 @@ printf '%s\n' "$@" > `+shellQuote(argsPath)+`
 	}
 }
 
-func TestCleanMigrationTargetEmptiesResolvedDestination(t *testing.T) {
+func TestCleanCloneTargetEmptiesResolvedDestination(t *testing.T) {
 	projectRoot := t.TempDir()
 	// Destination is a WordPress subdirectory of the project.
 	writeFile(t, filepath.Join(projectRoot, "wp", "index.html"), "host default")
@@ -146,8 +146,8 @@ func TestCleanMigrationTargetEmptiesResolvedDestination(t *testing.T) {
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
 	cfg := Config{LocalWPPath: "wp"}
 
-	if err := app.cleanMigrationTarget(projectRoot, cfg); err != nil {
-		t.Fatalf("cleanMigrationTarget() error = %v", err)
+	if err := app.cleanCloneTarget(projectRoot, cfg); err != nil {
+		t.Fatalf("cleanCloneTarget() error = %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(projectRoot, "wp", "index.html")); !os.IsNotExist(err) {

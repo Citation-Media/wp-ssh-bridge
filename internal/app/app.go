@@ -42,8 +42,8 @@ func (a *App) run(args []string) error {
 		return a.commandInit(args[1:])
 	case "pull":
 		return a.commandPull(args[1:])
-	case "migrate":
-		return a.commandMigrate(args[1:])
+	case "clone":
+		return a.commandClone(args[1:])
 	case "push":
 		return a.commandPush(args[1:])
 	case "provider":
@@ -52,6 +52,8 @@ func (a *App) run(args []string) error {
 		return a.commandPlugins(args[1:])
 	case "domains":
 		return a.commandDomains(args[1:])
+	case "migrate":
+		return errors.New(`the "migrate" command was renamed to "clone"; run "wp-ssh-bridge clone" with the same flags`)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -64,7 +66,7 @@ func (a *App) printHelp() {
 Usage:
   wp-ssh-bridge init [flags]                  Configure this project
   wp-ssh-bridge pull [flags]                  Pull database and files from the source host
-  wp-ssh-bridge migrate [flags]               Pull as a site migration without dev-mode rewrites
+  wp-ssh-bridge clone [flags]                 Pull as a site clone without dev-mode rewrites
   wp-ssh-bridge push [flags]                  Push database and files to the target host
   wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
   wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
@@ -90,12 +92,12 @@ Common flags:
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
-Migration flags:
-  --db-host string           Migration target DB host
-  --db-name string           Migration target DB name
-  --db-user string           Migration target DB user
-  --db-password string       Migration target DB password
-  --db-prefix string         Migration target table prefix
+Clone flags:
+  --db-host string           Clone target DB host
+  --db-name string           Clone target DB name
+  --db-user string           Clone target DB user
+  --db-password string       Clone target DB password
+  --db-prefix string         Clone target table prefix
   --clean-target             Remove pre-existing target content before syncing
 
 Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
@@ -209,20 +211,20 @@ func (a *App) commandPull(args []string) error {
 	return a.runPullPipeline(context.Background(), adapter, cfg, opts)
 }
 
-// commandMigrate runs the pull pipeline in migration mode with target DB config injection.
-func (a *App) commandMigrate(args []string) error {
-	opts, err := parseConfigCommand("migrate", args, a.Stderr)
+// commandClone runs the pull pipeline in clone mode with target DB config injection.
+func (a *App) commandClone(args []string) error {
+	opts, err := parseConfigCommand("clone", args, a.Stderr)
 	if err != nil {
 		return err
 	}
-	opts.Migrate = true
+	opts.Clone = true
 
 	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
 	if err != nil {
 		return err
 	}
 	adapter := adapterForRuntime(runtime)
-	if err := ensureMigrateAdapterSupported(adapter); err != nil {
+	if err := ensureCloneAdapterSupported(adapter); err != nil {
 		return err
 	}
 	cfg, err := loadConfigForRuntime(runtime, opts.ConfigFile)
@@ -240,7 +242,7 @@ func (a *App) commandMigrate(args []string) error {
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
 	}
-	if err := opts.validateMigrationCommand(cfg); err != nil {
+	if err := opts.validateCloneCommand(cfg); err != nil {
 		return err
 	}
 	if err := adapter.PreparePull(a, cfg, opts); err != nil {
@@ -262,16 +264,16 @@ func ensurePushAdapterSupported(adapter runtimeAdapter) error {
 	return nil
 }
 
-// ensureMigrateAdapterSupported blocks migrate in DDEV and wp-env projects. migrate is a
-// live host-to-host move into a standalone target: those adapters would route the database
+// ensureCloneAdapterSupported blocks clone in DDEV and wp-env projects. clone is a
+// live host-to-host copy into a standalone target: those adapters would route the database
 // import through `ddev wp` or `wp-env run cli` into the local container DB instead of the
-// injected target credentials, silently migrating to the wrong database.
-func ensureMigrateAdapterSupported(adapter runtimeAdapter) error {
+// injected target credentials, silently cloning into the wrong database.
+func ensureCloneAdapterSupported(adapter runtimeAdapter) error {
 	switch adapter.Mode() {
 	case modeDDEV:
-		return errors.New("migrate does not support DDEV projects; it moves a live WordPress site host-to-host into a standalone target. Run migrate against a plain destination directory, not a DDEV project root")
+		return errors.New("clone does not support DDEV projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a DDEV project root")
 	case modeWPEnv:
-		return errors.New("migrate does not support wp-env projects; it moves a live WordPress site host-to-host into a standalone target. Run migrate against a plain destination directory, not a wp-env project root")
+		return errors.New("clone does not support wp-env projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a wp-env project root")
 	}
 	return nil
 }
@@ -746,27 +748,27 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if !opts.SkipFiles {
-		// For migrate, --clean-target empties the destination before extraction so
+		// For clone, --clean-target empties the destination before extraction so
 		// pre-existing content on the target (e.g. a web host's default files) does not
 		// survive. rsync achieves this via --delete; the scp/tar transport cannot, so it
 		// needs an explicit wipe. Only the scp/tar path requires it.
-		if opts.Migrate && opts.CleanTarget && useSCP {
-			if err := a.cleanMigrationTarget(root, cfg); err != nil {
+		if opts.Clone && opts.CleanTarget && useSCP {
+			if err := a.cleanCloneTarget(root, cfg); err != nil {
 				return err
 			}
 		}
 		// Only DDEV replaces wp-config.php from the remote and sanitizes it afterwards.
 		// Standalone and wp-env keep the local file, which already carries working local
 		// database credentials.
-		preserveLocalWPConfig := adapter.Mode() != modeDDEV && !opts.Migrate
-		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Migrate, opts.CleanTarget, useSCP); err != nil {
+		preserveLocalWPConfig := adapter.Mode() != modeDDEV && !opts.Clone
+		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Clone, opts.CleanTarget, useSCP); err != nil {
 			return err
 		}
 	}
 
 	shouldImportDB := !opts.SkipDB && !opts.SkipImport
-	if opts.Migrate && (shouldImportDB || !opts.SkipFiles) {
-		if err := a.applyMigrationWPConfig(root, cfg); err != nil {
+	if opts.Clone && (shouldImportDB || !opts.SkipFiles) {
+		if err := a.applyCloneWPConfig(root, cfg); err != nil {
 			return err
 		}
 	}
@@ -784,7 +786,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if !shouldImportDB {
 		cfg.SkipSearchReplace = true
 	}
-	return a.postPull(ctx, adapter, cfg, opts.Migrate)
+	return a.postPull(ctx, adapter, cfg, opts.Clone)
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
@@ -824,7 +826,7 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	return a.postPush(ctx, root, cfg)
 }
 
-// configOptions tracks flags shared by init, pull, migrate, and push.
+// configOptions tracks flags shared by init, pull, clone, and push.
 type configOptions struct {
 	ProjectRoot         string
 	ConfigFile          string
@@ -834,7 +836,7 @@ type configOptions struct {
 	SkipDB              bool
 	SkipFiles           bool
 	SkipImport          bool
-	Migrate             bool
+	Clone               bool
 	CleanTarget         bool
 	ForceScpTransport   bool
 	SkipMaintenanceMode bool
@@ -855,11 +857,11 @@ type configOptions struct {
 	PluginRemoveFile    string
 	LocalURL            string
 	SkipSearchReplace   bool
-	MigrateDBHost       string
-	MigrateDBName       string
-	MigrateDBUser       string
-	MigrateDBPassword   string
-	MigrateDBPrefix     string
+	CloneDBHost         string
+	CloneDBName         string
+	CloneDBUser         string
+	CloneDBPassword     string
+	CloneDBPrefix       string
 	Integration         string
 }
 
@@ -897,12 +899,12 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
-	if name == "migrate" {
-		fs.StringVar(&opts.MigrateDBHost, "db-host", "", "migration target DB host")
-		fs.StringVar(&opts.MigrateDBName, "db-name", "", "migration target DB name")
-		fs.StringVar(&opts.MigrateDBUser, "db-user", "", "migration target DB user")
-		fs.StringVar(&opts.MigrateDBPassword, "db-password", "", "migration target DB password")
-		fs.StringVar(&opts.MigrateDBPrefix, "db-prefix", "", "migration target table prefix")
+	if name == "clone" {
+		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
+		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
+		fs.StringVar(&opts.CloneDBUser, "db-user", "", "clone target DB user")
+		fs.StringVar(&opts.CloneDBPassword, "db-password", "", "clone target DB password")
+		fs.StringVar(&opts.CloneDBPrefix, "db-prefix", "", "clone target table prefix")
 		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target content before syncing (rsync --delete or scp/tar target cleanup)")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -920,23 +922,23 @@ func (opts configOptions) rejectOperationFlags(command string) error {
 		return fmt.Errorf("--skip-files only applies to pull or push, not %s", command)
 	case opts.SkipImport:
 		return fmt.Errorf("--skip-import only applies to pull, not %s", command)
-	case opts.hasMigrationDBOptions():
-		return fmt.Errorf("--db-* migration options only apply to migrate, not %s", command)
+	case opts.hasCloneDBOptions():
+		return fmt.Errorf("--db-* options only apply to clone, not %s", command)
 	default:
 		return nil
 	}
 }
 
-func (opts configOptions) validateMigrationCommand(cfg Config) error {
-	return cfg.validateMigrationDBCredentials(!opts.SkipFiles)
+func (opts configOptions) validateCloneCommand(cfg Config) error {
+	return cfg.validateCloneDBCredentials(!opts.SkipFiles)
 }
 
-func (opts configOptions) hasMigrationDBOptions() bool {
-	return opts.MigrateDBHost != "" ||
-		opts.MigrateDBName != "" ||
-		opts.MigrateDBUser != "" ||
-		opts.MigrateDBPassword != "" ||
-		opts.MigrateDBPrefix != ""
+func (opts configOptions) hasCloneDBOptions() bool {
+	return opts.CloneDBHost != "" ||
+		opts.CloneDBName != "" ||
+		opts.CloneDBUser != "" ||
+		opts.CloneDBPassword != "" ||
+		opts.CloneDBPrefix != ""
 }
 
 // providerInstallOptions is intentionally narrow because provider install only writes generated files.
@@ -1021,20 +1023,20 @@ func (opts configOptions) apply(cfg Config) Config {
 	if opts.SkipSearchReplace {
 		cfg.SkipSearchReplace = true
 	}
-	if opts.MigrateDBHost != "" {
-		cfg.MigrateDBHost = opts.MigrateDBHost
+	if opts.CloneDBHost != "" {
+		cfg.CloneDBHost = opts.CloneDBHost
 	}
-	if opts.MigrateDBName != "" {
-		cfg.MigrateDBName = opts.MigrateDBName
+	if opts.CloneDBName != "" {
+		cfg.CloneDBName = opts.CloneDBName
 	}
-	if opts.MigrateDBUser != "" {
-		cfg.MigrateDBUser = opts.MigrateDBUser
+	if opts.CloneDBUser != "" {
+		cfg.CloneDBUser = opts.CloneDBUser
 	}
-	if opts.MigrateDBPassword != "" {
-		cfg.MigrateDBPassword = opts.MigrateDBPassword
+	if opts.CloneDBPassword != "" {
+		cfg.CloneDBPassword = opts.CloneDBPassword
 	}
-	if opts.MigrateDBPrefix != "" {
-		cfg.MigrateDBPrefix = opts.MigrateDBPrefix
+	if opts.CloneDBPrefix != "" {
+		cfg.CloneDBPrefix = opts.CloneDBPrefix
 	}
 	return cfg
 }

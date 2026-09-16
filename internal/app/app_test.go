@@ -90,83 +90,83 @@ func TestDomainsAddConfiguresPullAndInversePushMappings(t *testing.T) {
 	}
 }
 
-func TestPullRejectsMigrationFlags(t *testing.T) {
+func TestPullRejectsCloneFlags(t *testing.T) {
 	t.Parallel()
-	if _, err := parseConfigCommand("pull", []string{"--migrate"}, new(strings.Builder)); err == nil {
-		t.Fatal("parseConfigCommand(pull) accepted --migrate")
+	if _, err := parseConfigCommand("pull", []string{"--clone"}, new(strings.Builder)); err == nil {
+		t.Fatal("parseConfigCommand(pull) accepted --clone")
 	}
 	if _, err := parseConfigCommand("pull", []string{"--db-host", "db.example.com"}, new(strings.Builder)); err == nil {
 		t.Fatal("parseConfigCommand(pull) accepted --db-host")
 	}
 }
 
-func TestMigrateRejectsDDEVAdapter(t *testing.T) {
+func TestCloneRejectsDDEVAdapter(t *testing.T) {
 	t.Parallel()
 	ddev := adapterForRuntime(runtimeContext{Mode: modeDDEV, Root: t.TempDir()})
-	if err := ensureMigrateAdapterSupported(ddev); err == nil {
-		t.Fatal("ensureMigrateAdapterSupported() accepted the DDEV adapter")
+	if err := ensureCloneAdapterSupported(ddev); err == nil {
+		t.Fatal("ensureCloneAdapterSupported() accepted the DDEV adapter")
 	}
 	standalone := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: t.TempDir()})
-	if err := ensureMigrateAdapterSupported(standalone); err != nil {
-		t.Fatalf("ensureMigrateAdapterSupported() rejected the standalone adapter: %v", err)
+	if err := ensureCloneAdapterSupported(standalone); err != nil {
+		t.Fatalf("ensureCloneAdapterSupported() rejected the standalone adapter: %v", err)
 	}
 }
 
-func TestMigrateCommandRequiresCredentialsForFilePull(t *testing.T) {
+func TestCloneCommandRequiresCredentialsForFilePull(t *testing.T) {
 	t.Parallel()
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
 	app.WorkDir = t.TempDir()
 
-	err := app.commandMigrate([]string{
+	err := app.commandClone([]string{
 		"--silent",
 		"--user", "deploy",
 		"--host", "source.example.com",
 		"--remote-path", "/var/www/html",
 	})
 	if err == nil {
-		t.Fatal("commandMigrate() accepted file migration without credentials")
+		t.Fatal("commandClone() accepted file clone without credentials")
 	}
-	if !strings.Contains(err.Error(), "migrate requires target database credentials") {
+	if !strings.Contains(err.Error(), "clone requires target database credentials") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestMigrateCommandAcceptsDBFlags(t *testing.T) {
+func TestCloneCommandAcceptsDBFlags(t *testing.T) {
 	t.Parallel()
-	opts, err := parseConfigCommand("migrate", []string{
+	opts, err := parseConfigCommand("clone", []string{
 		"--db-host", "db.example.com",
 		"--db-name", "target",
 		"--db-user", "user",
 		"--db-password", "pass",
 	}, new(strings.Builder))
 	if err != nil {
-		t.Fatalf("parseConfigCommand(migrate) error = %v", err)
+		t.Fatalf("parseConfigCommand(clone) error = %v", err)
 	}
-	opts.Migrate = true
+	opts.Clone = true
 
 	cfg := Config{
-		MigrateDBHost:     opts.MigrateDBHost,
-		MigrateDBName:     opts.MigrateDBName,
-		MigrateDBUser:     opts.MigrateDBUser,
-		MigrateDBPassword: opts.MigrateDBPassword,
+		CloneDBHost:     opts.CloneDBHost,
+		CloneDBName:     opts.CloneDBName,
+		CloneDBUser:     opts.CloneDBUser,
+		CloneDBPassword: opts.CloneDBPassword,
 	}
-	if err := opts.validateMigrationCommand(cfg); err != nil {
-		t.Fatalf("validateMigrationCommand() rejected complete credentials: %v", err)
+	if err := opts.validateCloneCommand(cfg); err != nil {
+		t.Fatalf("validateCloneCommand() rejected complete credentials: %v", err)
 	}
 }
 
-func TestPushRejectsMigrateFlag(t *testing.T) {
+func TestPushRejectsCloneFlag(t *testing.T) {
 	t.Parallel()
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
 	app.WorkDir = t.TempDir()
 
-	err := app.commandPush([]string{"--migrate"})
+	err := app.commandPush([]string{"--clone"})
 	if err == nil {
-		t.Fatal("commandPush() accepted --migrate")
+		t.Fatal("commandPush() accepted --clone")
 	}
 	if !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatalf("unexpected error: %v", err)
@@ -214,5 +214,17 @@ func TestFillPushConfigDoesNotPromptForConfiguredRequiredValues(t *testing.T) {
 	}
 	if cfg.PushUser != "release" {
 		t.Fatalf("push SSH user changed unexpectedly: %q", cfg.PushUser)
+	}
+}
+
+func TestMigrateCommandNameReportsRename(t *testing.T) {
+	t.Parallel()
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := app.run([]string{"migrate", "--silent"})
+	if err == nil {
+		t.Fatal("run(migrate) succeeded; want an error pointing to clone")
+	}
+	if !strings.Contains(err.Error(), `renamed to "clone"`) {
+		t.Fatalf("run(migrate) error = %q, want the clone rename hint", err)
 	}
 }

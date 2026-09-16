@@ -126,9 +126,9 @@ func (a *App) removeRemoteDatabaseDump(ctx context.Context, projectRoot string, 
 
 // filesPull syncs the remote WordPress tree into the local project.
 // When useSCP is true it uses a tar pipe over SSH instead of rsync.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, cleanTarget bool, useSCP bool) error {
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool, cleanTarget bool, useSCP bool) error {
 	if useSCP {
-		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, migrate, cleanTarget)
+		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, clone, cleanTarget)
 	}
 
 	target := cfg.pullTarget()
@@ -143,13 +143,13 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 
 	args := rsyncArchiveArgs()
 	// A normal pull always mirrors the source, so it deletes stale local files. A
-	// migration is additive by default and only removes pre-existing target content when
+	// clone is additive by default and only removes pre-existing target content when
 	// --clean-target (cleanTarget) is set, so both transports behave consistently.
-	if !migrate || cleanTarget {
+	if !clone || cleanTarget {
 		args = append(args, "--delete")
 	}
 	args = append(args, "--safe-links")
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, migrate)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, clone)
 	if err != nil {
 		return err
 	}
@@ -168,9 +168,9 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 
 // filesPullTar syncs the remote WordPress tree using a tar pipe over SSH.
 // The tar step itself only adds or updates files; when cleanTarget is set the destination
-// was already emptied by cleanMigrationTarget before this runs (there is no rsync --delete
+// was already emptied by cleanCloneTarget before this runs (there is no rsync --delete
 // equivalent for the tar transport).
-func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool, cleanTarget bool) error {
+func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool, cleanTarget bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -181,7 +181,7 @@ func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, 
 		return err
 	}
 
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, migrate)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, clone)
 	if err != nil {
 		return err
 	}
@@ -205,17 +205,17 @@ func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, 
 	})
 }
 
-// cleanMigrationTarget empties the migration destination before the scp/tar transport
+// cleanCloneTarget empties the clone destination before the scp/tar transport
 // extracts into it, so pre-existing content on the target (for example a web host's
-// default files) does not survive the migration. The rsync transport achieves the same
+// default files) does not survive the clone. The rsync transport achieves the same
 // via --delete, which the scp/tar transport lacks. A small set of operational entries
 // (VCS metadata, DDEV/tool state, this tool's own config and binary) is preserved,
-// mirroring the rsync migrate excludes.
-func (a *App) cleanMigrationTarget(projectRoot string, cfg Config) error {
+// mirroring the rsync clone excludes.
+func (a *App) cleanCloneTarget(projectRoot string, cfg Config) error {
 	destination := localWPRoot(projectRoot, cfg)
-	keep := migrationCleanKeep(defaultBinaryPath())
+	keep := cloneCleanKeep(defaultBinaryPath())
 	a.UI.Warning("clean-target: emptying %s before extract (preserved: %s)", destination, strings.Join(sortedKeep(keep), ", "))
-	return a.runStep("Clearing migration target", "Migration target cleared", func() error {
+	return a.runStep("Clearing clone target", "Clone target cleared", func() error {
 		if err := os.MkdirAll(destination, 0o755); err != nil {
 			return err
 		}
@@ -223,12 +223,12 @@ func (a *App) cleanMigrationTarget(projectRoot string, cfg Config) error {
 	})
 }
 
-// migrationCleanKeep is the set of top-level entries cleanMigrationTarget must not delete:
+// cloneCleanKeep is the set of top-level entries cleanCloneTarget must not delete:
 // version-control and tooling state plus this tool's own config file and binary, which may
-// live in the destination when it is the project root. It mirrors the rsync migrate
+// live in the destination when it is the project root. It mirrors the rsync clone
 // excludes (.git, .ddev, .wp-ssh, wp-config-ddev.php) so both transports preserve the same
 // operational files.
-func migrationCleanKeep(binaryPath string) map[string]bool {
+func cloneCleanKeep(binaryPath string) map[string]bool {
 	keep := map[string]bool{
 		".git":               true,
 		".ddev":              true,
@@ -311,12 +311,12 @@ func (a *App) filesImport() {
 }
 
 // postPull applies local cleanup after a database or file pull.
-func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, migrate bool) error {
+func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
 	projectRoot := adapter.Root()
-	// Migration writes the target DB credentials before import (see runPullPipeline),
+	// Clone writes the target DB credentials before import (see runPullPipeline),
 	// so it only runs URL updates and keeps blocked plugins and the runtime's
 	// dev-mode post-pull hooks are skipped.
-	if !migrate {
+	if !clone {
 		for _, hook := range adapter.PostPullHooks() {
 			if err := hook(ctx, a, projectRoot, cfg); err != nil {
 				return err
@@ -329,14 +329,14 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 	if err := a.replaceSiteURLs(ctx, projectRoot, cfg); err != nil {
 		return err
 	}
-	if migrate {
+	if clone {
 		return nil
 	}
 	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
-func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool, migrate bool) ([]string, error) {
+func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool) ([]string, error) {
 	excludes := []string{
 		".git/",
 		".ddev/",
@@ -353,7 +353,7 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		excludes = append(excludes, "wp-config.php")
 	}
 
-	if !cfg.CloneImages && !migrate {
+	if !cfg.CloneImages && !clone {
 		excludes = append(excludes, "wp-content/uploads/")
 	}
 
@@ -366,7 +366,7 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		}
 	}
 
-	if migrate {
+	if clone {
 		return excludes, nil
 	}
 
@@ -527,9 +527,9 @@ func phpStringLiteral(value string) string {
 	return "'" + value + "'"
 }
 
-// applyMigrationWPConfig writes target database settings into the copied wp-config.php.
-func (a *App) applyMigrationWPConfig(projectRoot string, cfg Config) error {
-	if !cfg.hasAnyMigrationDBCredential() {
+// applyCloneWPConfig writes target database settings into the copied wp-config.php.
+func (a *App) applyCloneWPConfig(projectRoot string, cfg Config) error {
+	if !cfg.hasAnyCloneDBCredential() {
 		return nil
 	}
 
@@ -537,7 +537,7 @@ func (a *App) applyMigrationWPConfig(projectRoot string, cfg Config) error {
 	contents, err := os.ReadFile(wpConfig)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("wp-config.php not found at %s; migrate needs a copied or existing target config", wpConfig)
+			return fmt.Errorf("wp-config.php not found at %s; clone needs a copied or existing target config", wpConfig)
 		}
 		return err
 	}
@@ -546,21 +546,21 @@ func (a *App) applyMigrationWPConfig(projectRoot string, cfg Config) error {
 	if updated == string(contents) {
 		return nil
 	}
-	return a.runStep("Writing migration database credentials", "Migration database credentials written", func() error {
+	return a.runStep("Writing clone database credentials", "Clone database credentials written", func() error {
 		return os.WriteFile(wpConfig, []byte(updated), 0o644)
 	})
 }
 
-// updateWPConfigDBCredentialsContents is pure so migration config rewrites are testable.
+// updateWPConfigDBCredentialsContents is pure so clone config rewrites are testable.
 func updateWPConfigDBCredentialsContents(contents string, cfg Config) string {
 	defines := []struct {
 		name  string
 		value string
 	}{
-		{name: "DB_NAME", value: phpStringLiteral(cfg.MigrateDBName)},
-		{name: "DB_USER", value: phpStringLiteral(cfg.MigrateDBUser)},
-		{name: "DB_PASSWORD", value: phpStringLiteral(cfg.MigrateDBPassword)},
-		{name: "DB_HOST", value: phpStringLiteral(cfg.MigrateDBHost)},
+		{name: "DB_NAME", value: phpStringLiteral(cfg.CloneDBName)},
+		{name: "DB_USER", value: phpStringLiteral(cfg.CloneDBUser)},
+		{name: "DB_PASSWORD", value: phpStringLiteral(cfg.CloneDBPassword)},
+		{name: "DB_HOST", value: phpStringLiteral(cfg.CloneDBHost)},
 	}
 
 	insertions := []string{}
@@ -572,12 +572,12 @@ func updateWPConfigDBCredentialsContents(contents string, cfg Config) string {
 		}
 		insertions = append(insertions, wpConfigDefineLine(define.name, define.value))
 	}
-	if cfg.MigrateDBPrefix != "" {
-		updated, replaced := replaceWPConfigTablePrefix(contents, phpStringLiteral(cfg.MigrateDBPrefix))
+	if cfg.CloneDBPrefix != "" {
+		updated, replaced := replaceWPConfigTablePrefix(contents, phpStringLiteral(cfg.CloneDBPrefix))
 		if replaced {
 			contents = updated
 		} else {
-			insertions = append(insertions, wpConfigTablePrefixLine(phpStringLiteral(cfg.MigrateDBPrefix)))
+			insertions = append(insertions, wpConfigTablePrefixLine(phpStringLiteral(cfg.CloneDBPrefix)))
 		}
 	}
 	if len(insertions) == 0 {
