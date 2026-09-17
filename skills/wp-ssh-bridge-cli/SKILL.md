@@ -57,7 +57,7 @@ skills/wp-ssh-bridge-cli/scripts/install-wp-ssh-bridge.sh dev/wordpress-default
 
 Its first argument can be a DDEV project root or any destination folder, with the same `.ddev/bin` behavior.
 
-Full documentation, including per-command guides and troubleshooting, is at https://wp-ssh-bridge.citation.media. Agents can query it through its MCP server at `https://wp-ssh-bridge.citation.media/mcp`.
+Full documentation, including per-command guides and troubleshooting, is at https://wp-ssh-bridge.citation.media. When this skill and the matching reference do not cover an error or option, read https://wp-ssh-bridge.citation.media/llms.txt and follow it to the page you need; every page is also served as Markdown by appending `.md` to its path. Use the MCP server at `https://wp-ssh-bridge.citation.media/mcp` instead when it is already configured. Do not go there first; the skill and references are the curated answer.
 
 ## Set Up A Project Without Prompts
 
