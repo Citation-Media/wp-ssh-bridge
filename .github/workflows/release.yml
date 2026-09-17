@@ -97,6 +97,11 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      # Needed for CHANGELOG.md and scripts/release-notes.sh; the tag's own
+      # checkout is what makes the notes match the release.
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download archives
         uses: actions/download-artifact@v4
         with:
@@ -120,13 +125,31 @@ jobs:
           sha256sum *.tar.gz > checksums.txt
           cat checksums.txt
 
+      # Release notes come from CHANGELOG.md, which is also what the
+      # documentation site renders as its changelog. A tag without a section
+      # falls back to generated notes rather than publishing an empty release.
+      - name: Collect the release notes
+        id: notes
+        run: |
+          set -eu
+          if scripts/release-notes.sh "${{ github.ref_name }}" > release-notes.md; then
+            echo "GENERATE=false" >> "$GITHUB_OUTPUT"
+            echo "Using the CHANGELOG section for ${{ github.ref_name }}:"
+            cat release-notes.md
+          else
+            echo "GENERATE=true" >> "$GITHUB_OUTPUT"
+            echo "No CHANGELOG section for ${{ github.ref_name }}; falling back to generated notes."
+            : > release-notes.md
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/checksums.txt
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.GENERATE == 'false' && 'release-notes.md' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.GENERATE }}
 
   # Publishes the npm wrapper through npm trusted publishing: the job proves its
   # identity with a short-lived OIDC token instead of a long-lived NPM_TOKEN, and
