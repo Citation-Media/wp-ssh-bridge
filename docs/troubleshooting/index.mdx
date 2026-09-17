@@ -61,6 +61,7 @@ There is no key or password option, by design. Configure access in `~/.ssh/confi
 | `this is a wp-env project but wp-env status --json did not succeed` | Start or install the environment. Do not reach for `--integration standalone` as a workaround for anything that leads to a push; see below. |
 | Push is rejected | Expected and deliberate. Push from a standalone checkout instead; see [Push](/docs/commands/push). |
 | A warning about mounted plugins or themes before a pull | Expected. Those paths are excluded because the mounts would shadow them. Use `--skip-files` for a database-only sync. |
+| A plugin disappeared after a pull | Production-only tooling is removed by design. [Blocked plugins](/docs/troubleshooting/blocked-plugins) lists every slug and explains the three cases where nothing is removed. |
 
 :::tip[Make wp-env runs faster]
 When wp-env is resolved through `npx`, the package is looked up on every invocation, which roughly doubles startup time. Add it as a dev dependency instead:

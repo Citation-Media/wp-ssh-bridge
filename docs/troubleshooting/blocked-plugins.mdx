@@ -1,0 +1,124 @@
+---
+title: Plugins removed on pull
+description: The plugins wp-ssh-bridge skips during a file sync and deletes from the local site after a pull, why each group is on the list, and how to extend it for a project.
+sidebar:
+  label: Blocked plugins
+---
+
+A pull gives you production's content, not production's operational tooling. Backup jobs, transactional mail, and security scanners do nothing useful on a development copy and quite a lot that is unwelcome: they send real email to real customers, they start scheduled uploads to remote storage, and they lock you out of your own site.
+
+So a pull treats them twice. Their directories are **excluded from the file sync**, and any that are already installed locally are **deactivated and deleted** through WP-CLI afterwards. Only plugins that `wp plugin list` actually reports are touched, so the step stays quiet on a site that never had them.
+
+:::warning[Why this matters more than it sounds]
+An SMTP plugin carrying production credentials into a local copy is the one that bites hardest. The moment a developer saves a post or triggers an order status change, real messages go out under your client's domain. Removing them is not tidiness, it is the difference between a safe copy and an incident.
+:::
+
+## The list
+
+These 34 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
+
+### Backup, migration, and restore
+
+They schedule large uploads to remote storage and can overwrite a site from an old archive.
+
+```text
+wpvivid-backuprestore                          duplicator
+updraftplus                                    duplicator-pro
+updraftplus-premium                            all-in-one-wp-migration
+all-in-one-wp-migration-unlimited-extension    backwpup
+backupwordpress                                backup-backup
+blogvault-real-time-backup                     boldgrid-backup
+migrate-guru                                   wp-db-backup
+wp-migrate-db                                  wp-staging
+xcloner-backup-and-restore
+```
+
+### SMTP and mail delivery
+
+They carry live credentials and will send real mail from a development copy.
+
+```text
+wp-mail-smtp                                   post-smtp
+easy-wp-smtp                                   fluent-smtp
+smtp-mailer                                    wp-smtp
+gmail-smtp                                     mailgun
+mailjet-for-wordpress                          postmark-approved-wordpress-plugin
+sendinblue                                     sendgrid-email-delivery-simplified
+mailersend-official-smtp-integration           smtp2go
+wp-offload-ses-lite
+```
+
+### Security and monitoring
+
+They report a local host as a production site and can block your own access.
+
+```text
+patchstack
+wp-health
+```
+
+## Adding your own
+
+A project can extend the list, never shorten it. Point `plugin_remove_file` at a plain text file with one slug per line; everything after `#` is a comment. Your entries are added to the built-in ones.
+
+```text title=".wp-ssh-plugins.txt"
+# Client-specific tooling that should stay on production.
+some-monitoring-agent
+another-production-only-plugin
+```
+
+```yaml title=".wp-ssh.yaml"
+plugin_remove_file: ".wp-ssh-plugins.txt"
+```
+
+Keep the path relative so the config stays portable. The same file works through `WP_SSH_PULL_PLUGIN_REMOVE_FILE` or `--plugin-remove-file` for a one-off run.
+
+To run the cleanup on its own, against a site you already pulled:
+
+```bash
+wp-ssh-bridge plugins remove
+```
+
+## When nothing is removed
+
+Three cases, all deliberate:
+
+- **`clone` keeps every plugin.** A clone is meant to stay a real site, so it skips the cleanup entirely along with the other development rewrites. See [Clone](/docs/commands/clone).
+- **wp-env projects with mounts skip it.** When `.wp-env.json` declares `plugins`, `themes`, or `mappings`, `wp plugin delete` would run inside the container where those paths are your own working tree. Deleting there would delete your source.
+- **Symlinked or mounted plugin directories are never deleted**, whatever the runtime.
+
+## Checking what happened
+
+The pull reports the count as it goes:
+
+```text title="Pull output"
+✓ Removed 3 blocked plugins
+```
+
+Afterwards, list what survived:
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    ```bash
+    wp plugin list
+    ```
+
+  </Tab>
+  <Tab title="DDEV">
+
+    ```bash
+    ddev wp plugin list
+    ```
+
+  </Tab>
+  <Tab title="wp-env">
+
+    ```bash
+    npx wp-env run cli wp plugin list
+    ```
+
+  </Tab>
+</Tabs>
+
+A plugin from the list still showing up means one of the three cases above applies, most often a mounted directory.

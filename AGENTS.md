@@ -37,6 +37,8 @@ Editing the skill therefore ships it on the next docs deploy. A `SKILL.md` with 
 
 When changing the embedded default blocked-plugin list, update the list and its tests. Do not mirror specific default plugin slugs into the skill unless agents need to mention them to operate or troubleshoot the CLI.
 
+The documentation does list every slug, on `docs/troubleshooting/blocked-plugins.mdx`, because users need to know which plugins vanish from their site. `TestDocumentationListsEveryBlockedPlugin` compares that page against `defaultPluginList` in both directions and checks the count in the prose, so the page cannot drift; adding a plugin without documenting it fails the suite. The page collects slugs from its bare ```text blocks, so give any other example block a title.
+
 ## Keep The Documentation Site Current
 
 `docs/` holds the public documentation, published at https://wp-ssh-bridge.citation.media. When changing user-facing behavior, update the page that covers it in the same change:
