@@ -15,7 +15,7 @@ An SMTP plugin carrying production credentials into a local copy is the one that
 
 ## The list
 
-These 42 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
+These 45 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
 
 ### Backup, migration, and restore
 
@@ -54,8 +54,18 @@ They report a local host as a production site and can block your own access.
 
 ```text
 patchstack
-wp-health
 ```
+
+### Remote management
+
+They report the site to an external dashboard and accept instructions back from it. A development copy left connected shows up alongside the real sites, where it can be updated, backed up, or billed as one of them.
+
+```text
+worker              mainwp-child
+iwp-client          wp-health
+```
+
+`worker` is the ManageWP plugin and `wp-health` is WP Umbrella; both use a slug that does not match the product name.
 
 ### Image optimization
 

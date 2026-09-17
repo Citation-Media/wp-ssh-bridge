@@ -51,6 +51,13 @@ wp-offload-ses-lite
 
 # Security and site monitoring plugins.
 patchstack
+
+# Remote management plugins. They report the site to an external dashboard and
+# accept instructions from it, so a development copy shows up as a managed
+# production site and can be updated or backed up from there by mistake.
+worker
+mainwp-child
+iwp-client
 wp-health
 
 # Image optimization plugins. These hand uploads to a third-party service with

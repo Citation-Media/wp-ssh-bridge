@@ -2,10 +2,11 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
-## [Unreleased]
+## [0.6.0] - 2026-09-17
 
 ### Added
 
+- Block the widely used remote management plugins during pulls: ManageWP, MainWP, InfiniteWP, and WP Umbrella. They report the site to an external dashboard and accept instructions back, so a development copy shows up alongside the real ones and can be updated or backed up from there by mistake.
 - Block the widely used image optimization plugins during pulls: Smush, Imagify, EWWW, ShortPixel, Optimole, TinyPNG, Robin, and reSmush.it. They optimize through a third-party service with the production account's credentials, so on a development copy they spend the client's quota on images nobody will see. Optimizers that convert locally are deliberately left alone.
 - Add wp-env (`@wordpress/env`) support as a third runtime mode. The CLI detects a wp-env project from `.wp-env.json` or `.wp-env.override.json`, reads `wp-env status --json` for the local URL and install path, and runs local WP-CLI through `wp-env run cli`. Database dumps are staged inside the tree wp-env mounts at `/var/www/html` so the import runs against the container database instead of an unreachable host connection.
 - Warn before a file pull when `.wp-env.json` declares `plugins`, `themes`, or `mappings`. Those bind mounts shadow the host WordPress tree, so files pulled into them never reach WordPress.
@@ -47,5 +48,6 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
+[0.6.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.5.3...v0.6.0
 [0.5.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.4.1...v0.5.0
 [#7]: https://github.com/Citation-Media/wp-ssh-bridge/issues/7
