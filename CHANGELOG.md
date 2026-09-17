@@ -6,6 +6,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Added
 
+- Block the widely used image optimization plugins during pulls: Smush, Imagify, EWWW, ShortPixel, Optimole, TinyPNG, Robin, and reSmush.it. They optimize through a third-party service with the production account's credentials, so on a development copy they spend the client's quota on images nobody will see. Optimizers that convert locally are deliberately left alone.
 - Add wp-env (`@wordpress/env`) support as a third runtime mode. The CLI detects a wp-env project from `.wp-env.json` or `.wp-env.override.json`, reads `wp-env status --json` for the local URL and install path, and runs local WP-CLI through `wp-env run cli`. Database dumps are staged inside the tree wp-env mounts at `/var/www/html` so the import runs against the container database instead of an unreachable host connection.
 - Warn before a file pull when `.wp-env.json` declares `plugins`, `themes`, or `mappings`. Those bind mounts shadow the host WordPress tree, so files pulled into them never reach WordPress.
 

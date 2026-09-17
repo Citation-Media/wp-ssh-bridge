@@ -15,7 +15,7 @@ An SMTP plugin carrying production credentials into a local copy is the one that
 
 ## The list
 
-These 34 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
+These 42 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
 
 ### Backup, migration, and restore
 
@@ -56,6 +56,23 @@ They report a local host as a production site and can block your own access.
 patchstack
 wp-health
 ```
+
+### Image optimization
+
+They hand uploads to a third-party service using the production account's credentials. On a development copy that spends the client's quota on images nobody will see, and some of them rewrite local URLs to a CDN that has never seen the files.
+
+```text
+wp-smushit                                     imagify
+ewww-image-optimizer                           shortpixel-image-optimiser
+optimole-wp                                    tiny-compress-images
+robin-image-optimizer                          resmushit-image-optimizer
+```
+
+Only the widely used ones are listed, each with at least a hundred thousand installations. A smaller optimiser your project happens to use belongs in your own list below.
+
+:::note[Optimisers that work locally stay]
+Plugins that convert images on your own machine without calling out, such as Imsanity, WebP Express, and Converter for Media, are deliberately not on the list. They cost nothing, leak nothing, and removing them would change how a local copy serves images. The line is whether a plugin talks to an outside service on someone else's account.
+:::
 
 ## Adding your own
 

@@ -52,6 +52,18 @@ wp-offload-ses-lite
 # Security and site monitoring plugins.
 patchstack
 wp-health
+
+# Image optimization plugins. These hand uploads to a third-party service with
+# production credentials, which on a development copy spends the account's quota
+# on images nobody will see. Only the widely used ones are listed.
+wp-smushit
+imagify
+ewww-image-optimizer
+shortpixel-image-optimiser
+optimole-wp
+tiny-compress-images
+robin-image-optimizer
+resmushit-image-optimizer
 `
 
 // providerYAML renders the DDEV provider that delegates to this host CLI.
