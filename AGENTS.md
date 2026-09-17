@@ -130,6 +130,16 @@ The npm package is scoped to `@citation-media`, so the organization owns it from
 
 The npm job uses an `npm` environment, so publishing can require a review.
 
+## The Dependency Pins In The Root Manifest
+
+The workspace root declares `astro` and `js-yaml` as dependencies and overrides `astro`. None of that is arbitrary; removing it reintroduces two concrete failures.
+
+`@scalar/astro`, which blume pulls in for its API-reference feature, still peers on `astro <= 6`. Without the override npm hoists a vulnerable astro 6 into the root, the Cloudflare adapter binds to it and npm marks it invalid, while blume quietly builds against its own nested astro 7. The override collapses that to one astro and removes a critical advisory.
+
+Pinning `astro` at the root then moves its js-yaml 4 into the hoisted position, and blume needs js-yaml 5 there. The build fails with `The requested module 'js-yaml' does not provide an export named 'binaryTag'`. Declaring `js-yaml` at the root restores it; the packages that genuinely need js-yaml 3 or 4 keep nested copies.
+
+After changing any of this, run a real build. Neither failure shows up in `npm install`.
+
 ## Development
 
 - Match the existing Go style and keep changes focused.

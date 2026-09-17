@@ -16,7 +16,8 @@
     "deploy": "wrangler deploy --config dist/server/wrangler.json --name wp-ssh-bridge-docs"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^14.3.1",
+    "@astrojs/cloudflare": "^14.3.2",
+    "astro": "^7.3.3",
     "blume": "^1.7.0",
     "js-yaml": "^5.4.2"
   },

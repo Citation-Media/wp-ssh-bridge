@@ -17,5 +17,12 @@
     "skill:pack": "apm pack && cp .claude-plugin/marketplace.json packages/documentation/public/marketplace.json",
     "npm:check": "npm run prepublishOnly --workspace @citation-media/wp-ssh-bridge",
     "npm:publish": "npm publish --access public --workspace @citation-media/wp-ssh-bridge"
+  },
+  "overrides": {
+    "astro": "$astro"
+  },
+  "dependencies": {
+    "astro": "^7.3.3",
+    "js-yaml": "^5.4.2"
   }
 }
