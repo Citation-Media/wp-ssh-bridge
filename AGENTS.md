@@ -73,7 +73,9 @@ Tagging a release runs `.github/workflows/release.yml`:
 
 1. Tests run, then binaries are built for macOS and Linux on `amd64` and `arm64` and stamped with the tag.
 2. The archives and `checksums.txt` are attached to a GitHub release with generated notes.
-3. The `npm` job sets `packages/npm`'s version to the tag and publishes it. It runs after the release exists, because the package downloads its binary from that release.
+3. The `npm` job derives the version from the tag, writes it into `VERSION` and the wrapper's `package.json`, commits that back to the default branch, and publishes. It runs after the release exists, because the package downloads its binary from that release. A prerelease tag publishes under the `next` dist-tag so it never moves `latest`.
+
+Do not bump the version by hand before tagging. The workflow owns it, and the commit it pushes afterwards is also what makes Cloudflare rebuild the site with the new release in its changelog.
 
 Each archive is attached twice, under its versioned name and under a version-free one, so `releases/latest/download/<name>` is a permanent link to the newest build. `checksums.txt` lists both names for the same digest, which lets `shasum -c --ignore-missing` verify whichever file was fetched.
 
@@ -85,19 +87,16 @@ The site is deployed to Cloudflare Workers as `wp-ssh-bridge-docs`, at https://w
 
 ### The First npm Publish
 
-The CI job cannot create the package: a granular token can only be scoped to a package that already exists, or to the whole scope. The first version therefore goes out from a workstation, and CI takes over from the second.
+Trusted publishing creates the package on its first successful run, so no manual publish is needed. Register the trusted publisher at npmjs.com before the first tag, otherwise the job fails with an authentication error and you simply re-run it once the setting is in place.
 
-Do it only after the repository is public and the matching GitHub release exists. `prepublishOnly` enforces that: `packages/npm/scripts/check-release.js` sends a HEAD request for all four archives and `checksums.txt` at the tag `v<version>` and refuses to publish when any is unreachable. Publishing a version whose release cannot serve the binary would break every install of it.
+Publishing by hand still works when you need it, from `packages/npm`:
 
 ```bash
-cd packages/npm
-npm publish --dry-run          # shows the file list and runs the release check
+npm publish --dry-run
 npm publish --access public
 ```
 
-Afterwards create a granular token limited to `@citation-media/wp-ssh-bridge` with read and write access, store it as `NPM_TOKEN` in the repository's `npm` environment, and every later release publishes itself.
-
-The check can be bypassed with `WP_SSH_BRIDGE_SKIP_RELEASE_CHECK=1`, which is only correct when you are publishing a version whose release you are about to create.
+`prepublishOnly` runs either way: `scripts/check-release.js` sends a HEAD request for all four archives and `checksums.txt` at the tag `v<version>` and refuses to publish when any is unreachable, because a version whose release cannot serve the binary breaks every install of it. Override it with `WP_SSH_BRIDGE_SKIP_RELEASE_CHECK=1` only when you are about to create that release.
 
 ### Infrastructure The Pipeline Expects
 
@@ -120,11 +119,18 @@ One consequence is worth knowing: the changelog is built from GitHub Releases, a
 
 GitHub repository settings:
 
-| Kind | Name | Value |
-| --- | --- | --- |
-| Secret | `NPM_TOKEN` | Publish rights for `@citation-media/wp-ssh-bridge`, in the `npm` environment |
+GitHub needs no secrets at all. Cloudflare Workers Builds authenticates on its own side, and npm publishing uses trusted publishing, where the job proves its identity with a short-lived OIDC token rather than a stored one.
 
-Cloudflare needs no credentials in GitHub: Workers Builds authenticates on its own side. `DOCS_SITE_URL` is likewise unused now that the origin is pinned in `blume.config.ts`; set `SITE_URL` as a Workers Builds environment variable if a preview deployment ever needs a different origin.
+Configure that once at npmjs.com on `@citation-media/wp-ssh-bridge`, under Trusted Publishers:
+
+| Field | Value |
+| --- | --- |
+| Organization | `Citation-Media` |
+| Repository | `wp-ssh-bridge` |
+| Workflow filename | `release.yml` |
+| Environment | leave empty |
+
+Trusted publishing requires npm 11.5.1 and Node 22.14 or newer, which is why the job pins Node 24. npm attaches provenance by itself, so the workflow passes no `--provenance` flag.
 
 The npm package is scoped to `@citation-media`, so the organization owns it from the first publish and membership controls who can release it. The scope requires `--access public`, which the job passes and `publishConfig` also records. The job requests `id-token: write` and publishes with provenance, which npm only accepts from a public repository; while this one is private it publishes without provenance instead of failing.
 
