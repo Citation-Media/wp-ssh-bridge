@@ -8,11 +8,12 @@
     {
       "name": "wp-ssh-bridge-cli",
       "description": "Operate and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.",
+      "version": "0.5.2",
       "source": {
         "source": "github",
         "repo": "Citation-Media/wp-ssh-bridge",
-        "ref": "v0.5.2",
-        "sha": "7cbb1eb32a1fd1dfe4de43cfa47e86cf40c75734",
+        "ref": "v0.5.3",
+        "sha": "71dadc3ad8f4216ec7061b6e3c4899a27b44cc35",
         "tag_pattern": "v{version}"
       }
     }

@@ -100,7 +100,15 @@ npm publish --access public
 
 ### Infrastructure The Pipeline Expects
 
-Cloudflare hosts only the documentation site: the `wp-ssh-bridge-docs` Worker with `wp-ssh-bridge.citation.media` attached in the dashboard, not in the generated Wrangler config, so it survives redeploys. Binaries need no infrastructure of their own; GitHub serves them.
+Cloudflare hosts only the documentation site, as the `wp-ssh-bridge-docs` Worker. Binaries need no infrastructure of their own; GitHub serves them.
+
+The custom domain is a Worker-level trigger, attached once and independent of the generated Wrangler config:
+
+```bash
+wrangler deploy --config dist/server/wrangler.json --name wp-ssh-bridge-docs --domains wp-ssh-bridge.citation.media
+```
+
+Plain deploys afterwards keep it, which is what makes the automatic builds safe. Without it the hostname falls through to the zone's wildcard record and answers with an unrelated nginx page rather than 404, so a broken attachment looks like a stale site rather than an error.
 
 Deployment runs through Cloudflare Workers Builds, connected to this repository. Its build settings must be:
 
