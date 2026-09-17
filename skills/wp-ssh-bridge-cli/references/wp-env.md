@@ -12,11 +12,13 @@ The CLI enters wp-env mode when DDEV detection fails and the project root has `.
 npx wp-env start
 ```
 
-2. Configure from the wp-env project root:
+2. Configure from the wp-env project root. Without `--silent` the command prompts; pass the values as flags when running without a terminal:
 
 ```bash
-wp-ssh-bridge init
+wp-ssh-bridge init --silent --user deploy --host production.example.com --remote-path /home/production/public_html
 ```
+
+   wp-env projects already have a `package.json`, so `npm install --save-dev @citation-media/wp-ssh-bridge` and `npx wp-ssh-bridge` is the natural install route here.
 
 3. Pull from the configured source:
 

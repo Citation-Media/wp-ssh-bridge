@@ -1,11 +1,11 @@
 ---
 name: wp-ssh-bridge-cli
-description: Guide for using the wp-ssh-bridge CLI to pull, clone, or push WordPress databases and files over SSH. Use this whenever the user asks how to configure, run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, wp-env (@wordpress/env) local environments, clone mode for host-to-host site migrations, SSH username/host/path options, args/env/config usage, plugin cleanup, or safe WordPress pull, clone, and push workflows.
+description: Guide for installing, setting up, and using the wp-ssh-bridge CLI to pull, clone, or push WordPress databases and files over SSH. Use this whenever the user asks to install wp-ssh-bridge, set up or initialize a project for it, write its config, or run, automate, or troubleshoot wp-ssh-bridge, DDEV pull/push provider mode, standalone WordPress syncs, wp-env (@wordpress/env) local environments, clone mode for host-to-host site migrations, SSH username/host/path options, args/env/config usage, monorepos with several sites, plugin cleanup, or safe WordPress pull, clone, and push workflows.
 ---
 
 # wp-ssh-bridge CLI
 
-Use this skill to guide users through the manual decisions around `wp-ssh-bridge`. Keep answers practical: show the exact value, config key, env var, or command the user must provide. Avoid explaining internal behavior that the CLI already handles automatically unless the user is troubleshooting that behavior.
+Use this skill to guide users through the manual decisions around `wp-ssh-bridge`, and to set projects up on their behalf. Keep answers practical: show the exact value, config key, env var, or command the user must provide. Avoid explaining internal behavior that the CLI already handles automatically unless the user is troubleshooting that behavior.
 
 ## Manual Inputs To Check
 
@@ -30,13 +30,24 @@ Do not ask the user to choose DDEV, wp-env, or standalone mode unless they are e
 
 ## Install Or Update wp-ssh-bridge
 
-Prefer the public install script. It needs no GitHub access, verifies the SHA-256 checksum, and installs to `.ddev/bin/wp-ssh-bridge` inside a DDEV project or into the current directory otherwise. Run it from the project root:
+Pick one route per project and stay with it. In DDEV projects the generated provider files call the binary by the path of whichever install ran `init`, so switching routes later means rerunning `wp-ssh-bridge provider install`.
 
-```bash title="Install the latest wp-ssh-bridge release"
+**npm, for projects that already have a `package.json`.** The package is versioned with the project, needs no GitHub access, and downloads the matching release on install:
+
+```bash
+npm install --save-dev @citation-media/wp-ssh-bridge
+npx wp-ssh-bridge version
+```
+
+Every command in this skill then runs as `npx wp-ssh-bridge <command>`. Every machine that runs `ddev pull` needs `npm install` first, because the provider files point at the package's binary inside `node_modules`.
+
+**The install script, for everything else.** It verifies the SHA-256 checksum and installs to `.ddev/bin/wp-ssh-bridge` inside a DDEV project or into the current directory otherwise. Run it from the project root:
+
+```bash
 curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh
 ```
 
-Use `--dir <path>` for another destination, `--global` for `/usr/local/bin`, and `--version <tag>` to pin a release.
+Use `--dir <path>` for another destination, `--global` for `/usr/local/bin`, and `--version <tag>` to pin a release. In a DDEV project, run the binary as `./.ddev/bin/wp-ssh-bridge`.
 
 When the user has repository access and prefers GitHub releases directly, the skill script does the same through `gh`:
 
@@ -48,6 +59,41 @@ Its first argument can be a DDEV project root or any destination folder, with th
 
 Full documentation, including per-command guides and troubleshooting, is at https://wp-ssh-bridge.citation.media. Agents can query it through its MCP server at `https://wp-ssh-bridge.citation.media/mcp`.
 
+## Set Up A Project Without Prompts
+
+Follow this when asked to set up, initialize, or configure a project, or to get a first pull working. Plain `wp-ssh-bridge init` prompts interactively and blocks an agent; `--silent` takes every value from flags, environment, and existing config instead.
+
+1. Collect the values the CLI cannot infer before running anything: pull SSH user, host, remote WordPress path, and port if not 22. Push values are optional at init and can be added later. Ask for `local_wp_path` only when WordPress is not at the project root or, in DDEV, the docroot. Do not guess SSH targets or remote paths.
+2. Run init from the project root, or point at it with `--project-root`:
+
+```bash
+wp-ssh-bridge init --silent \
+  --user deploy \
+  --host production.example.com \
+  --remote-path /home/production/public_html
+```
+
+   Add `--port`, `--local-wp-path`, `--clone-images`, and the `--push-*` flags as needed. `init --silent` validates the values, writes the config, and in DDEV mode generates the provider files.
+
+3. Verify what was written before pulling. The files tell you which runtime the CLI detected:
+   - DDEV: `.ddev/wp-ssh.yaml` plus `.ddev/providers/wp-ssh.yaml`.
+   - wp-env and standalone: `.wp-ssh.yaml` at the project root.
+
+   A DDEV project that ended up with `.wp-ssh.yaml` was treated as standalone because `ddev describe -j` failed. Rerun with `--integration ddev` to get the real error rather than a silent fallback, and start the project first if it asks for that.
+
+4. Run the first pull. Uploads are excluded unless `--clone-images` is set or `clone_images: true` is in config:
+
+```bash
+ddev pull wp-ssh -y            # DDEV
+wp-ssh-bridge pull --silent    # wp-env and standalone
+```
+
+5. Verify with the WP-CLI that matches the runtime: `ddev wp option get home`, `npx wp-env run cli wp option get home`, or `wp option get home --path=<local wp path>`. Then `... wp plugin list`.
+
+6. The config contains no secrets unless `clone_db_password` is set, so commit it. Keep paths in it relative so it works for every checkout.
+
+For CI, the same values can come from `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_REMOTE_PATH`, and `WP_SSH_PULL_PORT` instead of flags. For a monorepo with several sites, see "Several sites in one repository" in `references/general-usage.md`.
+
 ## Router
 
 Read the most specific workflow reference first. Read only one reference unless the user explicitly compares workflows or the first reference says another one is needed:
@@ -57,7 +103,7 @@ Read the most specific workflow reference first. Read only one reference unless 
 | Cloning a site to a standalone host (site migration), `wp-ssh-bridge clone`, target DB credential injection, or host-to-host copy questions | `references/clone.md` |
 | DDEV projects, generated provider files, `ddev pull`, `ddev push`, or DDEV debugging | `references/ddev.md` |
 | wp-env / `@wordpress/env` projects, `.wp-env.json`, or `wp-env run cli` troubleshooting | `references/wp-env.md` |
-| Standalone usage, direct CLI commands, args/env/config mode, or non-DDEV troubleshooting | `references/general-usage.md` |
+| Standalone usage, direct CLI commands, args/env/config mode, config keys and flags, monorepos, or non-DDEV troubleshooting | `references/general-usage.md` |
 
 ## Default Recommendations
 
@@ -68,12 +114,15 @@ Read the most specific workflow reference first. Read only one reference unless 
 - Runtime detection is automatic. Recommend the `integration` config key, `--integration` flag, or `WP_SSH_INTEGRATION` only to resolve ambiguity (a repo with both DDEV and wp-env config) or to make a wrong-mode fallback fail loudly. It is not a speed optimization except for `standalone`.
 - Prefer config mode for repeatable project setup, args mode for one-off overrides, and env mode for automation or secrets-adjacent values.
 - Keep project-local paths relative in config files so DDEV config can be versioned.
+- In a monorepo, each site folder carries its own config. Use `--project-root <folder>` to drive a site from the repository root and `--config-file <name>` for a second environment of the same site, such as `.wp-ssh.staging.yaml`.
 - For multisite/custom domains, prefer `wp-ssh-bridge domains add --old production.example.com --new local.ddev.site` over manual YAML edits. This writes `pull_domain_replacements` and inverse `push_domain_replacements` by default.
 - Prefer protocol-less domains in `pull_domain_replacements` and `push_domain_replacements` for multisite. Use full URLs only for path-aware or scheme-specific replacement.
 - Protocol-less mappings replace the hostname once in both full URLs and bare multisite domain values, including targets that contain the source hostname such as `example.com.ddev.site`. DDEV's resolved `DDEV_TLD` is used for custom TLDs; `DDEV_HOSTNAME` lists all routed FQDNs, but explicit domain mappings determine production-to-local pairing.
 - Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
 - With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
 - For clone-style pulls (host-to-host site migrations), read `references/clone.md` before recommending commands. Recommend `wp-ssh-bridge clone`; do not recommend `pull --clone`, `push --clone`, or the former `migrate` command name.
+- A pull deliberately drops operational plugins: backup and migration tools, SMTP and mail senders, the security scanner, remote-management agents, and cloud image optimizers. They are excluded from the file sync and deleted locally afterwards, and the pull output lists what it removed. This is expected, not a failure; the full list is at https://wp-ssh-bridge.citation.media/docs/troubleshooting/blocked-plugins. A project extends the list with `plugin_remove_file` pointing at a text file of one slug per line, `#` comments allowed; the built-in entries cannot be switched off.
+- A pull wraps the local database import in WordPress maintenance mode, and a push does the same on the target for the whole run; both lift it again even on failure. Recommend `--skip-maintenance-mode` only when the user asks for it or WP-CLI cannot toggle it on that side.
 - The CLI runs preflight checks before pull/push work: local `ssh`, DDEV when applicable, local WP-CLI when DB work needs it, local path readability/writeability, SSH access, remote path access, remote temp writeability, and remote WP-CLI when DB work needs it.
 - Netcup/Plesk hosts may report MariaDB through `mysql --version` while exposing only `mysql` and `mysqldump`. The CLI reports `MariaDB client compatibility enabled`, creates temporary remote `mariadb`/`mariadb-dump` aliases for database work, and removes aliases plus remote database transfer files on success or error. A failure mentioning missing `mariadb-dump` indicates an older CLI that needs updating or a host missing `mysqldump` too.
 - File pulls use plain rsync `--delete` for stale synced paths and a sender-side `*.log` hide rule so WordPress-tree log files at any depth are not copied and are deleted locally, while local-only `.ddev/` including DDEV logs, `.git/`, config files, uploads when media cloning is off, and blocked-plugin paths are preserved for later CLI cleanup.
