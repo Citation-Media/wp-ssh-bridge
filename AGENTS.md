@@ -104,6 +104,19 @@ The check can be bypassed with `WP_SSH_BRIDGE_SKIP_RELEASE_CHECK=1`, which is on
 
 Cloudflare hosts only the documentation site: the `wp-ssh-bridge-docs` Worker with `wp-ssh-bridge.citation.media` attached in the dashboard, not in the generated Wrangler config, so it survives redeploys. Binaries need no infrastructure of their own; GitHub serves them.
 
+Deployment runs through Cloudflare Workers Builds, connected to this repository. Its build settings must be:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `packages/documentation` |
+| Build command | `npm run build` |
+| Deploy command | `npm run deploy` |
+| Environment variable | `GITHUB_TOKEN`, needed for the changelog while the repository is private |
+
+The deploy command matters: plain `npx wrangler deploy` cannot find the adapter's config at `dist/server/wrangler.json` and fails with "Could not detect a directory containing static files". The `deploy` script passes that config and pins the Worker name.
+
+Workers Builds has no deploy hook, and a published release creates no commit, so `.github/workflows/docs.yml` covers that one trigger and nothing else.
+
 GitHub repository settings:
 
 | Kind | Name | Value |

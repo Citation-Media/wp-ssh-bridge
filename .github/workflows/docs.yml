@@ -1,23 +1,15 @@
 name: docs
 
-# Builds the documentation site from packages/documentation and deploys it to
-# Cloudflare Workers. The MDX pages it renders live in docs/ at the repository
-# root, so both paths trigger this workflow.
+# Cloudflare Workers Builds deploys this site on every push to the connected
+# branch, so this workflow deliberately does not listen for pushes.
 #
-# It also runs whenever a release is published, because the changelog is sourced
-# from this repository's GitHub Releases at build time.
+# It exists for the one trigger Cloudflare cannot see: publishing a release.
+# The changelog is sourced from this repository's GitHub Releases at build time,
+# and a release creates no commit, so nothing would rebuild the site without it.
+#
+# Delete this workflow if you would rather rebuild by hand in the Cloudflare
+# dashboard after a release; nothing else depends on it.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "packages/documentation/**"
-      # The build bundles the agent skill into /.well-known/agent-skills/,
-      # so editing it has to redeploy the site.
-      - "skills/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/docs.yml"
   release:
     types: [published]
   workflow_dispatch:
