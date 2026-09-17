@@ -74,7 +74,6 @@ Tagging a release runs `.github/workflows/release.yml`:
 1. Tests run, then binaries are built for macOS and Linux on `amd64` and `arm64` and stamped with the tag.
 2. The archives and `checksums.txt` are attached to a GitHub release with generated notes.
 3. The `npm` job sets `packages/npm`'s version to the tag and publishes it. It runs after the release exists, because the package downloads its binary from that release.
-4. Publishing the release triggers `.github/workflows/docs.yml`, so the changelog picks up the new entry.
 
 Each archive is attached twice, under its versioned name and under a version-free one, so `releases/latest/download/<name>` is a permanent link to the newest build. `checksums.txt` lists both names for the same digest, which lets `shasum -c --ignore-missing` verify whichever file was fetched.
 
@@ -115,20 +114,21 @@ Deployment runs through Cloudflare Workers Builds, connected to this repository.
 
 The deploy command matters: plain `npx wrangler deploy` cannot find the adapter's config at `dist/server/wrangler.json` and fails with "Could not detect a directory containing static files". The `deploy` script passes that config and pins the Worker name.
 
-Workers Builds has no deploy hook, and a published release creates no commit, so `.github/workflows/docs.yml` covers that one trigger and nothing else.
+Nothing in GitHub Actions deploys the site. Workers Builds owns it end to end.
+
+One consequence is worth knowing: the changelog is built from GitHub Releases, and publishing a release creates no commit, so the site keeps the previous changelog until the next push. Pushing the version bump for the release after the tag, rather than before, is enough to close that gap; a manual rebuild in the Cloudflare dashboard also works.
 
 GitHub repository settings:
 
 | Kind | Name | Value |
 | --- | --- | --- |
-| Variable | `DOCS_SITE_URL` | Optional. Overrides the origin in `blume.config.ts`. |
-| Secret | `CLOUDFLARE_API_TOKEN` | Workers Scripts edit |
-| Secret | `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account ID |
 | Secret | `NPM_TOKEN` | Publish rights for `@citation-media/wp-ssh-bridge`, in the `npm` environment |
+
+Cloudflare needs no credentials in GitHub: Workers Builds authenticates on its own side. `DOCS_SITE_URL` is likewise unused now that the origin is pinned in `blume.config.ts`; set `SITE_URL` as a Workers Builds environment variable if a preview deployment ever needs a different origin.
 
 The npm package is scoped to `@citation-media`, so the organization owns it from the first publish and membership controls who can release it. The scope requires `--access public`, which the job passes and `publishConfig` also records. The job requests `id-token: write` and publishes with provenance, which npm only accepts from a public repository; while this one is private it publishes without provenance instead of failing.
 
-The docs workflow uses a `docs` environment and the npm job an `npm` environment, so either can require a review.
+The npm job uses an `npm` environment, so publishing can require a review.
 
 ## Development
 
