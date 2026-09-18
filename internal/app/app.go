@@ -75,11 +75,13 @@ Usage:
   wp-ssh-bridge version [--short]
 
 Common flags:
+  --destination string       Pull source SSH destination: [user@]host[:port], ssh:// URL, or a ~/.ssh/config alias; push alias for --push-destination
   --host string              Pull source SSH host; push alias for --push-host
   --port string              Pull source SSH port; push alias for --push-port
   --user string              Pull source SSH user; push alias for --push-user
   --config-file string       YAML config file path
   --remote-path string       Pull source WordPress root; push alias for --push-remote-path
+  --push-destination string  Push target SSH destination
   --push-host string         Push target SSH host
   --push-remote-path string  Push target WordPress root
   --local-wp-path string     Local WordPress root relative to the DDEV project
@@ -91,6 +93,7 @@ Common flags:
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
+  --ssh-command string       ssh program with leading arguments, for example "ssh -J bastion"
 
 Clone flags:
   --db-host string           Clone target DB host
@@ -173,6 +176,11 @@ func (a *App) commandInit(args []string) error {
 	}
 
 	a.UI.Success("Configured %s pull source for %s:%s", cfg.Provider, sshTarget(cfg.pullTarget()), trimTrailingSlash(cfg.RemotePath))
+	if cfg.Destination != "" {
+		if resolved, ok := resolveSSHDestination(context.Background(), cfg.pullTarget()); ok {
+			a.UI.Info("Pull source resolves to %s", resolved.describe())
+		}
+	}
 	a.UI.Success("Project files updated")
 	return nil
 }
@@ -841,11 +849,13 @@ type configOptions struct {
 	ForceScpTransport   bool
 	SkipMaintenanceMode bool
 	Provider            string
+	Destination         string
 	User                string
 	Host                string
 	Port                string
 	RemotePath          string
 	RemoteTmpDir        string
+	PushDestination     string
 	PushUser            string
 	PushHost            string
 	PushPort            string
@@ -863,6 +873,7 @@ type configOptions struct {
 	CloneDBPassword     string
 	CloneDBPrefix       string
 	Integration         string
+	SSHCommand          string
 }
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
@@ -882,11 +893,13 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.BoolVar(&opts.ForceScpTransport, "force-scp", false, "use scp/tar instead of rsync even when rsync is available")
 	fs.BoolVar(&opts.SkipMaintenanceMode, "skip-maintenance-mode", false, "skip enabling WordPress maintenance mode during write operations")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
+	fs.StringVar(&opts.Destination, "destination", "", "pull source SSH destination: [user@]host[:port], ssh:// URL, or ~/.ssh/config alias; push alias for --push-destination")
 	fs.StringVar(&opts.User, "user", "", "pull source SSH user; push alias for --push-user")
 	fs.StringVar(&opts.Host, "host", "", "pull source SSH host; push alias for --push-host")
 	fs.StringVar(&opts.Port, "port", "", "pull source SSH port; push alias for --push-port")
 	fs.StringVar(&opts.RemotePath, "remote-path", "", "pull source WordPress root; push alias for --push-remote-path")
 	fs.StringVar(&opts.RemoteTmpDir, "remote-tmp-dir", "", "pull source temporary directory; push alias for --push-remote-tmp-dir")
+	fs.StringVar(&opts.PushDestination, "push-destination", "", "push target SSH destination")
 	fs.StringVar(&opts.PushUser, "push-user", "", "push target SSH user")
 	fs.StringVar(&opts.PushHost, "push-host", "", "push target SSH host")
 	fs.StringVar(&opts.PushPort, "push-port", "", "push target SSH port")
@@ -898,6 +911,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
+	fs.StringVar(&opts.SSHCommand, "ssh-command", "", "ssh program with leading arguments, for example \"ssh -J bastion\"")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
@@ -910,7 +924,31 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
+	if err := opts.rejectSplitAddressWithDestination(name); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// rejectSplitAddressWithDestination refuses a destination next to the user, host, or
+// port flags it replaces. On push the short flags alias the push target, so both
+// spellings count there.
+func (opts configOptions) rejectSplitAddressWithDestination(command string) error {
+	pullSplit := opts.User != "" || opts.Host != "" || opts.Port != ""
+	pushSplit := opts.PushUser != "" || opts.PushHost != "" || opts.PushPort != ""
+	if command == "push" {
+		if (opts.Destination != "" || opts.PushDestination != "") && (pullSplit || pushSplit) {
+			return errors.New("--destination already carries the user, host, and port; do not combine it with --user, --host, --port, or their --push-* forms")
+		}
+		return nil
+	}
+	if opts.Destination != "" && pullSplit {
+		return errors.New("--destination already carries the user, host, and port; do not combine it with --user, --host, or --port")
+	}
+	if opts.PushDestination != "" && pushSplit {
+		return errors.New("--push-destination already carries the user, host, and port; do not combine it with --push-user, --push-host, or --push-port")
+	}
+	return nil
 }
 
 // rejectOperationFlags catches pull/push runtime flags on commands that only configure files.
@@ -975,6 +1013,13 @@ func (opts configOptions) apply(cfg Config) Config {
 	if opts.Provider != "" {
 		cfg.Provider = opts.Provider
 	}
+	if opts.SSHCommand != "" {
+		cfg.SSHCommand = opts.SSHCommand
+	}
+	if opts.Destination != "" {
+		cfg.Destination = opts.Destination
+		cfg.User, cfg.Host, cfg.Port = "", "", ""
+	}
 	if opts.User != "" {
 		cfg.User = opts.User
 	}
@@ -989,6 +1034,10 @@ func (opts configOptions) apply(cfg Config) Config {
 	}
 	if opts.RemoteTmpDir != "" {
 		cfg.RemoteTmpDir = opts.RemoteTmpDir
+	}
+	if opts.PushDestination != "" {
+		cfg.PushDestination = opts.PushDestination
+		cfg.PushUser, cfg.PushHost, cfg.PushPort = "", "", ""
 	}
 	if opts.PushUser != "" {
 		cfg.PushUser = opts.PushUser
@@ -1043,6 +1092,10 @@ func (opts configOptions) apply(cfg Config) Config {
 
 // applyGenericAsPush lets push commands use --user/--host/--remote-path as concise aliases.
 func (opts configOptions) applyGenericAsPush(cfg Config) Config {
+	if opts.Destination != "" {
+		cfg.PushDestination = opts.Destination
+		cfg.PushUser, cfg.PushHost, cfg.PushPort = "", "", ""
+	}
 	if opts.User != "" {
 		cfg.PushUser = opts.User
 	}
@@ -1093,10 +1146,37 @@ func parseRuntimeCommand(name string, args []string, stderr io.Writer) (runtimeO
 type prompter struct {
 	reader *bufio.Reader
 	out    io.Writer
+	// resolve looks up what a destination resolves to, for the confirmation line after
+	// the prompt. nil disables the lookup.
+	resolve func(RemoteTarget) (sshDestination, bool)
 }
 
 func newPrompter(in io.Reader, out io.Writer) prompter {
-	return prompter{reader: bufio.NewReader(in), out: out}
+	return prompter{
+		reader: bufio.NewReader(in),
+		out:    out,
+		resolve: func(target RemoteTarget) (sshDestination, bool) {
+			return resolveSSHDestination(context.Background(), target)
+		},
+	}
+}
+
+// promptDestination offers the one-value address form first. A non-empty answer
+// replaces the split user, host, and port; an empty one keeps whatever is configured
+// and falls through to the separate prompts.
+func (p prompter) promptDestination(label string, current string, target RemoteTarget) (string, error) {
+	destination, err := p.promptString(label, current, false)
+	if err != nil || destination == "" {
+		return destination, err
+	}
+	if p.resolve != nil {
+		target.Destination = destination
+		target.User, target.Host, target.Port = "", "", ""
+		if resolved, ok := p.resolve(target); ok {
+			fmt.Fprintf(p.out, "  resolves to %s\n", resolved.describe())
+		}
+	}
+	return destination, nil
 }
 
 // fillConfig asks only for values not already supplied by config, env, or flags.
@@ -1126,17 +1206,29 @@ func (p prompter) fillPullConfigFields(cfg *Config, requireTarget bool) error {
 	if err != nil {
 		return err
 	}
-	cfg.User, err = p.promptTargetString("SSH user", cfg.User, requireTarget)
-	if err != nil {
-		return err
+	if !requireTarget || !cfg.pullTarget().addressConfigured() {
+		destination, err := p.promptDestination("SSH destination (user@host[:port] or ~/.ssh/config alias; empty to enter user and host separately)", cfg.Destination, cfg.pullTarget())
+		if err != nil {
+			return err
+		}
+		if destination != "" {
+			cfg.Destination = destination
+			cfg.User, cfg.Host, cfg.Port = "", "", ""
+		}
 	}
-	cfg.Host, err = p.promptTargetString("SSH host", cfg.Host, requireTarget)
-	if err != nil {
-		return err
-	}
-	cfg.Port, err = p.promptString("SSH port", defaultString(cfg.Port, "22"), false)
-	if err != nil {
-		return err
+	if cfg.Destination == "" {
+		cfg.User, err = p.promptTargetString("SSH user", cfg.User, requireTarget)
+		if err != nil {
+			return err
+		}
+		cfg.Host, err = p.promptTargetString("SSH host", cfg.Host, requireTarget)
+		if err != nil {
+			return err
+		}
+		cfg.Port, err = p.promptString("SSH port", defaultString(cfg.Port, "22"), false)
+		if err != nil {
+			return err
+		}
 	}
 	cfg.RemotePath, err = p.promptTargetString("Remote WordPress absolute path", cfg.RemotePath, requireTarget)
 	if err != nil {
@@ -1169,17 +1261,29 @@ func (p prompter) fillPushConfigFields(cfg *Config, requireTarget bool) error {
 	if err != nil {
 		return err
 	}
-	cfg.PushUser, err = p.promptTargetString("Push SSH user", cfg.PushUser, requireTarget)
-	if err != nil {
-		return err
+	if !requireTarget || !cfg.pushTarget().addressConfigured() {
+		destination, err := p.promptDestination("Push SSH destination (user@host[:port] or ~/.ssh/config alias; empty to enter user and host separately)", cfg.PushDestination, cfg.pushTarget())
+		if err != nil {
+			return err
+		}
+		if destination != "" {
+			cfg.PushDestination = destination
+			cfg.PushUser, cfg.PushHost, cfg.PushPort = "", "", ""
+		}
 	}
-	cfg.PushHost, err = p.promptTargetString("Push SSH host", cfg.PushHost, requireTarget)
-	if err != nil {
-		return err
-	}
-	cfg.PushPort, err = p.promptString("Push SSH port", defaultString(cfg.PushPort, "22"), false)
-	if err != nil {
-		return err
+	if cfg.PushDestination == "" {
+		cfg.PushUser, err = p.promptTargetString("Push SSH user", cfg.PushUser, requireTarget)
+		if err != nil {
+			return err
+		}
+		cfg.PushHost, err = p.promptTargetString("Push SSH host", cfg.PushHost, requireTarget)
+		if err != nil {
+			return err
+		}
+		cfg.PushPort, err = p.promptString("Push SSH port", defaultString(cfg.PushPort, "22"), false)
+		if err != nil {
+			return err
+		}
 	}
 	cfg.PushRemotePath, err = p.promptTargetString("Push WordPress absolute path", cfg.PushRemotePath, requireTarget)
 	if err != nil {

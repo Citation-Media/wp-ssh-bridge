@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
+
+const defaultSSHCommand = "ssh"
 
 var sshOptions = []string{
 	"-o", "BatchMode=yes",
@@ -16,34 +19,42 @@ var sshOptions = []string{
 	"-o", "PreferredAuthentications=publickey",
 }
 
-// sshTarget returns the user@host target accepted by ssh and rsync.
+// sshTarget returns the [user@]host target accepted by ssh and rsync.
 func sshTarget(target RemoteTarget) string {
-	return target.User + "@" + target.Host
+	return target.address()
 }
 
-// sshArgs returns safe argv entries for non-interactive SSH key authentication.
-func sshArgs(target RemoteTarget) []string {
-	args := []string{}
-	if target.Port != "" {
-		args = append(args, "-p", target.Port)
+// sshProgramFields splits an ssh_command value into the program and its leading
+// arguments. rsync passes its -e value through the same whitespace split, which is
+// why the value is documented as whitespace-separated with no quoting.
+func sshProgramFields(command string) []string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return []string{defaultSSHCommand}
+	}
+	return fields
+}
+
+// sshArgv returns the complete ssh command line: the program with its wrapper
+// arguments, the port, the non-interactive options, then extra — usually the
+// destination and the remote command. Callers exec argv[0] with the rest.
+func sshArgv(target RemoteTarget, extra ...string) []string {
+	args := append([]string{}, sshProgramFields(target.SSHCommand)...)
+	if port := target.port(); port != "" {
+		args = append(args, "-p", port)
 	}
 	args = append(args, sshOptions...)
-	return args
+	return append(args, extra...)
 }
 
 // sshCommandString returns the rsync -e value for SSH transport.
 func sshCommandString(target RemoteTarget) string {
-	args := []string{"ssh"}
-	if target.Port != "" {
-		args = append(args, "-p", target.Port)
-	}
-	args = append(args, sshOptions...)
-	return strings.Join(args, " ")
+	return strings.Join(sshArgv(target), " ")
 }
 
 // runSSH executes a remote command through ssh without a local shell.
 func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
@@ -56,7 +67,7 @@ func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarge
 }
 
 func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
@@ -69,7 +80,7 @@ func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target
 }
 
 func (a *App) runSSHWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	return a.runSSHArgsWithFilteredWarnings(ctx, projectRoot, args)
 }
 
@@ -87,12 +98,13 @@ func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot st
 }
 
 func (a *App) runSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	return a.runSSHWithWriters(ctx, projectRoot, args, io.Discard, io.Discard)
 }
 
+// runSSHWithWriters runs a full ssh argv as built by sshArgv, so argv[0] is the program.
 func (a *App) runSSHWithWriters(ctx context.Context, projectRoot string, args []string, stdout io.Writer, stderr io.Writer) error {
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -111,7 +123,7 @@ func (a *App) writeCapturedOutput(label string, output string, stderr bool) {
 
 // outputSSH executes a remote command and captures stdout for URL and table probes.
 func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	stderr := bytes.Buffer{}
 	output, err := a.outputSSHWithStderr(ctx, projectRoot, args, &stderr)
 	if err != nil {
@@ -121,17 +133,57 @@ func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTa
 }
 
 func (a *App) outputSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
-	args := append(sshArgs(target), sshTarget(target), remoteCommand)
+	args := sshArgv(target, sshTarget(target), remoteCommand)
 	return a.outputSSHWithStderr(ctx, projectRoot, args, io.Discard)
 }
 
 func (a *App) outputSSHWithStderr(ctx context.Context, projectRoot string, args []string, stderr io.Writer) (string, error) {
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = projectRoot
 	cmd.Stderr = stderr
 	cmd.WaitDelay = sshWaitDelay
 	output, err := cmd.Output()
 	return string(output), err
+}
+
+// downloadOverSSH streams a remote file to a local path through the ssh session itself.
+// The fallback transport used to shell out to scp, which cannot run under an ssh_command
+// wrapper; going through ssh keeps every connection on the same program and options.
+func (a *App) downloadOverSSH(ctx context.Context, projectRoot string, target RemoteTarget, remotePath string, localPath string) error {
+	file, err := os.Create(localPath)
+	if err != nil {
+		return err
+	}
+	args := sshArgv(target, sshTarget(target), "cat "+shellQuote(remotePath))
+	stderr := bytes.Buffer{}
+	runErr := a.runSSHWithWriters(ctx, projectRoot, args, file, &stderr)
+	closeErr := file.Close()
+	if runErr != nil {
+		a.writeCapturedOutput("remote", stderr.String(), true)
+		return runErr
+	}
+	return closeErr
+}
+
+// uploadOverSSH streams a local file into a remote path through the ssh session itself.
+func (a *App) uploadOverSSH(ctx context.Context, projectRoot string, target RemoteTarget, localPath string, remotePath string) error {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	args := sshArgv(target, sshTarget(target), "cat > "+shellQuote(remotePath))
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = projectRoot
+	cmd.Stdin = file
+	stderr := bytes.Buffer{}
+	cmd.Stderr = &stderr
+	cmd.WaitDelay = sshWaitDelay
+	if err := cmd.Run(); err != nil {
+		a.writeCapturedOutput("remote", stderr.String(), true)
+		return err
+	}
+	return nil
 }
 
 // shellQuote quotes values for the unavoidable remote shell used by SSH servers.

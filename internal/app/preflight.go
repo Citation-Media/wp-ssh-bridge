@@ -216,12 +216,18 @@ func (a *App) needsRemoteMariaDBCompatibility(target RemoteTarget) bool {
 
 // remoteTargetKey distinguishes cached capability checks for separate SSH targets.
 func remoteTargetKey(target RemoteTarget) string {
-	return strings.Join([]string{target.User, target.Host, target.Port, target.RemotePath, target.RemoteTmpDir}, "\x00")
+	return strings.Join([]string{target.Destination, target.User, target.Host, target.Port, target.RemotePath, target.RemoteTmpDir, target.SSHCommand}, "\x00")
 }
 
 func (a *App) checkLocalEnvironment(plan preflightPlan) error {
 	if plan.NeedSSH {
-		if err := a.checkRequiredLocalCommand("ssh", "SSH is required to connect to the configured WordPress source or target"); err != nil {
+		// With ssh_command set, the program that must exist is the wrapper, not ssh.
+		program := sshProgramFields(plan.Config.SSHCommand)[0]
+		reason := "SSH is required to connect to the configured WordPress source or target"
+		if program != defaultSSHCommand {
+			reason = "it is named by ssh_command, which every SSH connection runs through"
+		}
+		if err := a.checkRequiredLocalCommand(program, reason); err != nil {
 			return err
 		}
 	}

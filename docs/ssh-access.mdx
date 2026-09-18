@@ -1,0 +1,121 @@
+---
+title: SSH access
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, and how 1Password, Bitwarden, bastions, and other wrappers fit in without any vendor code in the CLI.
+sidebar:
+  order: 5
+  icon: key
+---
+
+wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
+
+This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how to slot in an agent or a wrapper.
+
+## One address instead of three values
+
+The source and the target each take a single **destination**, in any form `ssh` itself accepts, plus the common `host:port` shorthand:
+
+| Form | Example | Notes |
+| --- | --- | --- |
+| Alias from `~/.ssh/config` | `prod` | User, hostname, port, and identity all come from the `Host prod` block. |
+| `user@host` | `deploy@production.example.com` | Port 22. |
+| `user@host:port` | `deploy@production.example.com:2222` | The shorthand most people expect. |
+| `ssh://` URL | `ssh://deploy@production.example.com:2222` | The form from `man ssh`. |
+| IPv6 | `deploy@[2001:db8::1]:2222` | Brackets are required so the port stays unambiguous. |
+
+```yaml title=".wp-ssh.yaml"
+pull_destination: "deploy@production.example.com:2222"
+pull_remote_path: "/home/production/public_html"
+
+push_destination: "staging"                     # a ~/.ssh/config alias
+push_remote_path: "/home/staging/public_html"
+push_url: "https://staging.example.com"
+```
+
+The same value works as `WP_SSH_PULL_DESTINATION` / `WP_SSH_PUSH_DESTINATION` and as `--destination` / `--push-destination`. On `push`, `--destination` refers to the push target, like the other short flags.
+
+A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. The split keys keep working for existing configs; `init` writes whichever form you gave it.
+
+## Aliases resolve through ssh
+
+When the destination is an alias, the CLI does not try to understand `~/.ssh/config` itself. It asks `ssh -G`, which prints the values OpenSSH would use without connecting, and shows you the result at setup:
+
+```text title="wp-ssh-bridge init --silent --destination prod --remote-path /var/www/html"
+✓ Configured wp-ssh pull source for prod:/var/www/html
+• Pull source resolves to deploy@production.example.com:2222
+✓ Project files updated
+```
+
+If that line shows the wrong user or host, fix the `Host` block; nothing in the CLI's config needs to change. A destination without a user is deliberate: it lets `~/.ssh/config` decide, and when nothing is configured there, ssh uses your local username, exactly as on the command line.
+
+:::tip[Per-developer users without per-developer config]
+An alias is the cleanest answer to "everyone has a different SSH user". Commit `pull_destination: "prod"`, and let each developer own the `Host prod` block in their `~/.ssh/config`. No inline overrides, no unversioned values.
+:::
+
+## Password managers as SSH agents
+
+1Password and Bitwarden both expose their keys through a standard SSH agent socket. OpenSSH talks to that socket; the CLI talks to OpenSSH. So they work with wp-ssh-bridge as soon as they work with `ssh`, and the CLI ships no vendor code for either.
+
+<Tabs inline param="agent" syncKey="agent">
+  <Tab title="1Password">
+
+    Turn on the SSH agent in 1Password's developer settings, then point OpenSSH at its socket in `~/.ssh/config`. The socket path contains a space on macOS, which is exactly why it belongs in this file rather than in any CLI option:
+
+    ```text title="~/.ssh/config"
+    Host *
+      IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    ```
+
+    On Linux the socket is `~/.1password/agent.sock`. Confirm the wiring with `ssh -G prod | grep identityagent`.
+
+  </Tab>
+  <Tab title="Bitwarden">
+
+    Enable the SSH agent in the Bitwarden desktop app and export the socket it shows in its settings, in your shell profile:
+
+    ```bash title="~/.zshrc or ~/.bashrc"
+    export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+    ```
+
+    Open a new terminal and confirm with `ssh-add -L`, which lists the keys the agent offers.
+
+  </Tab>
+</Tabs>
+
+One thing to know: a pull is not one SSH session. Preflight, the database export, the download, WP-CLI calls, and cleanup are separate `ssh` processes, and each one asks the agent for a signature. Both apps can remember an approval for a while, so one confirmation usually covers the whole run. If you are asked on every step, look for that setting in the app first.
+
+## Wrapping ssh
+
+Some setups cannot be expressed in `~/.ssh/config` alone: a bastion you would rather pass on the command line, a Teleport or Tailscale client, a wrapper that injects credentials into the environment. For those, `ssh_command` replaces the program the CLI runs, the way `GIT_SSH_COMMAND` does for Git:
+
+```yaml title=".wp-ssh.yaml"
+ssh_command: "ssh -J bastion.example.com"
+```
+
+The same value works as `WP_SSH_SSH_COMMAND` and `--ssh-command`. The CLI appends its own options and the destination after it, and hands the identical string to `rsync -e`, so every connection of a run goes through the wrapper, including the fallback transfer used when `rsync` is missing.
+
+Two rules follow from how `rsync -e` works:
+
+- The value is split on whitespace and there is no quoting, so a path with a space cannot go here. Put it in `~/.ssh/config` instead, as in the 1Password example above.
+- The first word must be on `PATH`. Preflight checks for it and names it in the error when it is missing.
+
+```bash title="Examples"
+--ssh-command "ssh -J bastion.example.com"        # jump host
+--ssh-command "tsh ssh"                           # Teleport
+--ssh-command "ssh -o IdentityAgent=/tmp/agent"   # an agent socket without spaces in its path
+```
+
+## What the CLI deliberately does not do
+
+- It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.
+- It bundles no SDK for 1Password, Bitwarden, or anything else. Their agents are ordinary SSH agents, and that is the only interface the CLI relies on.
+- It does not parse `~/.ssh/config`. `ssh -G` is the source of truth, which means every option OpenSSH understands is supported without a matching option here.
+
+## When a connection fails
+
+| Symptom | Check |
+| --- | --- |
+| `Permission denied (publickey)` with an agent configured | `ssh -G <destination> \| grep -i identityagent` shows which socket OpenSSH will use; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list. |
+| `agent refused operation` | The approval was declined or timed out in the password manager. Run again and confirm the prompt. |
+| It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts. Anything interactive, such as a passphrase prompt for an unloaded key, fails here on purpose. Load the key into an agent. |
+| A wrapper works by hand, not through `ssh_command` | Check that the first word is on `PATH` for the shell the CLI runs in, and that the value has no quotes. |
+| The wrong user or port is used | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user`/`pull_port` keys together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |

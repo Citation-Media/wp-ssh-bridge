@@ -11,11 +11,13 @@ Start with the exact error text. The CLI names the failing stage and, where it c
 | --- | --- | --- |
 | `Permission denied (publickey)` | Your key is not accepted by the host. | Test `ssh user@host` first. The CLI uses your normal OpenSSH configuration, so if that fails, this will too. |
 | `Host key verification failed` | The host is not in `known_hosts`. | Connect once manually and accept the key. |
-| Connection times out | Wrong port or a firewall. | Set `pull_port` or `push_port`, or add a `Host` block in `~/.ssh/config` and use the alias as the host. |
+| Connection times out | Wrong port or a firewall. | Put the port into the destination, `deploy@host:2222`, or add a `Host` block in `~/.ssh/config` and use the alias as the destination. |
+| `the destination already carries the user, host, and port` | A `pull_destination` next to `pull_user`, `pull_host`, or `pull_port`, often from an env var or flag. | Remove the split values or move them into the destination. |
+| A wrapper such as a bastion or Teleport is needed | Plain `ssh` cannot reach the host. | Set `ssh_command`; see [SSH access](/docs/ssh-access#wrapping-ssh). |
 | Remote path errors | The remote WordPress root is wrong. | `pull_remote_path` must be absolute and contain `wp-config.php`. |
 
 :::note[Private keys stay out of the CLI]
-There is no key or password option, by design. Configure access in `~/.ssh/config`, your agent, or an identity file, exactly as for any other SSH client.
+There is no key or password option, by design. Configure access in `~/.ssh/config`, your agent, or an identity file, exactly as for any other SSH client. Password managers such as 1Password and Bitwarden work as agents; [SSH access](/docs/ssh-access#password-managers-as-ssh-agents) shows the two lines each one needs.
 :::
 
 ## WP-CLI and the database
@@ -76,7 +78,7 @@ npm install --save-dev @wordpress/env
 | Symptom | Fix |
 | --- | --- |
 | `.ddev/bin/wp-ssh-bridge: No such file or directory` during a provider callback | The project-local binary is missing. Reinstall it, then run `./.ddev/bin/wp-ssh-bridge init` or `provider install`. |
-| `ddev pull wp-ssh --user deploy` is rejected | Native DDEV pull takes no CLI flags. Use `--environment=WP_SSH_PULL_USER=deploy` instead. |
+| `ddev pull wp-ssh --destination deploy@host` is rejected | Native DDEV pull takes no CLI flags. Use `--environment=WP_SSH_PULL_DESTINATION=deploy@host` instead. |
 | Local multisite domains do not resolve | The mappings are missing. Add them with `domains add`, then run `provider install` so `additional_hostnames` is refreshed. |
 | The provider behaves oddly after an update | Regenerate it: `./.ddev/bin/wp-ssh-bridge provider install`. |
 

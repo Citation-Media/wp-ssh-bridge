@@ -30,17 +30,17 @@ wp-ssh-bridge pull --silent --config-file .wp-ssh.production.yaml
 
 ```yaml title=".wp-ssh.yaml"
 # --- Pull source: where a pull or clone reads from ---
-pull_user: "deploy"
-pull_host: "production.example.com"
-pull_port: "22"                                # optional, defaults to 22
+pull_destination: "deploy@production.example.com:2222"   # or a ~/.ssh/config alias
 pull_remote_path: "/home/production/public_html"
 pull_remote_tmp_dir: "/tmp"                    # optional, defaults to /tmp
 
 # --- Push target: where a push writes to ---
-push_user: "deploy"
-push_host: "staging.example.com"
+push_destination: "deploy@staging.example.com"
 push_remote_path: "/home/staging/public_html"
 push_url: "https://staging.example.com"        # strongly recommended
+
+# --- Connection ---
+ssh_command: "ssh"                             # optional wrapper, e.g. "ssh -J bastion"
 
 # --- Local side ---
 local_wp_path: "."                             # relative to the project root
@@ -77,8 +77,9 @@ Never put `clone_db_password` in a committed config file, and never put private 
 
 | Key | Environment variable | Purpose |
 | --- | --- | --- |
-| `pull_user` | `WP_SSH_PULL_USER` | SSH user on the source host. |
-| `pull_host` | `WP_SSH_PULL_HOST` | SSH host. An alias from `~/.ssh/config` works. |
+| `pull_destination` | `WP_SSH_PULL_DESTINATION` | The whole SSH address: `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. Replaces the three keys below. See [SSH access](/docs/ssh-access). |
+| `pull_user` | `WP_SSH_PULL_USER` | SSH user on the source host. Not allowed beside `pull_destination`. |
+| `pull_host` | `WP_SSH_PULL_HOST` | SSH host. |
 | `pull_port` | `WP_SSH_PULL_PORT` | SSH port. Defaults to 22. |
 | `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Absolute path of the source WordPress root, containing `wp-config.php`. |
 | `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Where the database dump is written before download. Defaults to `/tmp`. |
@@ -87,12 +88,19 @@ Never put `clone_db_password` in a committed config file, and never put private 
 
 | Key | Environment variable | Purpose |
 | --- | --- | --- |
-| `push_user` | `WP_SSH_PUSH_USER` | SSH user on the target host. |
+| `push_destination` | `WP_SSH_PUSH_DESTINATION` | The whole SSH address of the target, in the same forms as `pull_destination`. Replaces the three keys below. |
+| `push_user` | `WP_SSH_PUSH_USER` | SSH user on the target host. Not allowed beside `push_destination`. |
 | `push_host` | `WP_SSH_PUSH_HOST` | SSH host. |
 | `push_port` | `WP_SSH_PUSH_PORT` | SSH port. Defaults to 22. |
 | `push_remote_path` | `WP_SSH_PUSH_REMOTE_PATH` | Absolute path of the target WordPress root. |
 | `push_remote_tmp_dir` | `WP_SSH_PUSH_REMOTE_TMP_DIR` | Target temp directory. Defaults to `/tmp`. |
 | `push_url` | `WP_SSH_PUSH_URL` | Public URL of the target, used for the post-push search-replace. Without it, the CLI reads the target's current home URL before the import. |
+
+### Connection
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `ssh_command` | `WP_SSH_SSH_COMMAND` | The ssh program with leading arguments, split on whitespace, for example `ssh -J bastion`. Defaults to `ssh`. Used for every connection, including `rsync -e`. See [Wrapping ssh](/docs/ssh-access#wrapping-ssh). |
 
 ### Local
 
@@ -138,12 +146,9 @@ Never put `clone_db_password` in a committed config file, and never put private 
 
     ```bash
     wp-ssh-bridge init --silent \
-      --user deploy \
-      --host example.com \
-      --port 22 \
+      --destination deploy@example.com \
       --remote-path /home/example/public_html \
-      --push-user deploy \
-      --push-host staging.example.com \
+      --push-destination deploy@staging.example.com \
       --push-remote-path /home/staging/public_html \
       --push-url https://staging.example.com
     ```
@@ -360,6 +365,8 @@ These apply to `pull`, `push`, and `clone` unless noted.
 | `--clean-target` | Clone only. Remove pre-existing target content before syncing. Destructive. |
 | `--project-root` | Operate on another project directory. |
 | `--integration` | Pin the runtime for this run. |
+| `--destination`, `--push-destination` | The whole SSH address for the source or target. On `push`, `--destination` is an alias for `--push-destination`. Cannot be combined with the `--user`, `--host`, and `--port` flags it replaces. |
+| `--ssh-command` | The ssh program with leading arguments, for this run. |
 
 ## Commands at a glance
 

@@ -3,6 +3,6 @@ import { defineMeta } from "blume";
 export default defineMeta({
   title: "Commands",
   icon: "terminal",
-  order: 5,
+  order: 6,
   pages: ["pull", "push", "clone"],
 });

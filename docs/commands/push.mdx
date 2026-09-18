@@ -24,12 +24,11 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
     wp-ssh-bridge push --silent
     ```
 
-    With an inline target. For `push`, the short flags refer to the push target, so `--host` means `--push-host`:
+    With an inline target. For `push`, the short flags refer to the push target, so `--destination` means `--push-destination`:
 
     ```bash
     wp-ssh-bridge push --silent \
-      --user deploy \
-      --host staging.example.com \
+      --destination deploy@staging.example.com \
       --remote-path /home/staging/public_html \
       --push-url https://staging.example.com
     ```
@@ -136,7 +135,9 @@ That list is deliberately short. A push is meant to make the target match your l
 | `--skip-search-replace` | Do not rewrite URLs on the target. |
 | `--skip-maintenance-mode` | Leave the target site reachable during the push. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
-| `--push-user`, `--push-host`, `--push-port`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--user`, `--host`, `--port`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
+| `--push-destination`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--destination`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
+| `--push-user`, `--push-host`, `--push-port` | The split form of the address, aliased by `--user`, `--host`, and `--port` on `push`. Not combinable with a destination. |
+| `--ssh-command` | Run every connection through another program, for example `ssh -J bastion`. |
 | `--config-file` | Read another YAML file, for example `.wp-ssh.staging.yaml`. |
 
 ## Domain rewrites in both directions

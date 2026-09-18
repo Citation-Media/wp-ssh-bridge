@@ -228,3 +228,62 @@ func TestMigrateCommandNameReportsRename(t *testing.T) {
 		t.Fatalf("run(migrate) error = %q, want the clone rename hint", err)
 	}
 }
+
+func TestDestinationFlagRejectsTheSplitAddressFlags(t *testing.T) {
+	t.Parallel()
+	for name, args := range map[string][]string{
+		"pull":  {"--destination", "prod", "--host", "example.com"},
+		"init":  {"--push-destination", "prod", "--push-user", "deploy"},
+		"push":  {"--destination", "prod", "--push-port", "2222"},
+		"clone": {"--destination", "prod", "--port", "22"},
+	} {
+		if _, err := parseConfigCommand(name, args, new(strings.Builder)); err == nil {
+			t.Fatalf("parseConfigCommand(%s) accepted %v", name, args)
+		}
+	}
+	if _, err := parseConfigCommand("pull", []string{"--destination", "prod", "--push-user", "deploy"}, new(strings.Builder)); err != nil {
+		t.Fatalf("parseConfigCommand(pull) rejected a pull destination beside push flags: %v", err)
+	}
+}
+
+func TestDestinationFlagReplacesTheSplitAddress(t *testing.T) {
+	t.Parallel()
+	cfg := Config{User: "old", Host: "old.example.com", Port: "2200", PushUser: "old", PushHost: "old-staging"}
+	opts := configOptions{Destination: "deploy@prod:2222", SSHCommand: "ssh -J bastion"}
+	cfg = opts.apply(cfg)
+	if cfg.Destination != "deploy@prod:2222" || cfg.User != "" || cfg.Host != "" || cfg.Port != "" {
+		t.Fatalf("apply() left the split pull address in place: %+v", cfg)
+	}
+	if cfg.SSHCommand != "ssh -J bastion" {
+		t.Fatalf("apply() did not set ssh_command: %+v", cfg)
+	}
+	cfg = opts.applyGenericAsPush(cfg)
+	if cfg.PushDestination != "deploy@prod:2222" || cfg.PushUser != "" || cfg.PushHost != "" {
+		t.Fatalf("applyGenericAsPush() did not alias --destination to the push target: %+v", cfg)
+	}
+}
+
+func TestFillConfigAcceptsADestinationInsteadOfUserAndHost(t *testing.T) {
+	t.Parallel()
+	cfg := Config{User: "old", Host: "old.example.com", RemotePath: "/var/www/html"}
+	// provider, destination, remote path (kept), tmp dir, local path, clone images, search-replace, configure push
+	input := strings.NewReader("\ndeploy@prod:2222\n\n\n\nn\nn\nn\n")
+	output := bytes.Buffer{}
+	prompter := newPrompter(input, &output)
+	prompter.resolve = func(target RemoteTarget) (sshDestination, bool) {
+		return sshDestination{User: "deploy", Host: "prod.example.com", Port: "2222"}, true
+	}
+
+	if err := prompter.fillConfig(&cfg); err != nil {
+		t.Fatalf("fillConfig() error = %v", err)
+	}
+	if cfg.Destination != "deploy@prod:2222" || cfg.User != "" || cfg.Host != "" || cfg.Port != "" {
+		t.Fatalf("destination did not replace the split address: %+v", cfg)
+	}
+	if strings.Contains(output.String(), "SSH user") {
+		t.Fatalf("prompted for the user after a destination was given:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "resolves to deploy@prod.example.com:2222") {
+		t.Fatalf("missing resolution line:\n%s", output.String())
+	}
+}
