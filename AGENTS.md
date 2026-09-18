@@ -119,10 +119,10 @@ Deployment runs through Cloudflare Workers Builds, connected to this repository.
 | Root directory | `packages/documentation` |
 | Build command | `npm run build` |
 | Deploy command | `npm run deploy` |
-| Non-production branch deploy command | `npm run deploy:preview` |
+| Version command (runs for non-production branches) | `npm run deploy:preview` |
 | Environment variable | `GITHUB_TOKEN`, needed for the changelog while the repository is private |
 
-The deploy commands matter: plain `npx wrangler deploy` cannot find the adapter's config at `dist/server/wrangler.json` and fails with "Could not detect a directory containing static files", and the default for branches, `npx wrangler versions upload`, fails the same way with "Missing entry-point to Worker script". Both scripts pass that config and pin the Worker name. `deploy:preview` uploads a version without deploying it, so a pull request branch gets a preview URL and production traffic is untouched.
+The deploy commands matter: plain `npx wrangler deploy` cannot find the adapter's config at `dist/server/wrangler.json` and fails with "Could not detect a directory containing static files", and the default "Version command", `npx wrangler versions upload`, which Workers Builds runs for every branch other than `main`, fails the same way with "Missing entry-point to Worker script". Both scripts pass that config and pin the Worker name. `deploy:preview` uploads a version without deploying it, so a pull request branch gets a preview URL and production traffic is untouched.
 
 Nothing in GitHub Actions deploys the site. Workers Builds owns it end to end.
 
