@@ -13,7 +13,7 @@ Configuration comes from three layers. Each one overrides the last, so you keep 
     `.ddev/wp-ssh.yaml` in DDEV projects, `.wp-ssh.yaml` in wp-env and Generic projects. Written by `init` and safe to commit, because generated files avoid machine-specific absolute paths.
   </Step>
   <Step title="Environment variables">
-    Every key has a `WP_SSH_*` twin. The right place for CI, per-developer SSH users, and passwords.
+    Every key has a `WP_SSH_*` twin. The right place for CI, per-developer SSH users, and passwords. [Secrets managers](/docs/secrets-managers) shows how 1Password and Bitwarden inject them for one run.
   </Step>
   <Step title="CLI flags">
     One-shot overrides. A `--integration` flag passed to `pull` or `push` is never written back to the config; only `init --integration` persists it.

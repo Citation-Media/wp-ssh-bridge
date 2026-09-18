@@ -81,6 +81,8 @@ An alias is the cleanest answer to "everyone has a different SSH user". Commit `
   </Tab>
 </Tabs>
 
+The same apps can also hold the values a run needs, such as a staging address or the clone database password, and inject them as environment variables; that is a different mechanism, described on [Secrets managers](/docs/secrets-managers).
+
 One thing to know: a pull is not one SSH session. Preflight, the database export, the download, WP-CLI calls, and cleanup are separate `ssh` processes, and each one asks the agent for a signature. Both apps can remember an approval for a while, so one confirmation usually covers the whole run. If you are asked on every step, look for that setting in the app first.
 
 ## Wrapping ssh
