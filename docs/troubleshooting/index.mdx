@@ -13,7 +13,7 @@ Start with the exact error text. The CLI names the failing stage and, where it c
 | `Host key verification failed` | The host is not in `known_hosts`. | Connect once manually and accept the key. |
 | Connection times out | Wrong port or a firewall. | Put the port into the destination, `deploy@host:2222`, or add a `Host` block in `~/.ssh/config` and use the alias as the destination. |
 | `the destination already carries the user, host, and port` | A `pull_destination` next to `pull_user`, `pull_host`, or `pull_port`, often from an env var or flag. | Remove the split values or move them into the destination. |
-| The host is only reachable through a bastion or a client such as Teleport | Plain `ssh host` cannot reach it. | Put `ProxyJump` or the client's `ProxyCommand` into a `Host` block and use the alias as the destination; see [SSH access](/docs/ssh-access#jump-hosts-and-other-clients). |
+| The host is only reachable through a bastion or a client such as Teleport | Plain `ssh host` cannot reach it. | Put `ProxyJump` or the client's `ProxyCommand` into a `Host` block, as that tool documents, and use the alias as the destination. |
 | Remote path errors | The remote WordPress root is wrong. | `pull_remote_path` must be absolute and contain `wp-config.php`. |
 
 :::note[Private keys stay out of the CLI]

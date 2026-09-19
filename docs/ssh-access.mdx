@@ -1,6 +1,6 @@
 ---
 title: SSH access
-description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, which key the agent offers, and how jump hosts fit in without any vendor code in the CLI.
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, and which key the agent offers, without any vendor code in the CLI.
 sidebar:
   order: 5
   icon: key
@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how a key or a jump host slots in. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
+This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how a key is chosen. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
 
 ## One address instead of three values
 
@@ -66,26 +66,12 @@ Host prod
 
 Export the public key from the password manager into `~/.ssh/prod.pub` once. With that block in place, `pull_destination: "prod"` is the whole address, and everything else about the connection lives where every other SSH tool finds it.
 
-## Jump hosts and other clients
-
-The CLI has no option for a bastion, a proxy command, or a different client, on purpose. All of them are `~/.ssh/config` settings, and putting them there means they also apply to `git`, to the DDEV provider, and to your terminal:
-
-```text title="~/.ssh/config"
-Host prod
-  HostName 10.0.12.5
-  ProxyJump bastion.example.com
-
-Host teleport-*
-  ProxyCommand tsh proxy ssh %r@%h:%p
-```
-
-Teleport, Tailscale SSH, cloud IAP tunnels, and similar clients all document their `ProxyCommand` or `ProxyJump` line; `tsh config` even generates it. Once `ssh prod` works in your terminal, the CLI works too, because it runs that same `ssh`.
-
 ## What the CLI deliberately does not do
 
 - It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.
 - It bundles no SDK for 1Password, Bitwarden, or anything else. Their agents are ordinary SSH agents, and that is the only interface the CLI relies on.
 - It does not parse `~/.ssh/config`. `ssh -G` is the source of truth, which means every option OpenSSH understands is supported without a matching option here.
+- It has no option for a bastion, a proxy command, or another client. Those are `ProxyJump` and `ProxyCommand` lines in a `Host` block, which OpenSSH, Teleport, Tailscale, and the like document themselves; once `ssh <alias>` works in your terminal, the alias works as a destination.
 
 ## When a connection fails
 
