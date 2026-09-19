@@ -75,7 +75,7 @@ Tagging a release runs `.github/workflows/release.yml`:
 
 1. Tests run, then binaries are built for macOS and Linux on `amd64` and `arm64` and stamped with the tag.
 2. The archives and `checksums.txt` are attached to a GitHub release whose notes are the matching `CHANGELOG.md` section, extracted by `scripts/release-notes.sh`. A tag with no section falls back to generated notes. Those notes are also what the documentation site renders as its changelog, so write them for users rather than for the commit log.
-3. The `npm` job derives the version from the tag, writes it into `VERSION` and the wrapper's `package.json`, commits that back to the default branch, and publishes. It runs after the release exists, because the package downloads its binary from that release. A prerelease tag publishes under the `next` dist-tag so it never moves `latest`.
+3. The `npm` job derives the version from the tag, writes it into `VERSION` and the wrapper's `package.json`, commits that back to the default branch, and publishes. It runs after the release exists, because the package downloads its binary from that release. A prerelease tag such as `v0.7.0-rc.1` publishes under the `next` dist-tag, is marked as a GitHub prerelease so `releases/latest` and the install script stay on the last stable build, and skips the version write-back; install it with `npm install --save-dev @citation-media/wp-ssh-bridge@next` or `install.sh --version v0.7.0-rc.1`.
 
 Do not bump the version by hand before tagging. The workflow owns it, and the commit it pushes afterwards is also what makes Cloudflare rebuild the site with the new release in its changelog.
 

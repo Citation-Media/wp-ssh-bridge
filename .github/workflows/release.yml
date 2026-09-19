@@ -150,6 +150,10 @@ jobs:
             dist/checksums.txt
           body_path: ${{ steps.notes.outputs.GENERATE == 'false' && 'release-notes.md' || '' }}
           generate_release_notes: ${{ steps.notes.outputs.GENERATE }}
+          # A tag with a suffix (v0.7.0-rc.1) is a prerelease. GitHub then keeps
+          # "latest" on the last stable release, so releases/latest/download and
+          # with it the install script never hand out a release candidate.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   # Publishes the npm wrapper through npm trusted publishing: the job proves its
   # identity with a short-lived OIDC token instead of a long-lived NPM_TOKEN, and
@@ -204,6 +208,9 @@ jobs:
         run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
 
       - name: Record the version in the repository
+        # Only a stable release is written back; a release candidate would put
+        # its version into the default branch and the site's changelog.
+        if: steps.version.outputs.NPM_TAG == 'latest'
         working-directory: .
         run: |
           set -eu
