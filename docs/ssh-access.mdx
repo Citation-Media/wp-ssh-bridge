@@ -1,6 +1,6 @@
 ---
 title: SSH access
-description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, which key the agent offers, and how 1Password, Bitwarden, and jump hosts fit in without any vendor code in the CLI.
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, which key the agent offers, and how jump hosts fit in without any vendor code in the CLI.
 sidebar:
   order: 5
   icon: key
@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how an agent or a jump host slots in.
+This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how a key or a jump host slots in. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
 
 ## One address instead of three values
 
@@ -51,43 +51,9 @@ If that line shows the wrong user or host, fix the `Host` block; nothing in the 
 An alias is the cleanest answer to "everyone has a different SSH user". Commit `pull_destination: "prod"`, and let each developer own the `Host prod` block in their `~/.ssh/config`. No inline overrides, no unversioned values.
 :::
 
-## Password managers as SSH agents
-
-1Password and Bitwarden both expose their keys through a standard SSH agent socket. OpenSSH talks to that socket; the CLI talks to OpenSSH. So they work with wp-ssh-bridge as soon as they work with `ssh`, and the CLI ships no vendor code for either.
-
-<Tabs inline param="agent" syncKey="agent">
-  <Tab title="1Password">
-
-    Turn on the SSH agent in 1Password's developer settings, then point OpenSSH at its socket in `~/.ssh/config`. The socket path contains a space on macOS, which is exactly why it belongs in this file rather than in any CLI option:
-
-    ```text title="~/.ssh/config"
-    Host *
-      IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-    ```
-
-    On Linux the socket is `~/.1password/agent.sock`. Confirm the wiring with `ssh -G prod | grep identityagent`.
-
-  </Tab>
-  <Tab title="Bitwarden">
-
-    Enable the SSH agent in the Bitwarden desktop app and export the socket it shows in its settings, in your shell profile:
-
-    ```bash title="~/.zshrc or ~/.bashrc"
-    export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
-    ```
-
-    Open a new terminal and confirm with `ssh-add -L`, which lists the keys the agent offers.
-
-  </Tab>
-</Tabs>
-
-The same apps can also hold the values a run needs, such as a staging address or the clone database password, and inject them as environment variables; that is a different mechanism, described on [Secrets managers](/docs/secrets-managers).
-
-One thing to know: a pull is not one SSH session. Preflight, the database export, the download, WP-CLI calls, and cleanup are separate `ssh` processes, and each one asks the agent for a signature. Both apps can remember an approval for a while, so one confirmation usually covers the whole run. If you are asked on every step, look for that setting in the app first.
-
 ## Which key the agent offers
 
-An agent offers every key it holds, in order, and `ssh` tries them one by one. With a handful of keys in 1Password or Bitwarden that is fine; with more, the server's attempt limit is reached before the right key comes up and you see `Too many authentication failures`. Pin the key in the alias, using the **public** key as a file. The private key stays in the agent; the file only tells `ssh` which one to ask for:
+An agent offers every key it holds, in order, and `ssh` tries them one by one. With a handful of keys that is fine; with more, the server's attempt limit is reached before the right key comes up and you see `Too many authentication failures`. Pin the key in the alias, using the **public** key as a file. The private key stays in the agent; the file only tells `ssh` which one to ask for:
 
 ```text title="~/.ssh/config"
 Host prod
