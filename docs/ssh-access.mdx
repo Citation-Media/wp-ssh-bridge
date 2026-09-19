@@ -1,6 +1,6 @@
 ---
 title: SSH access
-description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, and which key the agent offers, without any vendor code in the CLI.
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, without any vendor code in the CLI.
 sidebar:
   order: 5
   icon: key
@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how a key is chosen. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
+This page covers the three things that are specific to the CLI: the address format and how aliases resolve. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
 
 ## One address instead of three values
 
@@ -51,21 +51,6 @@ If that line shows the wrong user or host, fix the `Host` block; nothing in the 
 An alias is the cleanest answer to "everyone has a different SSH user". Commit `pull_destination: "prod"`, and let each developer own the `Host prod` block in their `~/.ssh/config`. No inline overrides, no unversioned values.
 :::
 
-## Which key the agent offers
-
-An agent offers every key it holds, in order, and `ssh` tries them one by one. With a handful of keys that is fine; with more, the server's attempt limit is reached before the right key comes up and you see `Too many authentication failures`. Pin the key in the alias, using the **public** key as a file. The private key stays in the agent; the file only tells `ssh` which one to ask for:
-
-```text title="~/.ssh/config"
-Host prod
-  HostName production.example.com
-  User deploy
-  Port 2222
-  IdentityFile ~/.ssh/prod.pub
-  IdentitiesOnly yes
-```
-
-Export the public key from the password manager into `~/.ssh/prod.pub` once. With that block in place, `pull_destination: "prod"` is the whole address, and everything else about the connection lives where every other SSH tool finds it.
-
 ## What the CLI deliberately does not do
 
 - It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.
@@ -80,5 +65,5 @@ Export the public key from the password manager into `~/.ssh/prod.pub` once. Wit
 | `Permission denied (publickey)` with an agent configured | `ssh -G <destination> \| grep -i identityagent` shows which socket OpenSSH will use; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list. |
 | `agent refused operation` | The approval was declined or timed out in the password manager. Run again and confirm the prompt. |
 | It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts. Anything interactive, such as a passphrase prompt for an unloaded key, fails here on purpose. Load the key into an agent. |
-| `Too many authentication failures` | The agent offered more keys than the server allows attempts. Pin the key with `IdentityFile` and `IdentitiesOnly yes` as shown above. |
+| `Too many authentication failures` | The agent offered more keys than the server allows attempts. Pin the key in the `Host` block with `IdentityFile` (the public key) and `IdentitiesOnly yes`, as OpenSSH documents. |
 | The wrong user or port is used | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user`/`pull_port` keys together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |
