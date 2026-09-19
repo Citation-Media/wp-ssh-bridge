@@ -15,7 +15,7 @@ npx wp-env start
 2. Configure from the wp-env project root. Without `--silent` the command prompts; pass the values as flags when running without a terminal:
 
 ```bash
-wp-ssh-bridge init --silent --user deploy --host production.example.com --remote-path /home/production/public_html
+wp-ssh-bridge init --silent --destination deploy@production.example.com --remote-path /home/production/public_html
 ```
 
    wp-env projects already have a `package.json`, so `npm install --save-dev @citation-media/wp-ssh-bridge` and `npx wp-ssh-bridge` is the natural install route here.
@@ -33,8 +33,7 @@ wp-ssh-bridge pull --silent
 `.wp-ssh.yaml` at the wp-env project root is the equivalent of `.ddev/wp-ssh.yaml`, with the same precedence: config file, then env vars, then flags. It holds only portable values, so it can be committed:
 
 ```yaml
-pull_user: "deploy"
-pull_host: "production.example.com"
+pull_destination: "deploy@production.example.com"
 pull_remote_path: "/home/production/public_html"
 clone_images: false
 ```

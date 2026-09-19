@@ -1,0 +1,69 @@
+---
+title: SSH access
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, without any vendor code in the CLI.
+sidebar:
+  order: 5
+  icon: key
+---
+
+wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
+
+This page covers the three things that are specific to the CLI: the address format and how aliases resolve. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
+
+## One address instead of three values
+
+The source and the target each take a single **destination**, in any form `ssh` itself accepts, plus the common `host:port` shorthand:
+
+| Form | Example | Notes |
+| --- | --- | --- |
+| Alias from `~/.ssh/config` | `prod` | User, hostname, port, and identity all come from the `Host prod` block. |
+| `user@host` | `deploy@production.example.com` | Port 22. |
+| `user@host:port` | `deploy@production.example.com:2222` | The shorthand most people expect. |
+| `ssh://` URL | `ssh://deploy@production.example.com:2222` | The form from `man ssh`. |
+| IPv6 | `deploy@[2001:db8::1]:2222` | Brackets are required so the port stays unambiguous. |
+
+```yaml title=".wp-ssh.yaml"
+pull_destination: "deploy@production.example.com:2222"
+pull_remote_path: "/home/production/public_html"
+
+push_destination: "staging"                     # a ~/.ssh/config alias
+push_remote_path: "/home/staging/public_html"
+push_url: "https://staging.example.com"
+```
+
+The same value works as `WP_SSH_PULL_DESTINATION` / `WP_SSH_PUSH_DESTINATION` and as `--destination` / `--push-destination`. On `push`, `--destination` refers to the push target, like the other short flags.
+
+A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. The split keys keep working for existing configs; `init` writes whichever form you gave it.
+
+## Aliases resolve through ssh
+
+When the destination is an alias, the CLI does not try to understand `~/.ssh/config` itself. It asks `ssh -G`, which prints the values OpenSSH would use without connecting, and shows you the result at setup:
+
+```text title="wp-ssh-bridge init --silent --destination prod --remote-path /var/www/html"
+✓ Configured wp-ssh pull source for prod:/var/www/html
+• Pull source resolves to deploy@production.example.com:2222
+✓ Project files updated
+```
+
+If that line shows the wrong user or host, fix the `Host` block; nothing in the CLI's config needs to change. A destination without a user is deliberate: it lets `~/.ssh/config` decide, and when nothing is configured there, ssh uses your local username, exactly as on the command line.
+
+:::tip[Per-developer users without per-developer config]
+An alias is the cleanest answer to "everyone has a different SSH user". Commit `pull_destination: "prod"`, and let each developer own the `Host prod` block in their `~/.ssh/config`. No inline overrides, no unversioned values.
+:::
+
+## What the CLI deliberately does not do
+
+- It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.
+- It bundles no SDK for 1Password, Bitwarden, or anything else. Their agents are ordinary SSH agents, and that is the only interface the CLI relies on.
+- It does not parse `~/.ssh/config`. `ssh -G` is the source of truth, which means every option OpenSSH understands is supported without a matching option here.
+- It has no option for a bastion, a proxy command, or another client. Those are `ProxyJump` and `ProxyCommand` lines in a `Host` block, which OpenSSH, Teleport, Tailscale, and the like document themselves; once `ssh <alias>` works in your terminal, the alias works as a destination.
+
+## When a connection fails
+
+| Symptom | Check |
+| --- | --- |
+| `Permission denied (publickey)` with an agent configured | `ssh -G <destination> \| grep -i identityagent` shows which socket OpenSSH will use; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list. |
+| `agent refused operation` | The approval was declined or timed out in the password manager. Run again and confirm the prompt. |
+| It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts. Anything interactive, such as a passphrase prompt for an unloaded key, fails here on purpose. Load the key into an agent. |
+| `Too many authentication failures` | The agent offered more keys than the server allows attempts. Pin the key in the `Host` block with `IdentityFile` (the public key) and `IdentitiesOnly yes`, as OpenSSH documents. |
+| The wrong user or port is used | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user`/`pull_port` keys together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |

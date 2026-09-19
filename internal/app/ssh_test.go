@@ -120,3 +120,95 @@ func installFakeCommand(t *testing.T, dir string, name string, script string) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
+
+func TestSSHArgvTakesThePortFromTheDestination(t *testing.T) {
+	t.Parallel()
+	target := RemoteTarget{Destination: "deploy@production.example.com:2222"}
+	args := sshArgv(target, sshTarget(target), "true")
+	want := []string{"ssh", "-p", "2222", "-o", "BatchMode=yes"}
+	for i, value := range want {
+		if args[i] != value {
+			t.Fatalf("sshArgv()[%d] = %q, want %q in %v", i, args[i], value, args)
+		}
+	}
+	if args[len(args)-2] != "deploy@production.example.com" || args[len(args)-1] != "true" {
+		t.Fatalf("sshArgv() did not end with destination and command: %v", args)
+	}
+	if got := sshCommandString(target); !strings.HasPrefix(got, "ssh -p 2222 -o BatchMode=yes") {
+		t.Fatalf("sshCommandString() = %q", got)
+	}
+}
+
+func TestSSHArgvOmitsThePortFlagByDefault(t *testing.T) {
+	t.Parallel()
+	args := sshArgv(RemoteTarget{User: "deploy", Host: "example.com"})
+	if args[0] != "ssh" || args[1] != "-o" {
+		t.Fatalf("sshArgv() without a port = %v", args)
+	}
+}
+
+func TestSSHTargetPrefersTheDestinationAddress(t *testing.T) {
+	t.Parallel()
+	cases := map[RemoteTarget]string{
+		{Destination: "prod"}:                                     "prod",
+		{Destination: "ssh://deploy@example.com:2222"}:            "deploy@example.com",
+		{Destination: "[2001:db8::1]:22"}:                         "[2001:db8::1]",
+		{User: "deploy", Host: "example.com"}:                     "deploy@example.com",
+		{Host: "example.com"}:                                     "example.com",
+		{Destination: "deploy@example.com", User: "x", Host: "y"}: "deploy@example.com",
+	}
+	for target, want := range cases {
+		if got := sshTarget(target); got != want {
+			t.Errorf("sshTarget(%+v) = %q, want %q", target, got, want)
+		}
+	}
+	if got := (RemoteTarget{Destination: "prod:2200", Port: "1"}).port(); got != "2200" {
+		t.Errorf("port() should come from the destination, got %q", got)
+	}
+}
+
+func TestDownloadOverSSHWritesRemoteStdoutToTheLocalFile(t *testing.T) {
+	dir := t.TempDir()
+	installFakeSSH(t, dir, "#!/bin/sh\nprintf 'dump-bytes'\n")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	local := filepath.Join(dir, "db.sql.gz")
+	target := RemoteTarget{Destination: "deploy@example.com"}
+	if err := app.downloadOverSSH(context.Background(), dir, target, "/tmp/db.sql.gz", local); err != nil {
+		t.Fatalf("downloadOverSSH() error = %v", err)
+	}
+	got, err := os.ReadFile(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dump-bytes" {
+		t.Fatalf("downloaded content = %q", got)
+	}
+}
+
+func TestUploadOverSSHStreamsTheLocalFileToRemoteStdin(t *testing.T) {
+	dir := t.TempDir()
+	captured := filepath.Join(dir, "captured")
+	installFakeSSH(t, dir, "#!/bin/sh\ncat > "+shellQuote(captured)+"\nprintf '%s\\n' \"$*\" > "+shellQuote(captured+".args")+"\n")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	local := filepath.Join(dir, "db.sql.gz")
+	if err := os.WriteFile(local, []byte("local-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := RemoteTarget{Destination: "deploy@example.com"}
+	if err := app.uploadOverSSH(context.Background(), dir, target, local, "/tmp/db.sql.gz"); err != nil {
+		t.Fatalf("uploadOverSSH() error = %v", err)
+	}
+	got, err := os.ReadFile(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "local-bytes" {
+		t.Fatalf("uploaded content = %q", got)
+	}
+	args, _ := os.ReadFile(captured + ".args")
+	if !strings.Contains(string(args), "deploy@example.com cat > '/tmp/db.sql.gz'") {
+		t.Fatalf("upload command = %q", args)
+	}
+}

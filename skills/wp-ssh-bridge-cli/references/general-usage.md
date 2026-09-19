@@ -10,12 +10,11 @@ Use this reference for standalone WordPress projects or when the user explicitly
 
 ```bash
 wp-ssh-bridge init --silent \
-  --user deploy \
-  --host production.example.com \
+  --destination deploy@production.example.com \
   --remote-path /home/production/public_html
 ```
 
-   Push values may be added on the same command with `--push-user`, `--push-host`, `--push-remote-path`, and `--push-url`, or later by editing the config. Missing push values are not an error at init; they are only required by `push`.
+   Push values may be added on the same command with `--push-destination`, `--push-remote-path`, and `--push-url`, or later by editing the config. Missing push values are not an error at init; they are only required by `push`.
 
 4. Pull from the configured source:
 
@@ -36,19 +35,19 @@ Pull replaces the local database and syncs files from the pull source. Push over
 Pull needs:
 
 ```text
-pull_user or --user or WP_SSH_PULL_USER
-pull_host or --host or WP_SSH_PULL_HOST
+pull_destination or --destination or WP_SSH_PULL_DESTINATION
 pull_remote_path or --remote-path or WP_SSH_PULL_REMOTE_PATH
 ```
 
 Push needs:
 
 ```text
-push_user or --push-user or WP_SSH_PUSH_USER
-push_host or --push-host or WP_SSH_PUSH_HOST
+push_destination or --push-destination or WP_SSH_PUSH_DESTINATION
 push_remote_path or --push-remote-path or WP_SSH_PUSH_REMOTE_PATH
 push_url or --push-url or WP_SSH_PUSH_URL
 ```
+
+A destination is `user@host[:port]`, an `ssh://user@host:port` URL, or an alias from `~/.ssh/config`; IPv6 goes in brackets. Without a user it takes the one from `~/.ssh/config`, or the local username. The split form still exists — `pull_user`/`pull_host`/`pull_port`, `--user`/`--host`/`--port`, `WP_SSH_PULL_USER`/`_HOST`/`_PORT`, and the `push_` equivalents — but a destination beside any of them is rejected, so use one form per target. On `push`, `--destination` is an alias for `--push-destination`, like the other short flags.
 
 Remote WordPress paths must be absolute and point to a WordPress root containing `wp-config.php`.
 
@@ -63,12 +62,10 @@ Standalone config lives at:
 Use config mode for repeatable project defaults:
 
 ```yaml
-pull_user: "deploy"
-pull_host: "production.example.com"
+pull_destination: "deploy@production.example.com"
 pull_remote_path: "/home/production/public_html"
 
-push_user: "deploy"
-push_host: "staging.example.com"
+push_destination: "deploy@staging.example.com:2222"
 push_remote_path: "/home/staging/public_html"
 push_url: "https://staging.example.com"
 
@@ -87,7 +84,7 @@ integration: "standalone"
 Less common keys, all optional:
 
 ```yaml
-pull_port: "2222"                       # SSH port when not 22; push_port for the target
+pull_port: "2222"                       # split-form port when not using a destination; push_port for the target
 pull_remote_tmp_dir: "/tmp"             # where the dump is written on the source host;
 push_remote_tmp_dir: "/tmp"             # push_remote_tmp_dir for the target. Change when /tmp is small or noexec
 local_url: "http://example.local"       # local URL for search-replace; only to override what DDEV/wp-env detect
@@ -122,7 +119,7 @@ repo/
 Run `init --silent` and `pull` inside each folder, or drive them from the repository root with `--project-root`:
 
 ```bash
-wp-ssh-bridge init --silent --project-root sites/alpha --user deploy --host alpha.example.com --remote-path /var/www/alpha
+wp-ssh-bridge init --silent --project-root sites/alpha --destination deploy@alpha.example.com --remote-path /var/www/alpha
 wp-ssh-bridge pull --silent --project-root sites/alpha
 ```
 
@@ -168,21 +165,19 @@ wp-ssh-bridge domains list
 Use env mode for shell, CI, or temporary overrides:
 
 ```bash
-export WP_SSH_PULL_USER=deploy
-export WP_SSH_PULL_HOST=production.example.com
+export WP_SSH_PULL_DESTINATION=deploy@production.example.com
 export WP_SSH_PULL_REMOTE_PATH=/home/production/public_html
 ```
 
 ```bash
-export WP_SSH_PUSH_USER=deploy
-export WP_SSH_PUSH_HOST=staging.example.com
+export WP_SSH_PUSH_DESTINATION=deploy@staging.example.com
 export WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html
 export WP_SSH_PUSH_URL=https://staging.example.com
 ```
 
-Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
+Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
 
-Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent.
+Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. To inject the variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager).
 
 ## Args Mode
 
@@ -190,15 +185,13 @@ Use args mode for one-shot commands:
 
 ```bash
 wp-ssh-bridge pull --silent \
-  --user deploy \
-  --host production.example.com \
+  --destination deploy@production.example.com \
   --remote-path /home/production/public_html
 ```
 
 ```bash
 wp-ssh-bridge push --silent \
-  --user deploy \
-  --host staging.example.com \
+  --destination deploy@staging.example.com \
   --remote-path /home/staging/public_html \
   --push-url https://staging.example.com
 ```
@@ -207,8 +200,7 @@ Push also supports explicit push flags:
 
 ```bash
 wp-ssh-bridge push --silent \
-  --push-user deploy \
-  --push-host staging.example.com \
+  --push-destination deploy@staging.example.com \
   --push-remote-path /home/staging/public_html \
   --push-url https://staging.example.com
 ```
@@ -235,7 +227,9 @@ Flags that select where things are, accepted by every command:
 --project-root <dir>        run against another project folder instead of the cwd
 --config-file <path>        config file, resolved from the project root
 --integration <mode>        pin ddev, wp-env, or standalone for this run
---port, --push-port         SSH ports when not 22
+--destination, --push-destination
+                            the whole SSH address; replaces --user/--host/--port
+--port, --push-port         split-form SSH ports when not using a destination
 --remote-tmp-dir <dir>      temp dir on the source host; --push-remote-tmp-dir for the target
 --local-wp-path <dir>       local WordPress root, relative to the project root
 --local-url <url>           local URL for search-replace, overrides the detected one
@@ -264,4 +258,4 @@ wp-ssh-bridge version
 wp-ssh-bridge pull --silent --config-file .wp-ssh.yaml
 ```
 
-For missing required values, provide the smallest full command with `--user`, `--host`, and `--remote-path` for pull, or the push equivalents for push.
+For missing required values, provide the smallest full command with `--destination` and `--remote-path` for pull, or the push equivalents for push. For `Permission denied` with a password-manager agent, check `ssh -G <destination> | grep -i identityagent` and `ssh-add -L` before anything else.

@@ -13,7 +13,8 @@
     "preview": "blume preview",
     "check": "blume check",
     "validate": "blume validate",
-    "deploy": "wrangler deploy --config dist/server/wrangler.json --name wp-ssh-bridge-docs"
+    "deploy": "wrangler deploy --config dist/server/wrangler.json --name wp-ssh-bridge-docs",
+    "deploy:preview": "wrangler versions upload --config dist/server/wrangler.json --name wp-ssh-bridge-docs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.3.2",

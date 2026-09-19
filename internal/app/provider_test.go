@@ -54,11 +54,12 @@ func TestProviderDBPullFallsBackToSCPWhenRemoteRsyncIsMissing(t *testing.T) {
 	}
 
 	installFakeCommand(t, dir, "ddev", "#!/bin/sh\nif [ \"$1\" = describe ] && [ \"$2\" = -j ]; then\n  printf '%s\\n' "+shellQuote(`{"type":"wordpress","app_root":"`+dir+`"}`)+"\nfi\n")
-	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *'command -v rsync'*) exit 1 ;;\nesac\n")
 
-	scpLog := filepath.Join(dir, "scp.log")
+	sshLog := filepath.Join(dir, "ssh.log")
 	rsyncLog := filepath.Join(dir, "rsync.log")
-	installFakeCommand(t, dir, "scp", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+shellQuote(scpLog)+"\n")
+	// The fallback downloads the dump with "ssh <host> cat <file>", so the fake ssh
+	// records that call and answers the rsync probe with failure.
+	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *'command -v rsync'*) exit 1 ;;\n  *' cat '*) printf '%s\\n' \"$*\" >> "+shellQuote(sshLog)+" ;;\nesac\n")
 	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+shellQuote(rsyncLog)+"\nexit 1\n")
 
 	stdout := bytes.Buffer{}
@@ -68,8 +69,12 @@ func TestProviderDBPullFallsBackToSCPWhenRemoteRsyncIsMissing(t *testing.T) {
 	if err := app.commandProviderRuntime("db-pull", []string{"--project-root", dir}); err != nil {
 		t.Fatalf("provider db-pull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
-	if _, err := os.Stat(scpLog); err != nil {
-		t.Fatalf("provider db-pull did not use scp fallback: %v", err)
+	logged, err := os.ReadFile(sshLog)
+	if err != nil {
+		t.Fatalf("provider db-pull did not stream the dump through ssh: %v", err)
+	}
+	if !strings.Contains(string(logged), "deploy@example.com cat ") {
+		t.Fatalf("fallback download did not run cat over ssh:\n%s", logged)
 	}
 	if _, err := os.Stat(rsyncLog); !os.IsNotExist(err) {
 		t.Fatalf("provider db-pull should not use rsync when remote rsync is missing, got err: %v", err)

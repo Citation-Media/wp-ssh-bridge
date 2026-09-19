@@ -58,9 +58,8 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP
 	}()
 
 	if useSCP {
-		args := append(scpArgs(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
 		if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
-			return a.runExternal(ctx, projectRoot, "scp", args...)
+			return a.uploadOverSSH(ctx, projectRoot, target, localDump, remoteDumpGZ)
 		}); err != nil {
 			return err
 		}

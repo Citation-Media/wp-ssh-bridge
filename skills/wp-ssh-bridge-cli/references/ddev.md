@@ -111,7 +111,7 @@ ddev push wp-ssh \
   -y
 ```
 
-Do not suggest `ddev pull wp-ssh --user deploy`; that flag belongs to direct `wp-ssh-bridge pull`, not native DDEV pull.
+Do not suggest `ddev pull wp-ssh --destination deploy@host` or `--user`; those flags belong to direct `wp-ssh-bridge pull`, not native DDEV pull. Use `--environment=WP_SSH_PULL_DESTINATION=...` there.
 
 ## Clone Pulls
 

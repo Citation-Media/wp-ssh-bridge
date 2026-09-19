@@ -84,12 +84,10 @@ This guide takes you from nothing to a working local copy of a live WordPress si
     Prefer no prompts? Answer everything up front. The three flags below are the minimum for a pull.
 
     ```bash title="Silent setup"
-    # --user         SSH user on the live host
-    # --host         SSH host (an alias from ~/.ssh/config works too)
+    # --destination  user@host[:port], or an alias from ~/.ssh/config
     # --remote-path  the directory that contains wp-config.php
     wp-ssh-bridge init --silent \
-      --user deploy \
-      --host example.com \
+      --destination deploy@example.com \
       --remote-path /home/example/public_html
     ```
 

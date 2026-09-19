@@ -73,31 +73,6 @@ func TestNeedsScpTransportReturnsFalseWhenBothAvailable(t *testing.T) {
 	}
 }
 
-// --- scpArgs ---
-
-func TestScpArgsIncludesPortWhenConfigured(t *testing.T) {
-	args := scpArgs(RemoteTarget{User: "deploy", Host: "example.com", Port: "2222"})
-	portIdx := -1
-	for i, a := range args {
-		if a == "-P" {
-			portIdx = i
-			break
-		}
-	}
-	if portIdx == -1 || portIdx+1 >= len(args) || args[portIdx+1] != "2222" {
-		t.Errorf("scpArgs missing -P 2222 for non-standard port:\n%v", args)
-	}
-}
-
-func TestScpArgsOmitsPortWhenDefault(t *testing.T) {
-	args := scpArgs(RemoteTarget{User: "deploy", Host: "example.com"})
-	for _, a := range args {
-		if a == "-P" {
-			t.Errorf("scpArgs should not include -P when port is empty:\n%v", args)
-		}
-	}
-}
-
 // --- --force-scp flag ---
 
 func TestForceScpFlag(t *testing.T) {

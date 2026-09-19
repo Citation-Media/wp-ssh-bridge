@@ -57,8 +57,7 @@ Use args mode for one-off clones:
 
 ```bash
 wp-ssh-bridge clone --silent \
-  --user deploy \
-  --host source.example.com \
+  --destination deploy@source.example.com \
   --remote-path /home/source/public_html \
   --db-host db.example.com \
   --db-name target_db \
@@ -94,8 +93,7 @@ If the user wants a DDEV development copy, use the normal DDEV pull workflow in 
 Use config mode for repeatable clone defaults:
 
 ```yaml
-pull_user: "deploy"
-pull_host: "source.example.com"
+pull_destination: "deploy@source.example.com"
 pull_remote_path: "/home/source/public_html"
 
 clone_db_host: "db.example.com"
