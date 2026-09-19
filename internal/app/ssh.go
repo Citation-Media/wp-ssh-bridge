@@ -9,8 +9,6 @@ import (
 	"strings"
 )
 
-const defaultSSHCommand = "ssh"
-
 var sshOptions = []string{
 	"-o", "BatchMode=yes",
 	"-o", "PasswordAuthentication=no",
@@ -24,22 +22,11 @@ func sshTarget(target RemoteTarget) string {
 	return target.address()
 }
 
-// sshProgramFields splits an ssh_command value into the program and its leading
-// arguments. rsync passes its -e value through the same whitespace split, which is
-// why the value is documented as whitespace-separated with no quoting.
-func sshProgramFields(command string) []string {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return []string{defaultSSHCommand}
-	}
-	return fields
-}
-
-// sshArgv returns the complete ssh command line: the program with its wrapper
-// arguments, the port, the non-interactive options, then extra — usually the
-// destination and the remote command. Callers exec argv[0] with the rest.
+// sshArgv returns the complete ssh command line: the program, the port, the
+// non-interactive options, then extra — usually the destination and the remote
+// command. Callers exec argv[0] with the rest.
 func sshArgv(target RemoteTarget, extra ...string) []string {
-	args := append([]string{}, sshProgramFields(target.SSHCommand)...)
+	args := []string{"ssh"}
 	if port := target.port(); port != "" {
 		args = append(args, "-p", port)
 	}
@@ -146,9 +133,9 @@ func (a *App) outputSSHWithStderr(ctx context.Context, projectRoot string, args 
 	return string(output), err
 }
 
-// downloadOverSSH streams a remote file to a local path through the ssh session itself.
-// The fallback transport used to shell out to scp, which cannot run under an ssh_command
-// wrapper; going through ssh keeps every connection on the same program and options.
+// downloadOverSSH streams a remote file to a local path through the ssh session itself,
+// so the fallback transport needs no second program and runs with the same options as
+// every other connection.
 func (a *App) downloadOverSSH(ctx context.Context, projectRoot string, target RemoteTarget, remotePath string, localPath string) error {
 	file, err := os.Create(localPath)
 	if err != nil {

@@ -249,13 +249,10 @@ func TestDestinationFlagRejectsTheSplitAddressFlags(t *testing.T) {
 func TestDestinationFlagReplacesTheSplitAddress(t *testing.T) {
 	t.Parallel()
 	cfg := Config{User: "old", Host: "old.example.com", Port: "2200", PushUser: "old", PushHost: "old-staging"}
-	opts := configOptions{Destination: "deploy@prod:2222", SSHCommand: "ssh -J bastion"}
+	opts := configOptions{Destination: "deploy@prod:2222"}
 	cfg = opts.apply(cfg)
 	if cfg.Destination != "deploy@prod:2222" || cfg.User != "" || cfg.Host != "" || cfg.Port != "" {
 		t.Fatalf("apply() left the split pull address in place: %+v", cfg)
-	}
-	if cfg.SSHCommand != "ssh -J bastion" {
-		t.Fatalf("apply() did not set ssh_command: %+v", cfg)
 	}
 	cfg = opts.applyGenericAsPush(cfg)
 	if cfg.PushDestination != "deploy@prod:2222" || cfg.PushUser != "" || cfg.PushHost != "" {

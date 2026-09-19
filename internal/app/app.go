@@ -93,7 +93,6 @@ Common flags:
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
-  --ssh-command string       ssh program with leading arguments, for example "ssh -J bastion"
 
 Clone flags:
   --db-host string           Clone target DB host
@@ -873,7 +872,6 @@ type configOptions struct {
 	CloneDBPassword     string
 	CloneDBPrefix       string
 	Integration         string
-	SSHCommand          string
 }
 
 // parseConfigCommand parses flags shared by user-facing setup and pull commands.
@@ -911,7 +909,6 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
-	fs.StringVar(&opts.SSHCommand, "ssh-command", "", "ssh program with leading arguments, for example \"ssh -J bastion\"")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
@@ -1012,9 +1009,6 @@ func (opts configOptions) apply(cfg Config) Config {
 	// --integration flag. commandInit sets it explicitly instead.
 	if opts.Provider != "" {
 		cfg.Provider = opts.Provider
-	}
-	if opts.SSHCommand != "" {
-		cfg.SSHCommand = opts.SSHCommand
 	}
 	if opts.Destination != "" {
 		cfg.Destination = opts.Destination

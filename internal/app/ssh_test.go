@@ -121,11 +121,11 @@ func installFakeCommand(t *testing.T, dir string, name string, script string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestSSHArgvUsesTheConfiguredProgramAndDestination(t *testing.T) {
+func TestSSHArgvTakesThePortFromTheDestination(t *testing.T) {
 	t.Parallel()
-	target := RemoteTarget{Destination: "deploy@production.example.com:2222", SSHCommand: "op run -- ssh"}
+	target := RemoteTarget{Destination: "deploy@production.example.com:2222"}
 	args := sshArgv(target, sshTarget(target), "true")
-	want := []string{"op", "run", "--", "ssh", "-p", "2222"}
+	want := []string{"ssh", "-p", "2222", "-o", "BatchMode=yes"}
 	for i, value := range want {
 		if args[i] != value {
 			t.Fatalf("sshArgv()[%d] = %q, want %q in %v", i, args[i], value, args)
@@ -134,16 +134,16 @@ func TestSSHArgvUsesTheConfiguredProgramAndDestination(t *testing.T) {
 	if args[len(args)-2] != "deploy@production.example.com" || args[len(args)-1] != "true" {
 		t.Fatalf("sshArgv() did not end with destination and command: %v", args)
 	}
-	if got := sshCommandString(target); !strings.HasPrefix(got, "op run -- ssh -p 2222 -o BatchMode=yes") {
+	if got := sshCommandString(target); !strings.HasPrefix(got, "ssh -p 2222 -o BatchMode=yes") {
 		t.Fatalf("sshCommandString() = %q", got)
 	}
 }
 
-func TestSSHArgvDefaultsToPlainSSH(t *testing.T) {
+func TestSSHArgvOmitsThePortFlagByDefault(t *testing.T) {
 	t.Parallel()
 	args := sshArgv(RemoteTarget{User: "deploy", Host: "example.com"})
 	if args[0] != "ssh" || args[1] != "-o" {
-		t.Fatalf("sshArgv() without ssh_command or port = %v", args)
+		t.Fatalf("sshArgv() without a port = %v", args)
 	}
 }
 

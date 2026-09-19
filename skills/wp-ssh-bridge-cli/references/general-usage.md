@@ -84,7 +84,6 @@ integration: "standalone"
 Less common keys, all optional:
 
 ```yaml
-ssh_command: "ssh -J bastion"           # wrap every connection; whitespace-split, no quoting, first word must be on PATH
 pull_port: "2222"                       # split-form port when not using a destination; push_port for the target
 pull_remote_tmp_dir: "/tmp"             # where the dump is written on the source host;
 push_remote_tmp_dir: "/tmp"             # push_remote_tmp_dir for the target. Change when /tmp is small or noexec
@@ -176,7 +175,7 @@ export WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html
 export WP_SSH_PUSH_URL=https://staging.example.com
 ```
 
-Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider; `WP_SSH_SSH_COMMAND` wraps ssh. Clone targets use `WP_SSH_CLONE_DB_*`.
+Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
 
 Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. To inject the variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` or `op run --environment <id> -- …` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager).
 
@@ -230,7 +229,6 @@ Flags that select where things are, accepted by every command:
 --integration <mode>        pin ddev, wp-env, or standalone for this run
 --destination, --push-destination
                             the whole SSH address; replaces --user/--host/--port
---ssh-command <cmd>         ssh program with leading args, e.g. "ssh -J bastion"
 --port, --push-port         split-form SSH ports when not using a destination
 --remote-tmp-dir <dir>      temp dir on the source host; --push-remote-tmp-dir for the target
 --local-wp-path <dir>       local WordPress root, relative to the project root

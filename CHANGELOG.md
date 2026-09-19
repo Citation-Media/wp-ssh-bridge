@@ -7,13 +7,12 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 ### Added
 
 - Accept one SSH destination per target instead of separate user, host, and port values: `pull_destination` and `push_destination`, `WP_SSH_PULL_DESTINATION` and `WP_SSH_PUSH_DESTINATION`, `--destination` and `--push-destination`. A destination is `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; IPv6 addresses go in brackets. On `push`, `--destination` aliases the push target like the other short flags. An alias needs no user in the config, because `~/.ssh/config` supplies it, and `init` prints what `ssh -G` resolves the destination to. The split keys keep working; a destination beside them is rejected rather than merged, so a stale `pull_user` can never override the alias.
-- Add `ssh_command`, `WP_SSH_SSH_COMMAND`, and `--ssh-command` to run every connection through another program, in the spirit of `GIT_SSH_COMMAND`: a jump host as `ssh -J bastion`, a Teleport client, or any wrapper. The value is split on whitespace and passed unchanged to `rsync -e`; preflight checks that its first word is on `PATH`.
-- Document SSH access on its own page: destinations, alias resolution, 1Password and Bitwarden as ordinary SSH agents, wrappers, and what to check when a connection fails. The CLI ships no vendor code for any of them.
+- Document SSH access on its own page: destinations, alias resolution, 1Password and Bitwarden as ordinary SSH agents, which key the agent offers, jump hosts through `~/.ssh/config`, and what to check when a connection fails. The CLI ships no vendor code for any of them.
 - Document secrets managers: which values belong in one, and how `op run` with secret references or a 1Password Environment, `bws run` with a Secrets Manager project, and the matching GitHub Actions inject them as `WP_SSH_*` variables for one run, locally, under DDEV, and in CI.
 
 ### Changed
 
-- Stream the database dump through `ssh` itself when rsync is unavailable, instead of a separate `scp` process. The fallback transport now honours `ssh_command` like every other connection; the `--force-scp` flag and the "scp/tar" transport name are unchanged.
+- Stream the database dump through `ssh` itself when rsync is unavailable, instead of a separate `scp` process. One program fewer to require, and the same options on every connection; the `--force-scp` flag and the "scp/tar" transport name are unchanged.
 - Ask for one SSH destination first during interactive `init`, and only fall back to the separate user, host, and port prompts when it is left empty.
 
 ## [0.6.0] - 2026-09-17

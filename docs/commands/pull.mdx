@@ -158,7 +158,6 @@ blocked plugin directories         from the block list
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
 | `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |
-| `--ssh-command` | Run every connection through another program, for example `ssh -J bastion`. |
 | `--local-wp-path`, `--local-url` | Override the local WordPress root and URL. |
 | `--config-file` | Read another YAML file, for example `.wp-ssh.production.yaml`. |
 | `--integration` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. |

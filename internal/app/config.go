@@ -20,7 +20,6 @@ type Config struct {
 	RemoteTmpDir           string
 	Destination            string
 	PushDestination        string
-	SSHCommand             string
 	PushUser               string
 	PushHost               string
 	PushPort               string
@@ -176,8 +175,6 @@ func readConfigFile(path string) (Config, error) {
 			cfg.PluginRemoveFile = value
 		case "local_url":
 			cfg.LocalURL = value
-		case "ssh_command":
-			cfg.SSHCommand = value
 		case "integration":
 			cfg.Integration = value
 		case "skip_search_replace":
@@ -314,7 +311,6 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeBoolValue(&body, "clone_images", cfg.CloneImages, defaults.CloneImages)
 	writeStringValue(&body, "plugin_remove_file", cfg.PluginRemoveFile, defaults.PluginRemoveFile)
 	writeStringValue(&body, "local_url", cfg.LocalURL, defaults.LocalURL)
-	writeStringValue(&body, "ssh_command", cfg.SSHCommand, defaults.SSHCommand)
 	writeStringValue(&body, "integration", cfg.Integration, defaults.Integration)
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
@@ -376,7 +372,6 @@ func (cfg *Config) applyEnv(env []string) {
 	cfg.PluginRemoveFile = firstNonEmpty(values["WP_SSH_PULL_PLUGIN_REMOVE_FILE"], cfg.PluginRemoveFile)
 	cfg.LocalURL = firstNonEmpty(values["WP_SSH_PULL_LOCAL_URL"], cfg.LocalURL)
 	cfg.Provider = firstNonEmpty(values["WP_SSH_PROVIDER"], cfg.Provider)
-	cfg.SSHCommand = firstNonEmpty(values["WP_SSH_SSH_COMMAND"], cfg.SSHCommand)
 	cfg.CloneDBHost = firstNonEmpty(values["WP_SSH_CLONE_DB_HOST"], cfg.CloneDBHost)
 	cfg.CloneDBName = firstNonEmpty(values["WP_SSH_CLONE_DB_NAME"], cfg.CloneDBName)
 	cfg.CloneDBUser = firstNonEmpty(values["WP_SSH_CLONE_DB_USER"], cfg.CloneDBUser)
@@ -405,8 +400,6 @@ type RemoteTarget struct {
 	Port         string
 	RemotePath   string
 	RemoteTmpDir string
-	// SSHCommand is the ssh program with any leading arguments, split on whitespace.
-	SSHCommand string
 }
 
 // pullTarget returns the configured upstream source.
@@ -418,7 +411,6 @@ func (cfg Config) pullTarget() RemoteTarget {
 		Port:         cfg.Port,
 		RemotePath:   cfg.RemotePath,
 		RemoteTmpDir: defaultString(cfg.RemoteTmpDir, "/tmp"),
-		SSHCommand:   cfg.SSHCommand,
 	}
 }
 
@@ -431,7 +423,6 @@ func (cfg Config) pushTarget() RemoteTarget {
 		Port:         cfg.PushPort,
 		RemotePath:   cfg.PushRemotePath,
 		RemoteTmpDir: defaultString(cfg.PushRemoteTmpDir, "/tmp"),
-		SSHCommand:   cfg.SSHCommand,
 	}
 }
 
@@ -634,7 +625,6 @@ func (cfg Config) envArgs() string {
 	add("WP_SSH_PULL_PLUGIN_REMOVE_FILE", cfg.PluginRemoveFile)
 	add("WP_SSH_PULL_LOCAL_URL", cfg.LocalURL)
 	add("WP_SSH_PROVIDER", cfg.Provider)
-	add("WP_SSH_SSH_COMMAND", cfg.SSHCommand)
 	add("WP_SSH_CLONE_DB_HOST", cfg.CloneDBHost)
 	add("WP_SSH_CLONE_DB_NAME", cfg.CloneDBName)
 	add("WP_SSH_CLONE_DB_USER", cfg.CloneDBUser)
@@ -654,9 +644,6 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	if overlay.Provider != "" {
 		base.Provider = overlay.Provider
-	}
-	if overlay.SSHCommand != "" {
-		base.SSHCommand = overlay.SSHCommand
 	}
 	if overlay.Destination != "" {
 		base.Destination = overlay.Destination

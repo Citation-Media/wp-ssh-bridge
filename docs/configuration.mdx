@@ -39,9 +39,6 @@ push_destination: "deploy@staging.example.com"
 push_remote_path: "/home/staging/public_html"
 push_url: "https://staging.example.com"        # strongly recommended
 
-# --- Connection ---
-ssh_command: "ssh"                             # optional wrapper, e.g. "ssh -J bastion"
-
 # --- Local side ---
 local_wp_path: "."                             # relative to the project root
 local_url: "https://example.ddev.site"         # only to override what is detected
@@ -95,12 +92,6 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `push_remote_path` | `WP_SSH_PUSH_REMOTE_PATH` | Absolute path of the target WordPress root. |
 | `push_remote_tmp_dir` | `WP_SSH_PUSH_REMOTE_TMP_DIR` | Target temp directory. Defaults to `/tmp`. |
 | `push_url` | `WP_SSH_PUSH_URL` | Public URL of the target, used for the post-push search-replace. Without it, the CLI reads the target's current home URL before the import. |
-
-### Connection
-
-| Key | Environment variable | Purpose |
-| --- | --- | --- |
-| `ssh_command` | `WP_SSH_SSH_COMMAND` | The ssh program with leading arguments, split on whitespace, for example `ssh -J bastion`. Defaults to `ssh`. Used for every connection, including `rsync -e`. See [Wrapping ssh](/docs/ssh-access#wrapping-ssh). |
 
 ### Local
 
@@ -366,7 +357,6 @@ These apply to `pull`, `push`, and `clone` unless noted.
 | `--project-root` | Operate on another project directory. |
 | `--integration` | Pin the runtime for this run. |
 | `--destination`, `--push-destination` | The whole SSH address for the source or target. On `push`, `--destination` is an alias for `--push-destination`. Cannot be combined with the `--user`, `--host`, and `--port` flags it replaces. |
-| `--ssh-command` | The ssh program with leading arguments, for this run. |
 
 ## Commands at a glance
 

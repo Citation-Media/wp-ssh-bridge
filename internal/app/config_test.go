@@ -499,13 +499,12 @@ func TestConfigFileRoundTripsConnectionKeys(t *testing.T) {
 		RemotePath:      "/var/www/html",
 		PushDestination: "staging",
 		PushRemotePath:  "/var/www/staging",
-		SSHCommand:      "ssh -J bastion",
 	}
 	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
 		t.Fatalf("writeConfigFile() error = %v", err)
 	}
 	body, _ := os.ReadFile(path)
-	for _, want := range []string{"pull_destination: \"deploy@production.example.com:2222\"", "push_destination: \"staging\"", "ssh_command: \"ssh -J bastion\""} {
+	for _, want := range []string{"pull_destination: \"deploy@production.example.com:2222\"", "push_destination: \"staging\""} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("config file missing %q:\n%s", want, body)
 		}
@@ -517,7 +516,7 @@ func TestConfigFileRoundTripsConnectionKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readConfigFile() error = %v", err)
 	}
-	if read.Destination != cfg.Destination || read.PushDestination != cfg.PushDestination || read.SSHCommand != cfg.SSHCommand {
+	if read.Destination != cfg.Destination || read.PushDestination != cfg.PushDestination {
 		t.Fatalf("readConfigFile() = %+v", read)
 	}
 }
@@ -528,13 +527,12 @@ func TestEnvOverlaysConnectionValues(t *testing.T) {
 	cfg.applyEnv([]string{
 		"WP_SSH_PULL_DESTINATION=prod",
 		"WP_SSH_PUSH_DESTINATION=deploy@staging.example.com",
-		"WP_SSH_SSH_COMMAND=op run -- ssh",
 	})
-	if cfg.Destination != "prod" || cfg.PushDestination != "deploy@staging.example.com" || cfg.SSHCommand != "op run -- ssh" {
+	if cfg.Destination != "prod" || cfg.PushDestination != "deploy@staging.example.com" {
 		t.Fatalf("applyEnv() = %+v", cfg)
 	}
 	env := cfg.envArgs()
-	for _, want := range []string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PUSH_DESTINATION=deploy@staging.example.com", "WP_SSH_SSH_COMMAND=op run -- ssh"} {
+	for _, want := range []string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PUSH_DESTINATION=deploy@staging.example.com"} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("envArgs() missing %q: %s", want, env)
 		}
@@ -543,9 +541,9 @@ func TestEnvOverlaysConnectionValues(t *testing.T) {
 
 func TestMergeConfigCarriesConnectionValues(t *testing.T) {
 	t.Parallel()
-	loaded := Config{Destination: "prod", PushDestination: "staging", SSHCommand: "ssh -J bastion"}
+	loaded := Config{Destination: "prod", PushDestination: "staging"}
 	merged := mergeConfig(defaultConfig(), loaded)
-	if merged.Destination != "prod" || merged.PushDestination != "staging" || merged.SSHCommand != "ssh -J bastion" {
+	if merged.Destination != "prod" || merged.PushDestination != "staging" {
 		t.Fatalf("mergeConfig() dropped connection values: %+v", merged)
 	}
 }

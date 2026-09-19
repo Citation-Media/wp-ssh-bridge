@@ -89,7 +89,7 @@ wp-ssh-bridge init --silent \
   --push-url https://staging.example.com
 ```
 
-`--destination` takes `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; the split `--user`, `--host`, and `--port` flags remain for configs that use them. Password managers such as 1Password and Bitwarden work as ordinary SSH agents, and `ssh_command` (`WP_SSH_SSH_COMMAND`, `--ssh-command`) wraps every connection in another program such as `ssh -J bastion`. See https://wp-ssh-bridge.citation.media/docs/ssh-access.
+`--destination` takes `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; the split `--user`, `--host`, and `--port` flags remain for configs that use them. Password managers such as 1Password and Bitwarden work as ordinary SSH agents; jump hosts and pinned keys go into `~/.ssh/config`. See https://wp-ssh-bridge.citation.media/docs/ssh-access.
 
 ```bash
 # The same setup with the split address form

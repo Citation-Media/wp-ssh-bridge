@@ -1,6 +1,6 @@
 ---
 title: SSH access
-description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, and how 1Password, Bitwarden, bastions, and other wrappers fit in without any vendor code in the CLI.
+description: How wp-ssh-bridge connects, how to give it one SSH address instead of user, host, and port, how aliases from ~/.ssh/config resolve, which key the agent offers, and how 1Password, Bitwarden, and jump hosts fit in without any vendor code in the CLI.
 sidebar:
   order: 5
   icon: key
@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how to slot in an agent or a wrapper.
+This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and how an agent or a jump host slots in.
 
 ## One address instead of three values
 
@@ -85,26 +85,35 @@ The same apps can also hold the values a run needs, such as a staging address or
 
 One thing to know: a pull is not one SSH session. Preflight, the database export, the download, WP-CLI calls, and cleanup are separate `ssh` processes, and each one asks the agent for a signature. Both apps can remember an approval for a while, so one confirmation usually covers the whole run. If you are asked on every step, look for that setting in the app first.
 
-## Wrapping ssh
+## Which key the agent offers
 
-Some setups cannot be expressed in `~/.ssh/config` alone: a bastion you would rather pass on the command line, a Teleport or Tailscale client, a wrapper that injects credentials into the environment. For those, `ssh_command` replaces the program the CLI runs, the way `GIT_SSH_COMMAND` does for Git:
+An agent offers every key it holds, in order, and `ssh` tries them one by one. With a handful of keys in 1Password or Bitwarden that is fine; with more, the server's attempt limit is reached before the right key comes up and you see `Too many authentication failures`. Pin the key in the alias, using the **public** key as a file. The private key stays in the agent; the file only tells `ssh` which one to ask for:
 
-```yaml title=".wp-ssh.yaml"
-ssh_command: "ssh -J bastion.example.com"
+```text title="~/.ssh/config"
+Host prod
+  HostName production.example.com
+  User deploy
+  Port 2222
+  IdentityFile ~/.ssh/prod.pub
+  IdentitiesOnly yes
 ```
 
-The same value works as `WP_SSH_SSH_COMMAND` and `--ssh-command`. The CLI appends its own options and the destination after it, and hands the identical string to `rsync -e`, so every connection of a run goes through the wrapper, including the fallback transfer used when `rsync` is missing.
+Export the public key from the password manager into `~/.ssh/prod.pub` once. With that block in place, `pull_destination: "prod"` is the whole address, and everything else about the connection lives where every other SSH tool finds it.
 
-Two rules follow from how `rsync -e` works:
+## Jump hosts and other clients
 
-- The value is split on whitespace and there is no quoting, so a path with a space cannot go here. Put it in `~/.ssh/config` instead, as in the 1Password example above.
-- The first word must be on `PATH`. Preflight checks for it and names it in the error when it is missing.
+The CLI has no option for a bastion, a proxy command, or a different client, on purpose. All of them are `~/.ssh/config` settings, and putting them there means they also apply to `git`, to the DDEV provider, and to your terminal:
 
-```bash title="Examples"
---ssh-command "ssh -J bastion.example.com"        # jump host
---ssh-command "tsh ssh"                           # Teleport
---ssh-command "ssh -o IdentityAgent=/tmp/agent"   # an agent socket without spaces in its path
+```text title="~/.ssh/config"
+Host prod
+  HostName 10.0.12.5
+  ProxyJump bastion.example.com
+
+Host teleport-*
+  ProxyCommand tsh proxy ssh %r@%h:%p
 ```
+
+Teleport, Tailscale SSH, cloud IAP tunnels, and similar clients all document their `ProxyCommand` or `ProxyJump` line; `tsh config` even generates it. Once `ssh prod` works in your terminal, the CLI works too, because it runs that same `ssh`.
 
 ## What the CLI deliberately does not do
 
@@ -119,5 +128,5 @@ Two rules follow from how `rsync -e` works:
 | `Permission denied (publickey)` with an agent configured | `ssh -G <destination> \| grep -i identityagent` shows which socket OpenSSH will use; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list. |
 | `agent refused operation` | The approval was declined or timed out in the password manager. Run again and confirm the prompt. |
 | It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts. Anything interactive, such as a passphrase prompt for an unloaded key, fails here on purpose. Load the key into an agent. |
-| A wrapper works by hand, not through `ssh_command` | Check that the first word is on `PATH` for the shell the CLI runs in, and that the value has no quotes. |
+| `Too many authentication failures` | The agent offered more keys than the server allows attempts. Pin the key with `IdentityFile` and `IdentitiesOnly yes` as shown above. |
 | The wrong user or port is used | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user`/`pull_port` keys together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |
