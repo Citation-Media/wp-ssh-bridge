@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format and how aliases resolve. Any SSH agent works, including the ones in 1Password and Bitwarden; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
+This page covers the three things that are specific to the CLI: the address format and how aliases resolve. Any SSH agent works, including the ones in 1Password, Bitwarden, and Proton Pass; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
 
 ## One address instead of three values
 
@@ -54,7 +54,7 @@ An alias is the cleanest answer to "everyone has a different SSH user". Commit `
 ## What the CLI deliberately does not do
 
 - It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.
-- It bundles no SDK for 1Password, Bitwarden, or anything else. Their agents are ordinary SSH agents, and that is the only interface the CLI relies on.
+- It bundles no SDK for 1Password, Bitwarden, Proton Pass, or anything else. Their agents are ordinary SSH agents, and that is the only interface the CLI relies on.
 - It does not parse `~/.ssh/config`. `ssh -G` is the source of truth, which means every option OpenSSH understands is supported without a matching option here.
 - It has no option for a bastion, a proxy command, or another client. Those are `ProxyJump` and `ProxyCommand` lines in a `Host` block, which OpenSSH, Teleport, Tailscale, and the like document themselves; once `ssh <alias>` works in your terminal, the alias works as a destination.
 

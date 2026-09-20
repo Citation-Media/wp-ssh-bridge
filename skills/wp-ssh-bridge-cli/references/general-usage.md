@@ -177,7 +177,7 @@ export WP_SSH_PUSH_URL=https://staging.example.com
 
 Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
 
-Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. To inject the variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager).
+Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. To inject the variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager), `pass-cli run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (Proton Pass).
 
 ## Args Mode
 

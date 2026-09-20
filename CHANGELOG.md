@@ -8,7 +8,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Accept one SSH destination per target instead of separate user, host, and port values: `pull_destination` and `push_destination`, `WP_SSH_PULL_DESTINATION` and `WP_SSH_PUSH_DESTINATION`, `--destination` and `--push-destination`. A destination is `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; IPv6 addresses go in brackets. On `push`, `--destination` aliases the push target like the other short flags. An alias needs no user in the config, because `~/.ssh/config` supplies it, and `init` prints what `ssh -G` resolves the destination to. The split keys keep working; a destination beside them is rejected rather than merged, so a stale `pull_user` can never override the alias.
 - Document SSH access on its own page: destinations, alias resolution, 1Password and Bitwarden as ordinary SSH agents, which key the agent offers, jump hosts through `~/.ssh/config`, and what to check when a connection fails. The CLI ships no vendor code for any of them.
-- Document secrets managers: which values belong in one, and how `op run` with a file of secret references and `bws run` with a Secrets Manager project inject them as `WP_SSH_*` variables for one run, locally and under DDEV.
+- Document secrets managers: which values belong in one, and how `op run` and `pass-cli run` with a file of secret references and `bws run` with a Secrets Manager project inject them as `WP_SSH_*` variables for one run, locally and under DDEV.
 
 ### Changed
 
