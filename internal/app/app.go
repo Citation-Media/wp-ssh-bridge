@@ -1179,7 +1179,7 @@ func (p prompter) fillConfig(cfg *Config) error {
 	if err := p.fillPullConfigFields(cfg, false); err != nil {
 		return err
 	}
-	configurePush, err := p.promptBool("Configure a push target", cfg.PushHost != "" || cfg.PushRemotePath != "")
+	configurePush, err := p.promptBool("Configure a push target", cfg.PushDestination != "" || cfg.PushHost != "" || cfg.PushRemotePath != "")
 	if err != nil {
 		return err
 	}

@@ -355,13 +355,22 @@ func writeBoolValue(body *strings.Builder, key string, value bool, defaultValue 
 // applyEnv overlays WP_SSH_* variables for provider compatibility.
 func (cfg *Config) applyEnv(env []string) {
 	values := envMap(env)
-	cfg.Destination = firstNonEmpty(values["WP_SSH_PULL_DESTINATION"], cfg.Destination)
+	// A destination from the environment replaces the split address of the config file,
+	// as the --destination flag does, so an override works on either kind of config.
+	// Split values set alongside it in the environment still conflict with it.
+	if destination := values["WP_SSH_PULL_DESTINATION"]; destination != "" {
+		cfg.Destination = destination
+		cfg.User, cfg.Host, cfg.Port = "", "", ""
+	}
 	cfg.User = firstNonEmpty(values["WP_SSH_PULL_USER"], cfg.User)
 	cfg.Host = firstNonEmpty(values["WP_SSH_PULL_HOST"], cfg.Host)
 	cfg.Port = firstNonEmpty(values["WP_SSH_PULL_PORT"], cfg.Port)
 	cfg.RemotePath = firstNonEmpty(values["WP_SSH_PULL_REMOTE_PATH"], cfg.RemotePath)
 	cfg.RemoteTmpDir = firstNonEmpty(values["WP_SSH_PULL_REMOTE_TMP_DIR"], cfg.RemoteTmpDir)
-	cfg.PushDestination = firstNonEmpty(values["WP_SSH_PUSH_DESTINATION"], cfg.PushDestination)
+	if destination := values["WP_SSH_PUSH_DESTINATION"]; destination != "" {
+		cfg.PushDestination = destination
+		cfg.PushUser, cfg.PushHost, cfg.PushPort = "", "", ""
+	}
 	cfg.PushUser = firstNonEmpty(values["WP_SSH_PUSH_USER"], cfg.PushUser)
 	cfg.PushHost = firstNonEmpty(values["WP_SSH_PUSH_HOST"], cfg.PushHost)
 	cfg.PushPort = firstNonEmpty(values["WP_SSH_PUSH_PORT"], cfg.PushPort)
@@ -426,29 +435,28 @@ func (cfg Config) pushTarget() RemoteTarget {
 	}
 }
 
-// address returns the [user@]host argument shared by ssh and rsync. A destination that
-// names no user yields the bare host, so ~/.ssh/config or the local username decides.
-func (target RemoteTarget) address() string {
-	if target.Destination != "" {
-		if dest, err := parseDestination(target.Destination); err == nil {
-			return dest.address()
-		}
-		return target.Destination
+// destination returns the address in one shape, whichever form configured it.
+// Validation rejects a malformed destination before any command is built, so the
+// fallback only keeps messages readable.
+func (target RemoteTarget) destination() sshDestination {
+	if target.Destination == "" {
+		return sshDestination{User: target.User, Host: target.Host, Port: target.Port}
 	}
-	if target.User == "" {
-		return target.Host
+	if dest, err := parseDestination(target.Destination); err == nil {
+		return dest
 	}
-	return target.User + "@" + target.Host
+	return sshDestination{Host: target.Destination}
 }
 
-// port returns the SSH port, taken from the destination when it carries one.
+// address returns the [user@]host argument shared by ssh and rsync. Without a user
+// it is the bare host, so ~/.ssh/config or the local username decides.
+func (target RemoteTarget) address() string {
+	return target.destination().address()
+}
+
+// port returns the SSH port, from the destination or the split value.
 func (target RemoteTarget) port() string {
-	if target.Destination != "" {
-		if dest, err := parseDestination(target.Destination); err == nil && dest.Port != "" {
-			return dest.Port
-		}
-	}
-	return target.Port
+	return target.destination().Port
 }
 
 // addressConfigured reports whether the target already knows where to connect.

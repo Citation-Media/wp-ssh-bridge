@@ -1,8 +1,7 @@
 import { defineConfig } from "blume";
 
-// The public origin of the docs site. Set SITE_URL in the deploy environment
-// (GitHub Actions reads it from the DOCS_SITE_URL repository variable). The
-// fallback is a placeholder until the real domain is wired up.
+// The public origin of the docs site. SITE_URL overrides it, for example to build
+// a copy for another host.
 const site = process.env.SITE_URL || "https://wp-ssh-bridge.citation.media";
 
 export default defineConfig({

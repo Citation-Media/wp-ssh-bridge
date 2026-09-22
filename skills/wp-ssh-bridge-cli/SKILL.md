@@ -13,7 +13,7 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
 2. Confirm the SSH target values the CLI cannot infer:
    - Pull: the SSH destination (`user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias) and the remote WordPress absolute path.
    - Push: the push SSH destination, remote WordPress absolute path, and preferably `push_url`.
-   - Prefer one destination over separate user, host, and port values. The CLI rejects a destination beside the split values, so do not mix the two forms for the same target.
+   - Prefer one destination over separate user, host, and port values. The CLI rejects a destination beside the split values in the same file, environment, or command line, so do not mix the two forms for the same target. A destination passed as `WP_SSH_PULL_DESTINATION` or `--destination` still overrides a config file that uses the split keys. For IPv6 hosts, recommend a `~/.ssh/config` alias; literals are refused.
 3. Confirm local values only when they are not obvious from the project:
    - Local WordPress path when WordPress is not at the default project/docroot location.
    - Whether uploads/media should be cloned during pull.

@@ -17,9 +17,6 @@ func TestParseDestinationAcceptsEverySSHForm(t *testing.T) {
 		{"production.example.com:2222", sshDestination{Host: "production.example.com", Port: "2222"}},
 		{"ssh://deploy@production.example.com:2222", sshDestination{User: "deploy", Host: "production.example.com", Port: "2222"}},
 		{"ssh://production.example.com", sshDestination{Host: "production.example.com"}},
-		{"[2001:db8::1]", sshDestination{Host: "[2001:db8::1]"}},
-		{"deploy@[2001:db8::1]:2222", sshDestination{User: "deploy", Host: "[2001:db8::1]", Port: "2222"}},
-		{"ssh://[2001:db8::1]:22", sshDestination{Host: "[2001:db8::1]", Port: "22"}},
 		{"  deploy@prod  ", sshDestination{User: "deploy", Host: "prod"}},
 	}
 	for _, tc := range cases {
@@ -41,13 +38,13 @@ func TestParseDestinationRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		"deploy@":                     "missing a host",
 		"deploy@prod extra":           "whitespace",
 		"prod/var/www":                "path",
-		"2001:db8::1":                 "brackets",
-		"[2001:db8::1":                "unclosed",
-		"[2001:db8::1]x":              "unexpected text",
+		"2001:db8::1":                 "IPv6",
+		"deploy@[2001:db8::1]:2222":   "IPv6",
+		"ssh://[2001:db8::1]:22":      "IPv6",
 		"deploy@prod:abc":             "numeric",
 		"dep;loy@prod":                "user in destination",
 		"deploy@pr$(id)od":            "host in destination",
-		"deploy@prod:22:33":           "brackets",
+		"deploy@prod:22:33":           "IPv6",
 		"ssh://deploy@prod:22/public": "path",
 	}
 	for raw, fragment := range cases {
@@ -72,6 +69,9 @@ func TestSSHDestinationAddressAndDescribe(t *testing.T) {
 	}
 	if got := (sshDestination{User: "deploy", Host: "prod", Port: "2222"}).describe(); got != "deploy@prod:2222" {
 		t.Errorf("describe() = %q", got)
+	}
+	if got := (sshDestination{User: "deploy", Host: "2001:db8::1", Port: "2222"}).describe(); got != "deploy@[2001:db8::1]:2222" {
+		t.Errorf("describe() should bracket a resolved IPv6 HostName, got %q", got)
 	}
 }
 

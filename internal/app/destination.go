@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -17,14 +16,13 @@ type sshDestination struct {
 	Port string
 }
 
-var (
-	validDestinationHost = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	validIPv6Literal     = regexp.MustCompile(`^\[[0-9A-Fa-f:.%]+\]$`)
-)
-
 // parseDestination accepts the address forms ssh itself accepts — an alias from
 // ~/.ssh/config, [user@]host, and ssh://[user@]host[:port] — plus the common
-// [user@]host:port shorthand. IPv6 addresses must be bracketed so the port is unambiguous.
+// [user@]host:port shorthand.
+//
+// IPv6 literals are refused rather than bracketed: macOS' default rsync splits a
+// remote spec at its first colon and cannot pass one on, so the only form that works
+// everywhere is an alias whose HostName is the address.
 func parseDestination(raw string) (sshDestination, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -47,33 +45,15 @@ func parseDestination(raw string) (sshDestination, error) {
 		}
 	}
 
-	// A bracketed IPv6 literal keeps its own colons; otherwise a single trailing :port is split off.
-	hostPart := value
-	switch {
-	case strings.HasPrefix(value, "["):
-		end := strings.Index(value, "]")
-		if end < 0 {
-			return sshDestination{}, fmt.Errorf("destination %q has an unclosed IPv6 bracket", raw)
-		}
-		hostPart = value[:end+1]
-		if rest := value[end+1:]; rest != "" {
-			if !strings.HasPrefix(rest, ":") {
-				return sshDestination{}, fmt.Errorf("destination %q has unexpected text after the IPv6 address", raw)
-			}
-			dest.Port = rest[1:]
-		}
-	case strings.Count(value, ":") > 1:
-		return sshDestination{}, fmt.Errorf("destination %q looks like an IPv6 address; wrap it in brackets, for example [2001:db8::1]:22", raw)
-	case strings.Contains(value, ":"):
-		hostPart, dest.Port, _ = strings.Cut(value, ":")
+	if strings.Contains(value, "[") || strings.Count(value, ":") > 1 {
+		return sshDestination{}, fmt.Errorf("destination %q is an IPv6 address; add a Host block with that HostName to ~/.ssh/config and use its alias as the destination", raw)
 	}
-
-	dest.Host = hostPart
+	dest.Host, dest.Port, _ = strings.Cut(value, ":")
 	if dest.Host == "" {
 		return sshDestination{}, fmt.Errorf("destination %q is missing a host", raw)
 	}
-	if !validDestinationHost.MatchString(dest.Host) && !validIPv6Literal.MatchString(dest.Host) {
-		return sshDestination{}, fmt.Errorf("host in destination %q must contain only letters, numbers, dots, underscores, or hyphens, or be a bracketed IPv6 address", raw)
+	if !validSSHPart.MatchString(dest.Host) {
+		return sshDestination{}, fmt.Errorf("host in destination %q must contain only letters, numbers, dots, underscores, or hyphens", raw)
 	}
 	if dest.Port != "" {
 		if _, err := strconv.Atoi(dest.Port); err != nil {
@@ -92,8 +72,12 @@ func (d sshDestination) address() string {
 }
 
 // describe renders a resolved destination for messages, omitting the default port.
+// ssh -G may resolve an alias to an IPv6 HostName, which is bracketed for display.
 func (d sshDestination) describe() string {
 	out := d.address()
+	if strings.Contains(d.Host, ":") {
+		out = strings.Replace(out, d.Host, "["+d.Host+"]", 1)
+	}
 	if d.Port != "" && d.Port != "22" {
 		out += ":" + d.Port
 	}

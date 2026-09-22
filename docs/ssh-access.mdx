@@ -20,7 +20,7 @@ The source and the target each take a single **destination**, in any form `ssh` 
 | `user@host` | `deploy@production.example.com` | Port 22. |
 | `user@host:port` | `deploy@production.example.com:2222` | The shorthand most people expect. |
 | `ssh://` URL | `ssh://deploy@production.example.com:2222` | The form from `man ssh`. |
-| IPv6 | `deploy@[2001:db8::1]:2222` | Brackets are required so the port stays unambiguous. |
+| IPv6 | not accepted directly | macOS' built-in rsync cannot pass an IPv6 literal on. Give the address a `Host` block with `HostName 2001:db8::1` and use the alias. |
 
 ```yaml title=".wp-ssh.yaml"
 pull_destination: "deploy@production.example.com:2222"
@@ -33,7 +33,7 @@ push_url: "https://staging.example.com"
 
 The same value works as `WP_SSH_PULL_DESTINATION` / `WP_SSH_PUSH_DESTINATION` and as `--destination` / `--push-destination`. On `push`, `--destination` refers to the push target, like the other short flags.
 
-A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. The split keys keep working for existing configs; `init` writes whichever form you gave it.
+A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both in the same place, the config file, the environment, or the flags, is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. A destination from the environment or a flag does replace the split keys of the config file, so `WP_SSH_PULL_DESTINATION` works as a one-off override on any project. The split keys keep working for existing configs; `init` writes whichever form you gave it.
 
 ## Aliases resolve through ssh
 

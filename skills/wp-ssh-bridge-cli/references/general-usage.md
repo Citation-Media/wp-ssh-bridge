@@ -47,7 +47,7 @@ push_remote_path or --push-remote-path or WP_SSH_PUSH_REMOTE_PATH
 push_url or --push-url or WP_SSH_PUSH_URL
 ```
 
-A destination is `user@host[:port]`, an `ssh://user@host:port` URL, or an alias from `~/.ssh/config`; IPv6 goes in brackets. Without a user it takes the one from `~/.ssh/config`, or the local username. The split form still exists — `pull_user`/`pull_host`/`pull_port`, `--user`/`--host`/`--port`, `WP_SSH_PULL_USER`/`_HOST`/`_PORT`, and the `push_` equivalents — but a destination beside any of them is rejected, so use one form per target. On `push`, `--destination` is an alias for `--push-destination`, like the other short flags.
+A destination is `user@host[:port]`, an `ssh://user@host:port` URL, or an alias from `~/.ssh/config`. IPv6 literals are refused because macOS' rsync cannot pass them on; put the address in a `Host` block and use the alias. Without a user it takes the one from `~/.ssh/config`, or the local username. The split form still exists — `pull_user`/`pull_host`/`pull_port`, `--user`/`--host`/`--port`, `WP_SSH_PULL_USER`/`_HOST`/`_PORT`, and the `push_` equivalents — but a destination beside any of them in the same place (file, environment, or flags) is rejected, so use one form per target. A destination from the environment or a flag replaces the split keys of the config file, so `WP_SSH_PULL_DESTINATION` overrides any project. On `push`, `--destination` is an alias for `--push-destination`, like the other short flags.
 
 Remote WordPress paths must be absolute and point to a WordPress root containing `wp-config.php`.
 

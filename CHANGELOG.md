@@ -2,18 +2,23 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
-## [0.7.0] - 2026-09-18
+## [0.7.0] - 2026-09-22
 
 ### Added
 
-- Accept one SSH destination per target instead of separate user, host, and port values: `pull_destination` and `push_destination`, `WP_SSH_PULL_DESTINATION` and `WP_SSH_PUSH_DESTINATION`, `--destination` and `--push-destination`. A destination is `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; IPv6 addresses go in brackets. On `push`, `--destination` aliases the push target like the other short flags. An alias needs no user in the config, because `~/.ssh/config` supplies it, and `init` prints what `ssh -G` resolves the destination to. The split keys keep working; a destination beside them is rejected rather than merged, so a stale `pull_user` can never override the alias.
-- Document SSH access on its own page: destinations, alias resolution, 1Password and Bitwarden as ordinary SSH agents, which key the agent offers, jump hosts through `~/.ssh/config`, and what to check when a connection fails. The CLI ships no vendor code for any of them.
-- Document secrets managers: which values belong in one, and how `op run` and `pass-cli run` with a file of secret references and `bws run` with a Secrets Manager project inject them as `WP_SSH_*` variables for one run, locally and under DDEV.
+- Accept one SSH destination per target instead of separate user, host, and port values: `pull_destination` and `push_destination`, `WP_SSH_PULL_DESTINATION` and `WP_SSH_PUSH_DESTINATION`, `--destination` and `--push-destination`. A destination is `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`, and `init` prints what `ssh -G` resolves it to. An alias needs no user in the config, because `~/.ssh/config` supplies it, and it is also the way to reach an IPv6 host: macOS' built-in rsync cannot pass an IPv6 literal on, so a destination refuses one. On `push`, `--destination` aliases the push target like the other short flags.
+- Keep the split `pull_user`, `pull_host`, and `pull_port` keys working. A destination and split values in the same file, environment, or command line are rejected rather than merged, so a stale `pull_user` can never override an alias. A destination from the environment or a flag replaces the split keys of the config file, so `WP_SSH_PULL_DESTINATION` works as an override on existing projects.
+- Document SSH access on its own page: the address forms, how aliases resolve, what the CLI deliberately leaves to OpenSSH and your SSH agent, and what to check when a connection fails. The agents of 1Password, Bitwarden, and Proton Pass work unchanged; the CLI ships no vendor code for any of them.
+- Document secrets managers: which values belong in one, and how `op run` and `pass-cli run` with a file of secret references, or `bws run` with a Secrets Manager project, inject them as `WP_SSH_*` variables for one run, locally and under DDEV.
 
 ### Changed
 
 - Stream the database dump through `ssh` itself when rsync is unavailable, instead of a separate `scp` process. One program fewer to require, and the same options on every connection; the `--force-scp` flag and the "scp/tar" transport name are unchanged.
 - Ask for one SSH destination first during interactive `init`, and only fall back to the separate user, host, and port prompts when it is left empty.
+
+### Upgrading
+
+- Older CLI versions stop with an unknown-key error on a config that uses `pull_destination` or `push_destination`. Update the CLI in every checkout, including the project-local binary DDEV calls, before committing such a config.
 
 ## [0.6.0] - 2026-09-17
 
@@ -61,6 +66,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
+[0.7.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.5.3...v0.6.0
 [0.5.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.4.1...v0.5.0
 [#7]: https://github.com/Citation-Media/wp-ssh-bridge/issues/7

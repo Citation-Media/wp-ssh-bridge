@@ -120,7 +120,7 @@ Deployment runs through Cloudflare Workers Builds, connected to this repository.
 | Build command | `npm run build` |
 | Deploy command | `npm run deploy` |
 | Version command (runs for non-production branches) | `npm run deploy:preview` |
-| Environment variable | `GITHUB_TOKEN`, needed for the changelog while the repository is private |
+| Environment variable | `GITHUB_TOKEN`, so the changelog source is not throttled by GitHub's anonymous rate limit |
 
 The deploy commands matter: plain `npx wrangler deploy` cannot find the adapter's config at `dist/server/wrangler.json` and fails with "Could not detect a directory containing static files", and the default "Version command", `npx wrangler versions upload`, which Workers Builds runs for every branch other than `main`, fails the same way with "Missing entry-point to Worker script". Both scripts pass that config and pin the Worker name. `deploy:preview` uploads a version without deploying it, so a pull request branch gets a preview URL and production traffic is untouched.
 
@@ -143,9 +143,7 @@ Configure that once at npmjs.com on `@citation-media/wp-ssh-bridge`, under Trust
 
 Trusted publishing requires npm 11.5.1 and Node 22.14 or newer, which is why the job pins Node 24. npm attaches provenance by itself, so the workflow passes no `--provenance` flag.
 
-The npm package is scoped to `@citation-media`, so the organization owns it from the first publish and membership controls who can release it. The scope requires `--access public`, which the job passes and `publishConfig` also records. The job requests `id-token: write` and publishes with provenance, which npm only accepts from a public repository; while this one is private it publishes without provenance instead of failing.
-
-The npm job uses an `npm` environment, so publishing can require a review.
+The npm package is scoped to `@citation-media`, so the organization owns it from the first publish and membership controls who can release it. The scope requires `--access public`, which the job passes and `publishConfig` also records. The job requests `id-token: write`, and npm attaches provenance because the repository is public.
 
 ## The Dependency Pins In The Root Manifest
 

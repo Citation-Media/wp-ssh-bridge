@@ -152,7 +152,6 @@ func TestSSHTargetPrefersTheDestinationAddress(t *testing.T) {
 	cases := map[RemoteTarget]string{
 		{Destination: "prod"}:                                     "prod",
 		{Destination: "ssh://deploy@example.com:2222"}:            "deploy@example.com",
-		{Destination: "[2001:db8::1]:22"}:                         "[2001:db8::1]",
 		{User: "deploy", Host: "example.com"}:                     "deploy@example.com",
 		{Host: "example.com"}:                                     "example.com",
 		{Destination: "deploy@example.com", User: "x", Host: "y"}: "deploy@example.com",

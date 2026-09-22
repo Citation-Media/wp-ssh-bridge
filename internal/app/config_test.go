@@ -547,3 +547,27 @@ func TestMergeConfigCarriesConnectionValues(t *testing.T) {
 		t.Fatalf("mergeConfig() dropped connection values: %+v", merged)
 	}
 }
+
+func TestEnvDestinationReplacesTheSplitAddressFromTheFile(t *testing.T) {
+	t.Parallel()
+	cfg := Config{User: "deploy", Host: "prod.example.com", Port: "2200", RemotePath: "/var/www/html"}
+	cfg.applyEnv([]string{"WP_SSH_PULL_DESTINATION=deploy@staging.example.com"})
+	if cfg.Destination != "deploy@staging.example.com" || cfg.User != "" || cfg.Host != "" || cfg.Port != "" {
+		t.Fatalf("applyEnv() kept the file's split address beside the env destination: %+v", cfg)
+	}
+	if err := cfg.validatePullRequired(); err != nil {
+		t.Fatalf("env destination over a split-form file was rejected: %v", err)
+	}
+
+	push := Config{PushUser: "deploy", PushHost: "staging.example.com", PushRemotePath: "/var/www/html"}
+	push.applyEnv([]string{"WP_SSH_PUSH_DESTINATION=release@staging.example.com"})
+	if push.PushDestination == "" || push.PushUser != "" || push.PushHost != "" {
+		t.Fatalf("applyEnv() kept the push split address: %+v", push)
+	}
+
+	same := Config{RemotePath: "/var/www/html"}
+	same.applyEnv([]string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PULL_USER=ci"})
+	if err := same.validatePullRequired(); err == nil {
+		t.Fatal("a destination and a split value in the environment should still conflict")
+	}
+}
