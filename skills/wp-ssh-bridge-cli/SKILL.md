@@ -11,8 +11,9 @@ Use this skill to guide users through the manual decisions around `wp-ssh-bridge
 
 1. Confirm whether the user is pulling into local WordPress or pushing to a remote target.
 2. Confirm the SSH target values the CLI cannot infer:
-   - Pull: SSH user, host, optional port, and remote WordPress absolute path.
-   - Push: push SSH user, host, optional port, remote WordPress absolute path, and preferably `push_url`.
+   - Pull: the SSH destination (`user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias) and the remote WordPress absolute path.
+   - Push: the push SSH destination, remote WordPress absolute path, and preferably `push_url`.
+   - Prefer one destination over separate user, host, and port values. The CLI rejects a destination beside the split values in the same file, environment, or command line, so do not mix the two forms for the same target. A destination passed as `WP_SSH_PULL_DESTINATION` or `--destination` still overrides a config file that uses the split keys. For IPv6 hosts, recommend a `~/.ssh/config` alias; literals are refused.
 3. Confirm local values only when they are not obvious from the project:
    - Local WordPress path when WordPress is not at the default project/docroot location.
    - Whether uploads/media should be cloned during pull.
@@ -63,17 +64,16 @@ Full documentation, including per-command guides and troubleshooting, is at http
 
 Follow this when asked to set up, initialize, or configure a project, or to get a first pull working. Plain `wp-ssh-bridge init` prompts interactively and blocks an agent; `--silent` takes every value from flags, environment, and existing config instead.
 
-1. Collect the values the CLI cannot infer before running anything: pull SSH user, host, remote WordPress path, and port if not 22. Push values are optional at init and can be added later. Ask for `local_wp_path` only when WordPress is not at the project root or, in DDEV, the docroot. Do not guess SSH targets or remote paths.
+1. Collect the values the CLI cannot infer before running anything: the pull SSH destination (`user@host[:port]`, or a `~/.ssh/config` alias, which then supplies user and port itself) and the remote WordPress path. Push values are optional at init and can be added later. Ask for `local_wp_path` only when WordPress is not at the project root or, in DDEV, the docroot. Do not guess SSH targets or remote paths.
 2. Run init from the project root, or point at it with `--project-root`:
 
 ```bash
 wp-ssh-bridge init --silent \
-  --user deploy \
-  --host production.example.com \
+  --destination deploy@production.example.com \
   --remote-path /home/production/public_html
 ```
 
-   Add `--port`, `--local-wp-path`, `--clone-images`, and the `--push-*` flags as needed. `init --silent` validates the values, writes the config, and in DDEV mode generates the provider files.
+   Add `--local-wp-path`, `--clone-images`, and `--push-destination` with the other `--push-*` flags as needed. `init --silent` validates the values, writes the config, and in DDEV mode generates the provider files. With an alias as destination it prints what `ssh -G` resolves it to; if that line names the wrong user or host, the fix is in `~/.ssh/config`, not in the CLI config.
 
 3. Verify what was written before pulling. The files tell you which runtime the CLI detected:
    - DDEV: `.ddev/wp-ssh.yaml` plus `.ddev/providers/wp-ssh.yaml`.
@@ -92,7 +92,7 @@ wp-ssh-bridge pull --silent    # wp-env and standalone
 
 6. The config contains no secrets unless `clone_db_password` is set, so commit it. Keep paths in it relative so it works for every checkout.
 
-For CI, the same values can come from `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_REMOTE_PATH`, and `WP_SSH_PULL_PORT` instead of flags. For a monorepo with several sites, see "Several sites in one repository" in `references/general-usage.md`.
+For CI, the same values can come from `WP_SSH_PULL_DESTINATION` and `WP_SSH_PULL_REMOTE_PATH` instead of flags. For a monorepo with several sites, see "Several sites in one repository" in `references/general-usage.md`.
 
 ## Router
 
@@ -118,8 +118,10 @@ Read the most specific workflow reference first. Read only one reference unless 
 - For multisite/custom domains, prefer `wp-ssh-bridge domains add --old production.example.com --new local.ddev.site` over manual YAML edits. This writes `pull_domain_replacements` and inverse `push_domain_replacements` by default.
 - Prefer protocol-less domains in `pull_domain_replacements` and `push_domain_replacements` for multisite. Use full URLs only for path-aware or scheme-specific replacement.
 - Protocol-less mappings replace the hostname once in both full URLs and bare multisite domain values, including targets that contain the source hostname such as `example.com.ddev.site`. DDEV's resolved `DDEV_TLD` is used for custom TLDs; `DDEV_HOSTNAME` lists all routed FQDNs, but explicit domain mappings determine production-to-local pairing.
-- Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI.
-- With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_*=...` flag; do not suggest `--user` after `ddev pull wp-ssh`.
+- Do not recommend copying private key material into config or env variables. SSH should use normal OpenSSH behavior, such as `~/.ssh/config`, loaded keys, or direct identity configuration outside this CLI. 1Password, Bitwarden, and Proton Pass work as ordinary SSH agents and need nothing from the CLI; their setup is the user's, not something to walk through. Bastions, proxy commands, and a pinned key (`IdentityFile <public key>` plus `IdentitiesOnly yes`, the fix for `Too many authentication failures`) belong in a `~/.ssh/config` `Host` block used as the destination; the CLI deliberately has no option for them. Full guidance: https://wp-ssh-bridge.citation.media/docs/ssh-access.
+- For per-developer SSH users, recommend a committed `~/.ssh/config` alias as the destination rather than inline overrides; each developer then owns the `Host` block.
+- When values must come from a secrets manager, use env mode with its run command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (secret references `op://vault/item/field`); `bws run --project-id <id> -- wp-ssh-bridge pull --silent` for Bitwarden Secrets Manager, with secrets named exactly like the `WP_SSH_*` variables and never `--no-inherit-env`, which drops the SSH agent socket; `pass-cli run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` for Proton Pass (references `pass://vault/item/field`). Only `clone_db_password` is a real secret; keep non-secret config in the file. Details: https://wp-ssh-bridge.citation.media/docs/secrets-managers.
+- With native `ddev pull wp-ssh`, pass one-off target overrides inline with DDEV's `--environment=WP_SSH_PULL_DESTINATION=...` flag; do not suggest `--destination` or `--user` after `ddev pull wp-ssh`.
 - For clone-style pulls (host-to-host site migrations), read `references/clone.md` before recommending commands. Recommend `wp-ssh-bridge clone`; do not recommend `pull --clone`, `push --clone`, or the former `migrate` command name.
 - A pull deliberately drops operational plugins: backup and migration tools, SMTP and mail senders, the security scanner, remote-management agents, and cloud image optimizers. They are excluded from the file sync and deleted locally afterwards, and the pull output lists what it removed. This is expected, not a failure; the full list is at https://wp-ssh-bridge.citation.media/docs/troubleshooting/blocked-plugins. A project extends the list with `plugin_remove_file` pointing at a text file of one slug per line, `#` comments allowed; the built-in entries cannot be switched off.
 - A pull wraps the local database import in WordPress maintenance mode, and a push does the same on the target for the whole run; both lift it again even on failure. Recommend `--skip-maintenance-mode` only when the user asks for it or WP-CLI cannot toggle it on that side.

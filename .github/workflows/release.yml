@@ -150,6 +150,10 @@ jobs:
             dist/checksums.txt
           body_path: ${{ steps.notes.outputs.GENERATE == 'false' && 'release-notes.md' || '' }}
           generate_release_notes: ${{ steps.notes.outputs.GENERATE }}
+          # A tag with a suffix (v0.7.0-rc.1) is a prerelease. GitHub then keeps
+          # "latest" on the last stable release, so releases/latest/download and
+          # with it the install script never hand out a release candidate.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   # Publishes the npm wrapper through npm trusted publishing: the job proves its
   # identity with a short-lived OIDC token instead of a long-lived NPM_TOKEN, and
@@ -193,17 +197,21 @@ jobs:
           RAW="${GITHUB_REF#refs/tags/}"
           VERSION="${RAW#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          # A prerelease must not move the latest dist-tag.
-          if printf '%s' "$VERSION" | grep -qE '-[A-Za-z0-9]'; then
-            echo "NPM_TAG=next" >> "$GITHUB_OUTPUT"
-          else
-            echo "NPM_TAG=latest" >> "$GITHUB_OUTPUT"
-          fi
+          # A prerelease must not move the latest dist-tag. A shell pattern, not
+          # grep: a pattern starting with "-" reads as a grep option and made
+          # every prerelease publish as latest (v0.7.0-rc.1).
+          case "$VERSION" in
+            *-*) echo "NPM_TAG=next" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "NPM_TAG=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Apply the version
         run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
 
       - name: Record the version in the repository
+        # Only a stable release is written back; a release candidate would put
+        # its version into the default branch and the site's changelog.
+        if: steps.version.outputs.NPM_TAG == 'latest'
         working-directory: .
         run: |
           set -eu

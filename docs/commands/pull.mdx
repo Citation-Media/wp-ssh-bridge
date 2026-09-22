@@ -28,8 +28,7 @@ A pull never modifies the remote site. It creates a temporary database dump in t
 
     ```bash
     wp-ssh-bridge pull --silent \
-      --user deploy \
-      --host example.com \
+      --destination deploy@example.com \
       --remote-path /home/example/public_html
     ```
 
@@ -50,12 +49,14 @@ A pull never modifies the remote site. It creates a temporary database dump in t
 
     Local WP-CLI runs as `ddev wp` inside the web container. The docroot, project URL, and temp directories come from `ddev describe`, so `init` fills them in for you.
 
-    Native `ddev pull` does not accept CLI flags such as `--user`. Use DDEV's inline environment for one-off overrides:
+    Native `ddev pull` does not accept CLI flags such as `--destination`. Use DDEV's inline environment for one-off overrides:
 
     ```bash
-    # Per-developer SSH user without putting it in the versioned config
-    ddev pull wp-ssh --environment=WP_SSH_PULL_USER=your-ssh-user -y
+    # Another source for this run only
+    ddev pull wp-ssh --environment=WP_SSH_PULL_DESTINATION=deploy@staging.example.com -y
     ```
+
+    For per-developer SSH users, prefer a `~/.ssh/config` alias as the committed destination; see [SSH access](/docs/ssh-access#aliases-resolve-through-ssh).
 
     ```bash
     # A complete one-off source
@@ -155,7 +156,8 @@ blocked plugin directories         from the block list
 | `--skip-search-replace` | Leave URLs untouched after the import. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
-| `--user`, `--host`, `--port`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. |
+| `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
+| `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |
 | `--local-wp-path`, `--local-url` | Override the local WordPress root and URL. |
 | `--config-file` | Read another YAML file, for example `.wp-ssh.production.yaml`. |
 | `--integration` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. |

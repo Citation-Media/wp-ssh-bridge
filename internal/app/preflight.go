@@ -216,7 +216,7 @@ func (a *App) needsRemoteMariaDBCompatibility(target RemoteTarget) bool {
 
 // remoteTargetKey distinguishes cached capability checks for separate SSH targets.
 func remoteTargetKey(target RemoteTarget) string {
-	return strings.Join([]string{target.User, target.Host, target.Port, target.RemotePath, target.RemoteTmpDir}, "\x00")
+	return strings.Join([]string{target.Destination, target.User, target.Host, target.Port, target.RemotePath, target.RemoteTmpDir}, "\x00")
 }
 
 func (a *App) checkLocalEnvironment(plan preflightPlan) error {

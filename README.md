@@ -82,14 +82,21 @@ Silent setup is available for repeatable project bootstrap:
 
 ```bash
 wp-ssh-bridge init --silent \
-  --user deploy \
-  --host example.com \
-  --port 22 \
+  --destination deploy@example.com \
   --remote-path /home/example/public_html \
-  --push-user deploy \
-  --push-host staging.example.com \
+  --push-destination deploy@staging.example.com \
   --push-remote-path /home/staging/public_html \
   --push-url https://staging.example.com
+```
+
+`--destination` takes `user@host[:port]`, an `ssh://` URL, or an alias from `~/.ssh/config`; the split `--user`, `--host`, and `--port` flags remain for configs that use them. Password managers such as 1Password and Bitwarden work as ordinary SSH agents; jump hosts and pinned keys go into `~/.ssh/config`. See https://wp-ssh-bridge.citation.media/docs/ssh-access.
+
+```bash
+# The same setup with the split address form
+wp-ssh-bridge init --silent \
+  --user deploy \
+  --host example.com \
+  --remote-path /home/example/public_html
 ```
 
 This creates:
@@ -124,26 +131,24 @@ Or use DDEV after initialization when you specifically want DDEV's native pull l
 ddev pull wp-ssh -y
 ```
 
-For per-developer SSH users with native DDEV pull, pass the user inline:
+For per-developer SSH users with native DDEV pull, commit a `~/.ssh/config` alias as the destination (`pull_destination: "prod"`) and let each developer own the `Host prod` block. To override the source for one run, pass it inline:
 
 ```bash
-ddev pull wp-ssh --environment=WP_SSH_PULL_USER=your-ssh-user -y
+ddev pull wp-ssh --environment=WP_SSH_PULL_DESTINATION=deploy@staging.example.com -y
 ```
-
-For teams, keep `pull_user` out of the versioned `.ddev/wp-ssh.yaml` when each developer has a different SSH user, and let each developer provide it inline.
 
 You can also override the full pull source inline:
 
 ```bash
 ddev pull wp-ssh \
-  --environment=WP_SSH_PULL_USER=your-ssh-user,WP_SSH_PULL_HOST=example.com,WP_SSH_PULL_REMOTE_PATH=/home/example/public_html \
+  --environment=WP_SSH_PULL_DESTINATION=deploy@example.com,WP_SSH_PULL_REMOTE_PATH=/home/example/public_html \
   -y
 ```
 
 One-shot overrides are supported:
 
 ```bash
-wp-ssh-bridge pull --silent --user deploy --host example.com --remote-path /home/example/public_html
+wp-ssh-bridge pull --silent --destination deploy@example.com --remote-path /home/example/public_html
 ```
 
 ### Clone
@@ -154,8 +159,7 @@ Clone is standalone-only: it copies a live site host-to-host into a plain target
 
 ```bash
 wp-ssh-bridge clone --silent \
-  --user deploy \
-  --host source.example.com \
+  --destination deploy@source.example.com \
   --remote-path /home/source/public_html \
   --db-host db.example.com \
   --db-name target_db \
@@ -179,12 +183,11 @@ Or use DDEV after initialization when you specifically want DDEV's native push l
 ddev push wp-ssh -y
 ```
 
-One-shot push target overrides are supported. For `push`, the concise `--user`, `--host`, `--port`, `--remote-path`, and `--remote-tmp-dir` flags also apply to the push target.
+One-shot push target overrides are supported. For `push`, the concise `--destination`, `--user`, `--host`, `--port`, `--remote-path`, and `--remote-tmp-dir` flags also apply to the push target.
 
 ```bash
 wp-ssh-bridge push --silent \
-  --user deploy \
-  --host staging.example.com \
+  --destination deploy@staging.example.com \
   --remote-path /home/staging/public_html \
   --push-url https://staging.example.com
 ```
@@ -230,8 +233,7 @@ wp-ssh-bridge pull --silent --skip-files
 `wp-ssh-bridge init` writes `.wp-ssh.yaml` at the wp-env project root. This is the wp-env equivalent of `.ddev/wp-ssh.yaml` and uses the same precedence: config file, then environment variables, then CLI flags. Because the wp-env install path and URL are resolved at run time, the file holds only portable values and can be committed:
 
 ```yaml
-pull_user: "deploy"
-pull_host: "production.example.com"
+pull_destination: "deploy@production.example.com"
 pull_remote_path: "/home/production/public_html"
 clone_images: false
 ```
@@ -314,8 +316,7 @@ Direct flags are intended for one-shot usage:
 
 ```bash
 wp-ssh-bridge pull --silent \
-  --user deploy \
-  --host example.com \
+  --destination deploy@example.com \
   --remote-path /home/example/public_html
 ```
 
