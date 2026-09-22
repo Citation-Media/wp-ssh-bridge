@@ -13,7 +13,7 @@ Always use the DDEV provider workflow for DDEV projects. Do not replace it with 
 ./.ddev/bin/wp-ssh-bridge init
 ```
 
-Use `wp-ssh-bridge init` instead only when the binary is intentionally installed on `PATH`.
+Use `wp-ssh-bridge init` instead only when the binary is intentionally installed on `PATH`. When the project installs the npm package, every `./.ddev/bin/wp-ssh-bridge` in this reference becomes `npx wp-ssh-bridge`; the provider files then call the package's binary by a project-relative path, so `npm install` has to run before `ddev pull` on each machine. Add `--silent` plus the `--user`, `--host`, and `--remote-path` flags when running init without a terminal; see "Set Up A Project Without Prompts" in `SKILL.md`.
 
 3. Use the provider name chosen during init. The default provider is `wp-ssh`.
 4. Pull with native DDEV:
@@ -111,7 +111,7 @@ ddev push wp-ssh \
   -y
 ```
 
-Do not suggest `ddev pull wp-ssh --user deploy`; that flag belongs to direct `wp-ssh-bridge pull`, not native DDEV pull.
+Do not suggest `ddev pull wp-ssh --destination deploy@host` or `--user`; those flags belong to direct `wp-ssh-bridge pull`, not native DDEV pull. Use `--environment=WP_SSH_PULL_DESTINATION=...` there.
 
 ## Clone Pulls
 
@@ -166,7 +166,7 @@ ddev pull <provider> -y
 ./.ddev/bin/wp-ssh-bridge provider generate --kind all
 ```
 
-If a provider callback fails with `.ddev/bin/wp-ssh-bridge: No such file or directory`, reinstall or update the project-local binary, then rerun `./.ddev/bin/wp-ssh-bridge init` or `./.ddev/bin/wp-ssh-bridge provider install`.
+If a provider callback fails with `.ddev/bin/wp-ssh-bridge: No such file or directory`, reinstall or update the project-local binary, then rerun `./.ddev/bin/wp-ssh-bridge init` or `./.ddev/bin/wp-ssh-bridge provider install`. The same error naming a path under `node_modules` means the npm package is not installed on this machine: run `npm install`. After switching between the script and npm, rerun `provider install` so the provider files point at the binary that is actually present; `--binary <path>` pins a different path explicitly.
 
 Only run a suggested debugging step after the user confirms it.
 

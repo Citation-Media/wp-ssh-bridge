@@ -38,8 +38,8 @@ func (a *App) tarPipeFromRemote(ctx context.Context, projectRoot string, target 
 	defer pr.Close()
 	defer pw.Close()
 
-	sshArgList := append(sshArgs(target), sshTarget(target), remoteCmd)
-	sshCmd := exec.CommandContext(ctx, "ssh", sshArgList...)
+	sshArgList := sshArgv(target, sshTarget(target), remoteCmd)
+	sshCmd := exec.CommandContext(ctx, sshArgList[0], sshArgList[1:]...)
 	sshCmd.Dir = projectRoot
 	sshCmd.Stdout = pw
 	sshCmd.WaitDelay = sshWaitDelay
@@ -115,8 +115,8 @@ func (a *App) tarPipeToRemote(ctx context.Context, projectRoot string, target Re
 	var tarStderr bytes.Buffer
 	tarCmd.Stderr = &tarStderr
 
-	sshArgList := append(sshArgs(target), sshTarget(target), remoteCmd)
-	sshCmd := exec.CommandContext(ctx, "ssh", sshArgList...)
+	sshArgList := sshArgv(target, sshTarget(target), remoteCmd)
+	sshCmd := exec.CommandContext(ctx, sshArgList[0], sshArgList[1:]...)
 	sshCmd.Dir = projectRoot
 	sshCmd.Stdin = pr
 	sshCmd.WaitDelay = sshWaitDelay

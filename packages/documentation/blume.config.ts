@@ -1,8 +1,7 @@
 import { defineConfig } from "blume";
 
-// The public origin of the docs site. Set SITE_URL in the deploy environment
-// (GitHub Actions reads it from the DOCS_SITE_URL repository variable). The
-// fallback is a placeholder until the real domain is wired up.
+// The public origin of the docs site. SITE_URL overrides it, for example to build
+// a copy for another host.
 const site = process.env.SITE_URL || "https://wp-ssh-bridge.citation.media";
 
 export default defineConfig({
@@ -19,8 +18,8 @@ export default defineConfig({
       // content and the site that renders it stay separable.
       { type: "filesystem", root: "../../docs", prefix: "docs" },
       // Every GitHub release becomes a changelog entry. Blume renders the
-      // timeline at /changelog and a feed at /changelog/rss.xml. The repo is
-      // private, so builds need GITHUB_TOKEN with read access to it.
+      // timeline at /changelog and a feed at /changelog/rss.xml. Builds pass
+      // GITHUB_TOKEN so the API rate limit does not empty the changelog.
       {
         type: "github-releases",
         prefix: "changelog",
@@ -49,9 +48,7 @@ export default defineConfig({
       { label: "Changelog", path: "/changelog", href: "/changelog", icon: "history" },
     ],
     cta: { href: "/docs/installation", label: "Install" },
-    // The source repository is private. Point the header mark at the
-    // organization so the link works for everyone.
-    repo: "https://github.com/Citation-Media",
+    repo: "https://github.com/Citation-Media/wp-ssh-bridge",
   },
 
   // "Last updated" from git history. CI checks out with fetch-depth: 0 so the
@@ -75,9 +72,8 @@ export default defineConfig({
         `Install the latest release with \`curl -fsSL ${site}/install.sh | sh\`, then run \`wp-ssh-bridge init\` in the project and \`wp-ssh-bridge pull --silent\`. The command pages below cover pull, push, and clone for every runtime.`,
       ].join("\n"),
     },
-    // The repository is private, so the project's agent skill cannot be
-    // fetched from GitHub. Publishing it here makes it installable: the build
-    // bundles each skill directory and serves it under
+    // Publishing the project's agent skill here makes it installable without
+    // Git: the build bundles each skill directory and serves it under
     // /.well-known/agent-skills/ per the Agent Skills Discovery RFC.
     skills: "../../skills",
     // Hosted MCP server for coding agents (Claude Code, Cursor, VS Code).

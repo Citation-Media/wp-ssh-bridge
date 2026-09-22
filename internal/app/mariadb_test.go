@@ -158,14 +158,9 @@ func TestDBPullRemovesMariaDBCompatibilityAliasesAfterExport(t *testing.T) {
 func TestDBPullCleansRemoteAndPartialLocalDumpAfterDownloadFailure(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "ssh.log")
-	installFakeSSH(t, dir, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\n")
-	installFakeCommand(t, dir, "scp", `#!/bin/sh
-for arg do
-  last=$arg
-done
-printf 'partial dump' > "$last"
-exit 1
-`)
+	// The fallback download streams "cat <dump>" through ssh; answer it with a partial
+	// dump and a failure so the caller has to clean up both sides.
+	installFakeSSH(t, dir, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\ncase \"$*\" in\n  *' cat '*) printf 'partial dump'; exit 1 ;;\nesac\n")
 
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	err := app.dbPull(context.Background(), dir, Config{

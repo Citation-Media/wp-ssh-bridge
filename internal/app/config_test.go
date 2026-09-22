@@ -457,3 +457,117 @@ func TestWriteDDEVConfigUsesRelativeProjectPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestDestinationSatisfiesTheRequiredAddress(t *testing.T) {
+	t.Parallel()
+	cfg := Config{Destination: "prod", RemotePath: "/var/www/html"}
+	if err := cfg.validatePullRequired(); err != nil {
+		t.Fatalf("validatePullRequired() rejected a destination-only source: %v", err)
+	}
+	cfg = Config{PushDestination: "ssh://deploy@staging.example.com:2222", PushRemotePath: "/var/www/html"}
+	if err := cfg.validatePushRequired(); err != nil {
+		t.Fatalf("validatePushRequired() rejected a destination-only target: %v", err)
+	}
+}
+
+func TestDestinationRejectsSplitAddressBesideIt(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []Config{
+		{Destination: "prod", User: "deploy", RemotePath: "/var/www/html"},
+		{Destination: "prod", Host: "example.com", RemotePath: "/var/www/html"},
+		{Destination: "prod", Port: "2222", RemotePath: "/var/www/html"},
+		{PushDestination: "prod", PushUser: "deploy", PushRemotePath: "/var/www/html"},
+	} {
+		err := cfg.validateInitValues()
+		if err == nil {
+			t.Fatalf("validateInitValues() accepted destination beside split address: %+v", cfg)
+		}
+		if !strings.Contains(err.Error(), "already carries the user, host, and port") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if err := (Config{Destination: "deploy@prod extra"}).validateInitValues(); err == nil {
+		t.Fatal("validateInitValues() accepted a malformed destination")
+	}
+}
+
+func TestConfigFileRoundTripsConnectionKeys(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "wp-ssh.yaml")
+	cfg := Config{
+		Destination:     "deploy@production.example.com:2222",
+		RemotePath:      "/var/www/html",
+		PushDestination: "staging",
+		PushRemotePath:  "/var/www/staging",
+	}
+	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
+		t.Fatalf("writeConfigFile() error = %v", err)
+	}
+	body, _ := os.ReadFile(path)
+	for _, want := range []string{"pull_destination: \"deploy@production.example.com:2222\"", "push_destination: \"staging\""} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("config file missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), "pull_user") || strings.Contains(string(body), "pull_host") {
+		t.Fatalf("config file wrote split address keys beside the destination:\n%s", body)
+	}
+	read, err := readConfigFile(path)
+	if err != nil {
+		t.Fatalf("readConfigFile() error = %v", err)
+	}
+	if read.Destination != cfg.Destination || read.PushDestination != cfg.PushDestination {
+		t.Fatalf("readConfigFile() = %+v", read)
+	}
+}
+
+func TestEnvOverlaysConnectionValues(t *testing.T) {
+	t.Parallel()
+	cfg := Config{}
+	cfg.applyEnv([]string{
+		"WP_SSH_PULL_DESTINATION=prod",
+		"WP_SSH_PUSH_DESTINATION=deploy@staging.example.com",
+	})
+	if cfg.Destination != "prod" || cfg.PushDestination != "deploy@staging.example.com" {
+		t.Fatalf("applyEnv() = %+v", cfg)
+	}
+	env := cfg.envArgs()
+	for _, want := range []string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PUSH_DESTINATION=deploy@staging.example.com"} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("envArgs() missing %q: %s", want, env)
+		}
+	}
+}
+
+func TestMergeConfigCarriesConnectionValues(t *testing.T) {
+	t.Parallel()
+	loaded := Config{Destination: "prod", PushDestination: "staging"}
+	merged := mergeConfig(defaultConfig(), loaded)
+	if merged.Destination != "prod" || merged.PushDestination != "staging" {
+		t.Fatalf("mergeConfig() dropped connection values: %+v", merged)
+	}
+}
+
+func TestEnvDestinationReplacesTheSplitAddressFromTheFile(t *testing.T) {
+	t.Parallel()
+	cfg := Config{User: "deploy", Host: "prod.example.com", Port: "2200", RemotePath: "/var/www/html"}
+	cfg.applyEnv([]string{"WP_SSH_PULL_DESTINATION=deploy@staging.example.com"})
+	if cfg.Destination != "deploy@staging.example.com" || cfg.User != "" || cfg.Host != "" || cfg.Port != "" {
+		t.Fatalf("applyEnv() kept the file's split address beside the env destination: %+v", cfg)
+	}
+	if err := cfg.validatePullRequired(); err != nil {
+		t.Fatalf("env destination over a split-form file was rejected: %v", err)
+	}
+
+	push := Config{PushUser: "deploy", PushHost: "staging.example.com", PushRemotePath: "/var/www/html"}
+	push.applyEnv([]string{"WP_SSH_PUSH_DESTINATION=release@staging.example.com"})
+	if push.PushDestination == "" || push.PushUser != "" || push.PushHost != "" {
+		t.Fatalf("applyEnv() kept the push split address: %+v", push)
+	}
+
+	same := Config{RemotePath: "/var/www/html"}
+	same.applyEnv([]string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PULL_USER=ci"})
+	if err := same.validatePullRequired(); err == nil {
+		t.Fatal("a destination and a split value in the environment should still conflict")
+	}
+}

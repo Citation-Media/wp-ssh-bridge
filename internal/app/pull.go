@@ -93,9 +93,8 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		}
 	}()
 	if useSCP {
-		args := append(scpArgs(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
 		if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
-			return a.runExternal(ctx, projectRoot, "scp", args...)
+			return a.downloadOverSSH(ctx, projectRoot, target, remoteDumpGZ, localDump)
 		}); err != nil {
 			return err
 		}

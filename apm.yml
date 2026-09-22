@@ -6,8 +6,8 @@
 # the documentation site publishes the same directory at
 # /.well-known/agent-skills/ for clients that need no repository access.
 name: wp-ssh-bridge
-version: 0.5.2
-description: Operate and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
+version: 0.7.0
+description: Install, set up, operate, and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
 author: Citation Media
 license: MIT
 homepage: https://wp-ssh-bridge.citation.media
@@ -29,6 +29,6 @@ marketplace:
     claude: {}
   packages:
     - name: wp-ssh-bridge-cli
-      description: Operate and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
+      description: Install, set up, operate, and troubleshoot the wp-ssh-bridge CLI for pulling, cloning, and pushing WordPress databases and files over SSH.
       source: Citation-Media/wp-ssh-bridge
-      version: "^0.5.0"
+      version: "^0.7.0"

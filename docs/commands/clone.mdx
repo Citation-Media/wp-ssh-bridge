@@ -31,8 +31,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 
     ```bash
     wp-ssh-bridge clone --silent \
-      --user deploy \
-      --host source.example.com \
+      --destination deploy@source.example.com \
       --remote-path /home/source/public_html \
       --db-host db.example.com \
       --db-name target_db \
@@ -82,9 +81,10 @@ Source, exactly as for a pull:
 
 | Flag | Config key | Environment variable |
 | --- | --- | --- |
-| `--user` | `pull_user` | `WP_SSH_PULL_USER` |
-| `--host` | `pull_host` | `WP_SSH_PULL_HOST` |
+| `--destination` | `pull_destination` | `WP_SSH_PULL_DESTINATION` |
 | `--remote-path` | `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` |
+
+`--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias; the split `--user`, `--host`, and `--port` flags still work for configs that use them. See [SSH access](/docs/ssh-access).
 
 Target database, written into `wp-config.php`:
 
@@ -110,8 +110,7 @@ wp-ssh-bridge clone --silent
 For a migration you run more than once, keep it in a file:
 
 ```yaml title=".wp-ssh.yaml"
-pull_user: "deploy"
-pull_host: "source.example.com"
+pull_destination: "deploy@source.example.com"
 pull_remote_path: "/home/source/public_html"
 
 clone_db_host: "db.example.com"
@@ -168,8 +167,7 @@ It removes pre-existing content in the resolved target directory before the sync
     ```bash
     mkdir -p ~/migrations/example && cd ~/migrations/example
     wp-ssh-bridge clone --silent \
-      --user deploy \
-      --host source.example.com \
+      --destination deploy@source.example.com \
       --remote-path /home/source/public_html \
       --db-host db.example.com \
       --db-name target_db \
