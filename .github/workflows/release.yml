@@ -197,12 +197,13 @@ jobs:
           RAW="${GITHUB_REF#refs/tags/}"
           VERSION="${RAW#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          # A prerelease must not move the latest dist-tag.
-          if printf '%s' "$VERSION" | grep -qE '-[A-Za-z0-9]'; then
-            echo "NPM_TAG=next" >> "$GITHUB_OUTPUT"
-          else
-            echo "NPM_TAG=latest" >> "$GITHUB_OUTPUT"
-          fi
+          # A prerelease must not move the latest dist-tag. A shell pattern, not
+          # grep: a pattern starting with "-" reads as a grep option and made
+          # every prerelease publish as latest (v0.7.0-rc.1).
+          case "$VERSION" in
+            *-*) echo "NPM_TAG=next" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "NPM_TAG=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Apply the version
         run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
