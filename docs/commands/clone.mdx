@@ -145,6 +145,20 @@ It removes pre-existing content in the resolved target directory before the sync
 
 `--clean-target` exists only on `clone`. It is rejected on `pull` and `push`.
 
+## Maintenance mode during the import
+
+When a WordPress site is already installed at the target, the clone puts it into maintenance mode while the database is imported and lifts it again afterwards, including on failure. A migration usually targets an empty directory and a new database instead. There is no site to protect then, and WP-CLI could not activate maintenance mode anyway, so the import runs without it:
+
+```text
+• Skipping local maintenance mode: no installed WordPress site at the destination yet
+```
+
+With `--clean-target`, the previous site is replaced, so maintenance mode is skipped without checking:
+
+```text
+• Skipping local maintenance mode: --clean-target replaces the destination site
+```
+
 ## Migration walkthrough
 
 <Steps>
@@ -217,5 +231,6 @@ Unless you accept all of that, stay on the local-orchestrated path.
 | Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
 | The cloned site shows the source domain | No domain mapping was configured, or `--skip-search-replace` was set. Add the mapping and rerun. |
 | Old files from the previous install remain | Clones are additive. Use `--clean-target` if that is what you want. |
+| `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 
 More in [Troubleshooting](/docs/troubleshooting).

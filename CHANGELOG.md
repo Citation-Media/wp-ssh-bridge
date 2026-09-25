@@ -2,6 +2,12 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Clone into an empty target. Maintenance mode needs an installed WordPress site, so a clone into an empty directory or a new database stopped with `Enabling local maintenance mode failed` before the import. The CLI now checks with `wp core is-installed` and imports without maintenance mode when no site is installed yet, and `clone --clean-target` skips it outright because the previous site is being replaced. The same check covers a fresh project's first pull and the first push into an empty target directory.
+
 ## [0.8.0] - 2026-09-25
 
 ### Added

@@ -786,10 +786,19 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if shouldImportDB && !opts.SkipMaintenanceMode {
-		if err := a.enableLocalMaintenanceMode(ctx, root, cfg); err != nil {
-			return err
+		if opts.Clone && opts.CleanTarget {
+			// The destination's previous site has just been replaced, so there is
+			// nothing left for maintenance mode to protect during the import.
+			a.UI.Info("Skipping local maintenance mode: --clean-target replaces the destination site")
+		} else {
+			enabled, err := a.enableLocalMaintenanceMode(ctx, root, cfg)
+			if err != nil {
+				return err
+			}
+			if enabled {
+				defer a.disableLocalMaintenanceMode(context.Background(), root, cfg)
+			}
 		}
-		defer a.disableLocalMaintenanceMode(context.Background(), root, cfg)
 	}
 	if shouldImportDB {
 		if err := a.importLocalDB(ctx, root, cfg); err != nil {
@@ -817,10 +826,13 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 
 	if !opts.SkipMaintenanceMode {
 		target := cfg.pushTarget()
-		if err := a.enableRemoteMaintenanceMode(ctx, root, target); err != nil {
+		enabled, err := a.enableRemoteMaintenanceMode(ctx, root, target)
+		if err != nil {
 			return err
 		}
-		defer a.disableRemoteMaintenanceMode(context.Background(), root, target)
+		if enabled {
+			defer a.disableRemoteMaintenanceMode(context.Background(), root, target)
+		}
 	}
 
 	if !opts.SkipDB {

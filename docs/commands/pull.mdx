@@ -113,7 +113,7 @@ A pull never modifies the remote site. It creates a temporary database dump in t
     rsync mirrors the remote WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
   </Step>
   <Step title="Maintenance mode and import">
-    The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`.
+    The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
   </Step>
   <Step title="URL rewrites">
     A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database.

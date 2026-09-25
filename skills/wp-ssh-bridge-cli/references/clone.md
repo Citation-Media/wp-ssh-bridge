@@ -81,6 +81,9 @@ Safety:
 - It is destructive and cannot be undone. Recommend it only when the user explicitly wants pre-existing target content removed, and confirm the resolved target path first.
 - On the scp/tar transport it preserves only operational entries — `.git`, `.ddev`, `.wp-ssh`, `wp-config-ddev.php`, `.wp-ssh.yaml`, and the `wp-ssh-bridge` binary — and refuses to run against a filesystem root or the home directory. On rsync, the configured `--exclude` paths are preserved.
 - It is rejected on `pull` and `push`; it exists only on `clone`.
+- The import runs without maintenance mode, because the destination site is being replaced; the CLI prints `Skipping local maintenance mode: --clean-target replaces the destination site`.
+
+A clone into an empty directory or a new database also runs the import without maintenance mode, since `wp core is-installed` finds no site to protect; the CLI prints `Skipping local maintenance mode: no installed WordPress site at the destination yet`. Neither needs `--skip-maintenance-mode`.
 
 ## DDEV And wp-env Projects
 
