@@ -883,3 +883,89 @@ func TestURLHelpers(t *testing.T) {
 		t.Fatalf("sqlQuote() = %q", got)
 	}
 }
+
+// postPullClone runs the clone's post-import URL step against a copied wp-config.php
+// and a fake wp that reports the source site URL.
+func postPullClone(t *testing.T, cfg Config, wpConfig string) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte(wpConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "wp.log")
+	installFakeCommand(t, dir, "wp", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\ncase \"$*\" in *'option get home'*|*'option get siteurl'*) printf 'https://source.example.com\\n' ;; esac\n")
+	stdout := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+	cfg.LocalWPPath = "."
+	adapter := standaloneAdapter{runtime: runtimeContext{Mode: modeStandalone, Root: dir}}
+	if err := app.postPull(context.Background(), adapter, cfg, true); err != nil {
+		t.Fatalf("postPull(clone) error = %v\n%s", err, stdout.String())
+	}
+	contents, err := os.ReadFile(filepath.Join(dir, "wp-config.php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := os.ReadFile(logPath)
+	return string(contents), string(log), stdout.String()
+}
+
+const cloneWPConfigWithoutURLs = "<?php\ndefine( 'DB_NAME', 'target_db' );\n/* That's all, stop editing! Happy publishing. */\n"
+
+const cloneWPConfigWithURLs = "<?php\ndefine( 'DB_NAME', 'target_db' );\ndefine( 'WP_HOME', 'https://source.example.com' );\ndefine( 'WP_SITEURL', 'https://source.example.com/wp' );\n/* That's all, stop editing! Happy publishing. */\n"
+
+func TestCloneWithoutTargetURLKeepsSourceURL(t *testing.T) {
+	for _, wpConfig := range []string{cloneWPConfigWithoutURLs, cloneWPConfigWithURLs} {
+		got, wpLog, stdout := postPullClone(t, Config{}, wpConfig)
+		if got != wpConfig {
+			t.Fatalf("a clone without a target URL must leave wp-config.php as copied:\n%s", got)
+		}
+		if strings.Contains(wpLog, "search-replace") {
+			t.Fatalf("a clone without a target URL must not rewrite database URLs:\n%s", wpLog)
+		}
+		if !strings.Contains(stdout, "Keeping the source site URL: no target URL is configured") {
+			t.Fatalf("missing notice about the kept source URL:\n%s", stdout)
+		}
+	}
+}
+
+func TestCloneWithTargetURLDoesNotAddURLConstants(t *testing.T) {
+	got, wpLog, _ := postPullClone(t, Config{LocalURL: "https://target.example.com"}, cloneWPConfigWithoutURLs)
+	if got != cloneWPConfigWithoutURLs {
+		t.Fatalf("a clone must not add URL constants the source does not define:\n%s", got)
+	}
+	if !strings.Contains(wpLog, "search-replace https://source.example.com https://target.example.com") {
+		t.Fatalf("database URLs should move to the configured target URL:\n%s", wpLog)
+	}
+}
+
+func TestCloneRewritesExistingURLConstantsKeepingTheirPath(t *testing.T) {
+	got, _, _ := postPullClone(t, Config{LocalURL: "https://target.example.com"}, cloneWPConfigWithURLs)
+	for _, want := range []string{"define( 'WP_HOME', 'https://target.example.com' );", "define( 'WP_SITEURL', 'https://target.example.com/wp' );"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("wp-config.php missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "source.example.com") || strings.Contains(got, "DOMAIN_CURRENT_SITE") || strings.Contains(got, "localhost") {
+		t.Fatalf("only the existing URL constants should move to the target:\n%s", got)
+	}
+}
+
+func TestCloneWithDomainMappingRewritesExistingURLConstants(t *testing.T) {
+	got, wpLog, _ := postPullClone(t, Config{PullDomainReplacements: []DomainReplacement{{Old: "source.example.com", New: "target.example.com"}}}, cloneWPConfigWithURLs)
+	if !strings.Contains(got, "'https://target.example.com'") || !strings.Contains(got, "'https://target.example.com/wp'") || strings.Contains(got, "localhost") {
+		t.Fatalf("a protocol-less mapping should move the existing URL constants too:\n%s", got)
+	}
+	if !strings.Contains(wpLog, "search-replace source.example.com target.example.com") {
+		t.Fatalf("the configured mapping should still rewrite the database:\n%s", wpLog)
+	}
+}
+
+func TestRewriteWPConfigURLDefinesContentsReplacesOnce(t *testing.T) {
+	t.Parallel()
+	contents := "define( 'DB_HOST', 'example.com' );\ndefine( 'WP_HOME', 'https://example.com' );\ndefine( 'WP_SITEURL', 'http://example.com/wp' );\n"
+	got := rewriteWPConfigURLDefinesContents(contents, uniqueReplacementPairs(replacementPairsForURLs("https://example.com", "https://example.com.staging.test")))
+	want := "define( 'DB_HOST', 'example.com' );\ndefine( 'WP_HOME', 'https://example.com.staging.test' );\ndefine( 'WP_SITEURL', 'https://example.com.staging.test/wp' );\n"
+	if got != want {
+		t.Fatalf("rewriteWPConfigURLDefinesContents() =\n%s\nwant\n%s", got, want)
+	}
+}

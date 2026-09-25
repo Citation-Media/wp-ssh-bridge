@@ -51,6 +51,8 @@ Target DB values:
 
 Use configured `pull_domain_replacements` or `--skip-search-replace` according to the migration plan. If the target URL differs from the source URL, configure replacements before running the clone.
 
+Without a target URL (`local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`) and without a pull domain mapping, the clone keeps the source URL in the database and `wp-config.php` and prints `Keeping the source site URL`; that is expected for a same-domain migration. With a target URL or mapping, the database is rewritten and `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` get the same replacements only if the copied `wp-config.php` already defines them; a clone never adds them. A cloned site that redirects to `localhost` was made by an older CLI: update it and fix or remove the `WP_HOME`/`WP_SITEURL` defines.
+
 ## Direct Command
 
 Use args mode for one-off clones:
@@ -120,17 +122,7 @@ Prefer environment variables for password values when the config file is version
 
 ## Server-To-Server Transfer
 
-Do not present server-to-server transfer as the default clone path. The implemented clone path is local-orchestrated: source to host to target working tree.
-
-Server-to-server can be faster, but it changes the trust and support model:
-
-- the source server needs SSH reachability to the target server
-- the source server needs target credentials or agent-forwarded access
-- target host keys must be trusted from the source server
-- many shared hosts block outbound SSH or have limited transfer tooling
-- failures are harder to diagnose because both remote hosts are active participants
-
-Recommend the local-orchestrated `clone` path unless the user explicitly accepts those requirements. Treat server-to-server as a future explicit workflow, not a mode that silently changes transport.
+The CLI always runs on the machine that receives the site. Running `clone` on the new server is supported and is the preferred migration when that server allows outbound SSH: connect with `ssh -A` so it uses the local agent, install the CLI outside the web root, and run `clone` from a working directory outside the web root with `--local-wp-path <web root>`, because the CLI stages the full database dump in its working directory. When the new server cannot reach the old one, clone into a local directory with a local database and then `push` to the new host with `--push-url`, after creating the target `wp-config.php` with the same table prefix. There is no mode in which the old host sends directly to the new one; do not suggest one. Full guide: https://wp-ssh-bridge.citation.media/docs/migrate-a-site.
 
 ## Command Name Errors
 
