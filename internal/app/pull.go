@@ -317,24 +317,15 @@ func (a *App) filesImport() {
 func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
 	projectRoot := adapter.Root()
 	// Clone writes the target DB credentials before import (see runPullPipeline),
-	// so it only runs URL updates and keeps blocked plugins and the runtime's
+	// so it only moves the site URL and keeps blocked plugins and the runtime's
 	// dev-mode post-pull hooks are skipped.
-	if !clone {
-		for _, hook := range adapter.PostPullHooks() {
-			if err := hook(ctx, a, projectRoot, cfg); err != nil {
-				return err
-			}
-		}
+	if clone {
+		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
 	}
-	if clone && preferredLocalURL(projectRoot, cfg) == "" {
-		// A clone moves a live site. Without a configured target URL, the URL constants
-		// would fall back to a development host such as https://localhost, so the clone
-		// keeps the source URL and rewrites only what a domain mapping names.
-		if len(cfg.PullDomainReplacements) == 0 {
-			a.UI.Info("Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.")
-			return nil
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(ctx, a, projectRoot, cfg); err != nil {
+			return err
 		}
-		return a.replaceSiteURLs(ctx, projectRoot, cfg)
 	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
 		return err
@@ -342,10 +333,50 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 	if err := a.replaceSiteURLs(ctx, projectRoot, cfg); err != nil {
 		return err
 	}
-	if clone {
+	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
+}
+
+// moveClonedSiteURL moves a cloned live site to its target URL. The URL constants the
+// copied wp-config.php already defines get the same replacements as the database, so a
+// WP_SITEURL in a subdirectory keeps its path; constants the source does not define are
+// not added. Without a target URL or domain mapping the site keeps the source URL instead
+// of a development fallback such as https://localhost.
+func (a *App) moveClonedSiteURL(ctx context.Context, projectRoot string, cfg Config) error {
+	pairs, ok := a.siteURLReplacementPairs(ctx, projectRoot, cfg)
+	if !ok {
 		return nil
 	}
-	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
+	if len(pairs) == 0 {
+		a.UI.Info("Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.")
+		return nil
+	}
+	wpConfig := filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")
+	contents, err := os.ReadFile(wpConfig)
+	if err != nil {
+		return err
+	}
+	if updated := rewriteWPConfigURLDefinesContents(string(contents), pairs); updated != string(contents) {
+		if err := a.runStep("Updating cloned WordPress URL constants", "Cloned WordPress URL constants updated", func() error {
+			return os.WriteFile(wpConfig, []byte(updated), 0o644)
+		}); err != nil {
+			return err
+		}
+	}
+	return a.applySiteURLReplacements(ctx, projectRoot, cfg, pairs)
+}
+
+// rewriteWPConfigURLDefinesContents applies the URL replacements to the WP_HOME,
+// WP_SITEURL, and DOMAIN_CURRENT_SITE defines that exist. One pass over each define
+// with the longest match first keeps a target that contains the source host, such as
+// example.com.staging.test, from being rewritten a second time.
+func rewriteWPConfigURLDefinesContents(contents string, pairs []replacementPair) string {
+	replacements := make([]string, 0, 2*len(pairs))
+	for _, pair := range pairs {
+		replacements = append(replacements, pair.old, pair.new)
+	}
+	replacer := strings.NewReplacer(replacements...)
+	defines := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"](?:WP_HOME|WP_SITEURL|DOMAIN_CURRENT_SITE)['"]\s*,.*?\);`)
+	return defines.ReplaceAllStringFunc(contents, replacer.Replace)
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
@@ -695,13 +726,28 @@ if (is_readable($ddev_settings) && !defined('DB_USER')) {
 
 // replaceSiteURLs updates single-site and multisite URLs after database import.
 func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Config) error {
-	if cfg.SkipSearchReplace {
+	pairs, ok := a.siteURLReplacementPairs(ctx, projectRoot, cfg)
+	if !ok {
 		return nil
+	}
+	if len(pairs) == 0 {
+		a.UI.Warning("Skipping WordPress URL replacement because no configured replacement pairs exist and the old or new URL could not be detected.")
+		return nil
+	}
+	return a.applySiteURLReplacements(ctx, projectRoot, cfg, pairs)
+}
+
+// siteURLReplacementPairs returns the configured domain mappings plus the pairs that move
+// the imported site URL to the local URL, longest first. ok is false when search-replace
+// is skipped or there is no local WordPress install to rewrite.
+func (a *App) siteURLReplacementPairs(ctx context.Context, projectRoot string, cfg Config) ([]replacementPair, bool) {
+	if cfg.SkipSearchReplace {
+		return nil, false
 	}
 
 	wpRoot := localWPRoot(projectRoot, cfg)
 	if _, err := os.Stat(filepath.Join(wpRoot, "wp-config.php")); err != nil {
-		return nil
+		return nil, false
 	}
 
 	pairs := []replacementPair{}
@@ -728,12 +774,12 @@ func (a *App) replaceSiteURLs(ctx context.Context, projectRoot string, cfg Confi
 		}
 		pairs = append(pairs, autoPairs...)
 	}
-	if len(pairs) == 0 {
-		a.UI.Warning("Skipping WordPress URL replacement because no configured replacement pairs exist and the old or new URL could not be detected.")
-		return nil
-	}
-	pairs = uniqueReplacementPairs(pairs)
+	return uniqueReplacementPairs(pairs), true
+}
 
+// applySiteURLReplacements runs the replacements against the local database, per blog
+// and in the domain tables on multisite.
+func (a *App) applySiteURLReplacements(ctx context.Context, projectRoot string, cfg Config, pairs []replacementPair) error {
 	if a.isMultisite(ctx, projectRoot, cfg) {
 		if err := a.runMultisiteSearchReplace(ctx, projectRoot, cfg, pairs); err != nil {
 			return err

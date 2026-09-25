@@ -153,13 +153,7 @@ A clone moves the site to another domain only when you name one. Without a targe
 • Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.
 ```
 
-| You configure | Database URLs | `WP_HOME`, `WP_SITEURL`, `DOMAIN_CURRENT_SITE` in `wp-config.php` |
-| --- | --- | --- |
-| Nothing | Unchanged, source URL | Unchanged, as copied from the source |
-| A domain mapping such as `source.example.com` to `target.example.com` | Rewritten by the mapping | Unchanged, as copied from the source |
-| `local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`, or a mapping to a complete URL such as `https://target.example.com` | Rewritten to that URL | Set to that URL |
-
-If the copied `wp-config.php` defines `WP_HOME` or `WP_SITEURL` and the domain changes, give the complete target URL with `local_url`, so the constants move with the database.
+To move the site, name the target with `local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`, or with a domain mapping such as `source.example.com` to `target.example.com`. The database is rewritten, and the `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` constants get the same replacements, but only where the copied `wp-config.php` already defines them. A `WP_SITEURL` in a subdirectory keeps its path, and a site that keeps its URLs in the database gets no new constants.
 
 ## Maintenance mode during the import
 

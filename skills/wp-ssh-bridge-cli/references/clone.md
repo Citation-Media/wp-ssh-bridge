@@ -51,7 +51,7 @@ Target DB values:
 
 Use configured `pull_domain_replacements` or `--skip-search-replace` according to the migration plan. If the target URL differs from the source URL, configure replacements before running the clone.
 
-Without a target URL (`local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`) and without a pull domain mapping, the clone keeps the source URL in the database and `wp-config.php` and prints `Keeping the source site URL`; that is expected for a same-domain migration. A protocol-less mapping rewrites the database only; when the copied `wp-config.php` defines `WP_HOME` or `WP_SITEURL` and the domain changes, recommend the complete target URL via `local_url` so the constants follow. A cloned site that redirects to `localhost` was made by an older CLI: update it and fix or remove the `WP_HOME`/`WP_SITEURL` defines.
+Without a target URL (`local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`) and without a pull domain mapping, the clone keeps the source URL in the database and `wp-config.php` and prints `Keeping the source site URL`; that is expected for a same-domain migration. With a target URL or mapping, the database is rewritten and `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` get the same replacements only if the copied `wp-config.php` already defines them; a clone never adds them. A cloned site that redirects to `localhost` was made by an older CLI: update it and fix or remove the `WP_HOME`/`WP_SITEURL` defines.
 
 ## Direct Command
 

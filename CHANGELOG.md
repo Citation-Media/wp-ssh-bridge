@@ -6,7 +6,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Fixed
 
-- Keep the source site URL on a clone that names no target URL. The clone fell back to a development host and wrote `WP_HOME` and `WP_SITEURL` as `https://localhost` into the target's `wp-config.php`, even with a domain mapping without a protocol, so the migrated site redirected to `localhost`. Now a clone rewrites the URL constants only when a target URL is configured with `local_url`, `WP_SSH_PULL_LOCAL_URL`, `--local-url`, or a mapping to a complete URL; a protocol-less mapping still rewrites the database, and without any target the source URL stays and the CLI says so.
+- Keep a cloned site's URLs unless a target is named. A clone fell back to a development host and wrote `WP_HOME` and `WP_SITEURL` as `https://localhost` into the target's `wp-config.php`, also with a domain mapping without a protocol, so the migrated site redirected to `localhost`. Now a clone without `local_url`, `WP_SSH_PULL_LOCAL_URL`, `--local-url`, or a pull domain mapping keeps the source URL and says so. With a target, the database is rewritten and the URL constants get the same replacements, but only where the copied `wp-config.php` already defines them, so a site that keeps its URLs in the database gets no new constants and a `WP_SITEURL` in a subdirectory keeps its path.
 
 ## [0.8.1] - 2026-09-25
 
