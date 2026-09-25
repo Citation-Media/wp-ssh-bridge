@@ -180,3 +180,52 @@ func TestLocalWPCommandUsesDownloadedPhar(t *testing.T) {
 		t.Fatalf("localWPCommand() missing original args: name=%q args=%#v", name, args)
 	}
 }
+
+// dbPushToEmptyTarget pushes a prepared dump to a fake target whose WP-CLI reports no
+// site URL, as on a first push into an empty directory, and a failing upload.
+func dbPushToEmptyTarget(t *testing.T, cfg Config) (string, string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(downloadsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(downloadsDir(dir), "db.sql.gz"), []byte("dump"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sshLog := filepath.Join(dir, "ssh.log")
+	rsyncLog := filepath.Join(dir, "rsync.log")
+	installFakeSSH(t, dir, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(sshLog)+"\n")
+	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(rsyncLog)+"\nexit 1\n")
+	cfg.PushUser, cfg.PushHost, cfg.PushRemotePath = "deploy", "example.com", "/var/www/html"
+
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := app.dbPush(context.Background(), dir, cfg, false)
+	ssh, _ := os.ReadFile(sshLog)
+	rsync, _ := os.ReadFile(rsyncLog)
+	return string(ssh), string(rsync), err
+}
+
+func TestDBPushStopsBeforeUploadWhenTargetURLIsUnknown(t *testing.T) {
+	sshLog, rsyncLog, err := dbPushToEmptyTarget(t, Config{})
+	if err == nil || !strings.Contains(err.Error(), "push target URL is unknown") || !strings.Contains(err.Error(), "push_url, WP_SSH_PUSH_URL, or --push-url") {
+		t.Fatalf("dbPush() error = %v, want a request for the push target URL", err)
+	}
+	if rsyncLog != "" || strings.Contains(sshLog, "db import") {
+		t.Fatalf("nothing should reach the target before its URL is known:\nssh:\n%s\nrsync:\n%s", sshLog, rsyncLog)
+	}
+}
+
+func TestDBPushWithoutTargetURLContinuesWhenURLsAreHandledOtherwise(t *testing.T) {
+	for name, cfg := range map[string]Config{
+		"skip search-replace": {SkipSearchReplace: true},
+		"push domain mapping": {PushDomainReplacements: []DomainReplacement{{Old: "example.ddev.site", New: "example.com"}}},
+	} {
+		_, rsyncLog, err := dbPushToEmptyTarget(t, cfg)
+		if err != nil && strings.Contains(err.Error(), "push target URL is unknown") {
+			t.Fatalf("%s: dbPush() should not require a push URL: %v", name, err)
+		}
+		if rsyncLog == "" {
+			t.Fatalf("%s: dbPush() should go on to upload the dump", name)
+		}
+	}
+}

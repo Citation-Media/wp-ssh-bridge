@@ -122,17 +122,7 @@ Prefer environment variables for password values when the config file is version
 
 ## Server-To-Server Transfer
 
-Do not present server-to-server transfer as the default clone path. The implemented clone path is local-orchestrated: source to host to target working tree.
-
-Server-to-server can be faster, but it changes the trust and support model:
-
-- the source server needs SSH reachability to the target server
-- the source server needs target credentials or agent-forwarded access
-- target host keys must be trusted from the source server
-- many shared hosts block outbound SSH or have limited transfer tooling
-- failures are harder to diagnose because both remote hosts are active participants
-
-Recommend the local-orchestrated `clone` path unless the user explicitly accepts those requirements. Treat server-to-server as a future explicit workflow, not a mode that silently changes transport.
+The CLI always runs on the machine that receives the site. Running `clone` on the new server is supported and is the preferred migration when that server allows outbound SSH: connect with `ssh -A` so it uses the local agent, install the CLI outside the web root, and run `clone` from a working directory outside the web root with `--local-wp-path <web root>`, because the CLI stages the full database dump in its working directory. When the new server cannot reach the old one, clone into a local directory with a local database and then `push` to the new host with `--push-url`, after creating the target `wp-config.php` with the same table prefix. There is no mode in which the old host sends directly to the new one; do not suggest one. Full guide: https://wp-ssh-bridge.citation.media/docs/migrate-a-site.
 
 ## Command Name Errors
 

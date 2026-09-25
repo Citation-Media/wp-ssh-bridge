@@ -43,7 +43,7 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
       --push-url https://staging.example.com
     ```
 
-    Set `push_url` whenever you can. Without it the CLI reads the target's current home URL before the import and uses that, which works but relies on the target being in a sane state.
+    Set `push_url` whenever you can. Without it the CLI reads the target's current home URL before the import and uses that, which works but relies on the target being in a sane state. On a target without an installed site, such as the first push into an empty directory, there is nothing to read, so the push stops before uploading anything until `push_url`, a push domain mapping, or `--skip-search-replace` says what to do with the URLs.
 
   </Tab>
   <Tab title="DDEV">
@@ -208,6 +208,7 @@ See [Configuration](/docs/configuration#domain-mappings) for the details.
 | --- | --- |
 | Push rejected in a wp-env project | Expected. Push from a standalone checkout instead; see the wp-env tab above. |
 | The target still shows the old URL | `push_url` was missing and the target's home URL was unusable. Set `push_url` and run again with `--skip-files`. |
+| `the push target URL is unknown because the target has no installed WordPress site` | A first push into an empty target has no URL to read. Set `push_url`, `WP_SSH_PUSH_URL`, or `--push-url`, add a push domain mapping, or pass `--skip-search-replace` to keep the local URLs. |
 | Internal links point at the local domain | A missing push domain mapping. Add it with `domains add` and rerun the search-replace with `--skip-files`. |
 | The target site stays in maintenance mode | The run was interrupted before cleanup. Remove `.maintenance` in the remote WordPress root. |
 | Warning about stale files | The tar fallback is in use, so removed files remain on the target. Install rsync on both sides. |
