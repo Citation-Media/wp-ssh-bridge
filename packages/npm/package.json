@@ -1,6 +1,6 @@
 {
   "name": "@citation-media/wp-ssh-bridge",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Pull, push, and clone WordPress databases and files over SSH. Installs the wp-ssh-bridge binary for your platform.",
   "license": "MIT",
   "homepage": "https://wp-ssh-bridge.citation.media",
