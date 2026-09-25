@@ -53,6 +53,10 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	remoteDump := fmt.Sprintf("%s/ddev-%s-%s-%s.sql", remoteTmp, projectName, time.Now().Format("20060102150405"), dumpID)
 	remoteDumpGZ := remoteDump + ".gz"
 	mariaDBSetup, mariaDBCleanup := remoteMariaDBCompatibilityCommands(remoteTmp, dumpID, a.needsRemoteMariaDBCompatibility(target))
+	wpExport := "wp_ssh_wp"
+	if override := a.remotePHPFunctionOverrideFor(target); override.required() {
+		wpExport = override.command()
+	}
 
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
@@ -62,7 +66,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		remoteWPCLIPrelude(target),
 		mariaDBSetup,
 		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
-		fmt.Sprintf("wp_ssh_wp --allow-root db export %s;", shellQuote(remoteDump)),
+		fmt.Sprintf("%s --allow-root db export %s;", wpExport, shellQuote(remoteDump)),
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		mariaDBCleanup + ";",
 		"trap - EXIT",
@@ -99,7 +103,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 			return err
 		}
 	} else {
-		args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
+		args := append(rsyncArchiveArgs(), "-e", a.sshCommandString(target), sshTarget(target)+":"+remoteDumpGZ, localDump)
 		if err := a.runStep("Downloading database export", "Database export downloaded", func() error {
 			return a.runExternal(ctx, projectRoot, "rsync", args...)
 		}); err != nil {
@@ -158,7 +162,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 	for _, exclude := range excludes {
 		args = append(args, "--exclude="+exclude)
 	}
-	args = append(args, "-e", sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
+	args = append(args, "-e", a.sshCommandString(target), sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/", destination+"/")
 
 	return a.runStep("Syncing WordPress files from pull source", "WordPress files synced", func() error {
 		return a.runExternalAllowRsyncVanished(ctx, projectRoot, args...)

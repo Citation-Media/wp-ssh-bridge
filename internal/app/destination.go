@@ -87,7 +87,7 @@ func (d sshDestination) describe() string {
 // resolveSSHDestination asks ssh -G what an alias or URL resolves to, without connecting.
 // ok is false when ssh is unavailable or printed nothing usable, so callers can stay quiet.
 func resolveSSHDestination(ctx context.Context, target RemoteTarget) (sshDestination, bool) {
-	args := sshArgv(target, "-G", sshTarget(target))
+	args := plainSSHArgv(target, "-G", sshTarget(target))
 	output, err := exec.CommandContext(ctx, args[0], args[1:]...).Output()
 	if err != nil {
 		return sshDestination{}, false

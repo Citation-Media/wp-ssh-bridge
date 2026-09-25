@@ -302,6 +302,18 @@ When this layout is found during database preflight, the CLI reports it and crea
 
 The temporary aliases are removed on success and by the remote cleanup trap on failure. Remote database transfer files are also removed after download/import and are retried during error cleanup. The SCP/tar file fallback streams its archive over SSH, so it does not leave a remote tar file behind.
 
+### Disabled PHP functions
+
+Many shared hosts disable PHP's `exec()` and similar functions, often also on the command line. WP-CLI's `wp db export` calls `exec()` directly, so on these hosts the export dies with exit status 255 and no message. The workaround below is verified on Hostinger.
+
+Pull preflight reads WP-CLI's PHP binary, `php.ini`, and entry script from `wp cli info`, or from the `#!` line of the `wp` script when that fails, and asks that PHP with plain `php -r` whether it disables `exec`, `proc_open`, `proc_close`, or `escapeshellarg`. No code runs inside WP-CLI, so a `wp-cli.yml` that disables `eval` does not affect the check. When a function is disabled, only the export runs with those functions removed from the host's list:
+
+```text
+✓ Pull source PHP function compatibility enabled (exec allowed for WP-CLI db export only)
+```
+
+The override is a `php -d disable_functions=…` startup option of that one process. No file is written, and the host's other disabled functions and every other PHP process are unchanged. Preflight stops the pull when the host blocks the override or the CLI cannot determine WP-CLI's PHP. Details: https://wp-ssh-bridge.citation.media/docs/troubleshooting/disabled-php-functions.
+
 ## Configuration
 
 Project config lives in `.ddev/wp-ssh.yaml` in DDEV mode and `.wp-ssh.yaml` in wp-env and standalone mode.
@@ -417,7 +429,7 @@ wp-ssh-bridge provider generate --kind all
 
 `wp-ssh-bridge` keeps feature parity with the original provider:
 
-- Verifies local SSH key authentication.
+- Verifies local SSH key authentication and shares one SSH connection per login for each CLI process, so an approving SSH agent asks once per direct `pull` or `push`. Each DDEV provider step runs as its own process and authenticates once.
 - Verifies WP-CLI compatibility locally and on configured pull/push remotes before relying on WP-CLI operations.
 - Exports the upstream database with remote WP-CLI and downloads `.ddev/.downloads/db.sql.gz`.
 - Rsyncs the upstream WordPress root into the local WordPress root.

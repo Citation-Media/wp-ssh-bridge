@@ -1,0 +1,76 @@
+---
+title: Disabled PHP functions
+description: Why WP-CLI database exports die without a message on hosts that disable PHP's exec(), and how wp-ssh-bridge re-enables it for the export alone.
+sidebar:
+  label: Disabled PHP functions
+---
+
+Many shared hosts harden PHP by listing `exec` and similar functions in `disable_functions`, often for PHP on the command line as well. WP-CLI's `wp db export` calls `exec()` directly, so on these hosts PHP stops the export with a fatal error. When the host also hides PHP errors, the export ends with exit status 255 and prints nothing at all.
+
+`wp-ssh-bridge` detects this during pull preflight and re-enables the functions for the export command alone. **You do not have to configure anything.** The workaround is verified on Hostinger, whose command-line PHP disables `exec`.
+
+## What you see
+
+When the workaround engages, preflight says so and names the functions:
+
+```text
+✓ Pull source PHP function compatibility enabled (exec allowed for WP-CLI db export only)
+```
+
+Without the workaround, the database export step fails with no remote output, only an exit status:
+
+```text
+✗ Exporting pull source database failed: exit status 255
+Error: exit status 255
+```
+
+## What the CLI does
+
+<Steps>
+  <Step title="Find the PHP that runs WP-CLI">
+    `wp cli info` reports the PHP binary, its `php.ini`, and the WP-CLI phar. If that report fails, the CLI reads the `#!` line of the `wp` script instead, such as `#!/usr/bin/env php`. No code runs inside WP-CLI, so a `wp-cli.yml` that disables `eval` does not matter.
+  </Step>
+  <Step title="Ask that PHP what it blocks">
+    A plain `php -r` call with the same binary and `php.ini` reports which of the functions `wp db export` needs are disabled: `exec`, `proc_open`, `proc_close`, and `escapeshellarg`.
+  </Step>
+  <Step title="Prove the override works">
+    If any are disabled, the CLI starts PHP once with `-d disable_functions=` set to the host's list minus those functions, and checks that they are now callable. If the host blocks the override too, the pull stops here, before anything is exported.
+  </Step>
+  <Step title="Run the export with the override">
+    Only the `wp db export` command starts PHP with that `-d` setting. Every other WP-CLI command in the run keeps the host's configuration.
+  </Step>
+</Steps>
+
+:::note[What changes on the host]
+Nothing. `-d` is a startup option of one PHP process, so the functions are available only inside the export while it runs. No `php.ini`, `.user.ini`, or other file is written, and the PHP that serves the website keeps them disabled throughout, including during the pull. Every function the host disables apart from those four stays disabled for the export as well.
+:::
+
+The export loads WP-CLI and the site's `wp-config.php` for the database credentials, but not WordPress itself, plugins, or themes. It runs as your SSH user, who can already run shell commands directly, so the override grants no access that user did not have.
+
+Only the pull source is checked. `wp db import` does not call `exec()`, so a push target that disables only `exec`, as Hostinger does, imports normally. The import does start the database client through `proc_open()` and `proc_close()`, so on a push target that also disables those, WP-CLI stops the import with a message that names them; ask the provider to allow them for PHP on the command line.
+
+## When it still fails
+
+| Message | Meaning | Fix |
+| --- | --- | --- |
+| `exit status 255` from the export and no compatibility line in preflight | The installed binary predates the workaround. | [Update wp-ssh-bridge](/docs/installation#updating). |
+| `PHP disables exec, …, and this host does not allow re-enabling them for a single command with php -d` | The host enforces `disable_functions` beyond `php.ini`. | Ask the provider to allow those functions for PHP on the command line. There is no safe way around it from the CLI. |
+| `PHP function check failed … could not determine the PHP that runs WP-CLI` | `wp cli info` failed and `wp` is a wrapper script rather than the WP-CLI phar, so the PHP binary it uses is unknown. | Run `wp cli info` on the host to see why it fails. A `wp` that is the WP-CLI phar itself, or a symlink to it, avoids the problem. |
+
+## Checking a host yourself
+
+```bash title="Which functions the command-line PHP disables"
+ssh deploy@example.com 'php -r "echo ini_get(\"disable_functions\"), PHP_EOL;"'
+```
+
+Output that contains `exec` is the case the workaround exists for:
+
+```text
+system, exec, shell_exec, passthru, popen
+```
+
+```bash title="Whether the host accepts a per-command override"
+ssh deploy@example.com 'php -d disable_functions= -r "var_dump(function_exists(\"exec\"));"'
+```
+
+`bool(true)` means the workaround can run on this host.

@@ -20,6 +20,8 @@ type App struct {
 	WorkDir                    string
 	UI                         *CLIUI
 	remoteMariaDBCompatibility map[string]bool
+	remotePHPFunctions         map[string]remotePHPFunctionOverride
+	sshSessions                *sshSessionPool
 }
 
 // newApp builds the runtime wrapper used by main and tests.

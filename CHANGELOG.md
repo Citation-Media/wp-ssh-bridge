@@ -2,6 +2,16 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
+## [0.8.0] - 2026-09-25
+
+### Added
+
+- Share one SSH connection per login for the whole run. The first preflight check opens an OpenSSH control master, and every later check, WP-CLI command, and transfer reuses it, so an SSH agent that asks for approval, such as 1Password's, asks once per login instead of once per command. The connection closes when the command finishes, fails, or is interrupted, and a leftover one closes itself after ten idle minutes. DDEV provider steps run as separate processes and authenticate once each.
+
+### Fixed
+
+- Pull database exports from hosts that disable PHP's `exec()` for the command line, a common shared-hosting hardening, verified on Hostinger. WP-CLI's `wp db export` calls `exec()` directly, so on these hosts it died with exit status 255 and no message. Preflight now detects which of the functions the export needs are disabled and runs only the export with them removed from the host's `disable_functions` list, through a `php -d` startup option of that one process. Nothing on the host changes, and every other disabled function stays disabled. The check never runs code inside WP-CLI, so a `wp-cli.yml` that disables `eval` does not affect it. Preflight stops with a message naming the functions when the host blocks the override. See [Disabled PHP functions](https://wp-ssh-bridge.citation.media/docs/troubleshooting/disabled-php-functions).
+
 ## [0.7.0] - 2026-09-22
 
 ### Added
@@ -66,6 +76,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
+[0.8.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.5.3...v0.6.0
 [0.5.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.4.1...v0.5.0

@@ -47,6 +47,9 @@ Every pull and push starts with checks, so a failure happens before anything is 
 - the remote WordPress path is readable and the remote temp directory is writable
 - WP-CLI on the remote host, when the database is involved
 - the database client layout on the remote host, which is where the [Netcup MariaDB workaround](/docs/troubleshooting/netcup-mariadb) kicks in
+- on the pull source, the PHP functions `wp db export` needs, which is where the [workaround for disabled PHP functions](/docs/troubleshooting/disabled-php-functions) kicks in
+
+The first remote check opens one SSH connection per login that every later step of the run reuses, so an agent that asks for approval asks once. [SSH access](/docs/ssh-access#one-connection-per-run) explains when it closes.
 
 If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the remote temp directory as `wp-ssh-bridge-wp-cli.phar`, marks it executable, and tests it directly and through `php`. Only if that also fails does the run stop.
 
@@ -103,6 +106,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 - A pull never writes to the source host, apart from a temporary dump that is deleted again.
 - Maintenance mode wraps every database import, on both sides, and is lifted even when the run fails.
 - Remote temporary files and the MariaDB compatibility shim are removed on success and by a cleanup trap on failure.
+- PHP functions a host disables are re-enabled only for the `wp db export` process that needs them, never in the host's PHP configuration.
 - `wp-config.php` is never pushed, so a target keeps its own credentials.
 - Push is rejected in wp-env projects, where the local tree would erase the target's plugins and uploads.
 - Clone is rejected in DDEV and wp-env projects, where the import would land in a container database.

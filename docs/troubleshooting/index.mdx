@@ -11,6 +11,7 @@ Start with the exact error text. The CLI names the failing stage and, where it c
 | --- | --- | --- |
 | `Permission denied (publickey)` | Your key is not accepted by the host. | Test `ssh user@host` first. The CLI uses your normal OpenSSH configuration, so if that fails, this will too. |
 | `Host key verification failed` | The host is not in `known_hosts`. | Connect once manually and accept the key. |
+| The SSH agent asks for approval several times in one run | A direct `pull`, `push`, or `clone` authenticates once per login, so repeated prompts there mean the installed binary predates connection sharing. With the DDEV provider, each step such as `db-pull` and `files-pull` is its own process and asks once, which is expected. | For direct runs, [update wp-ssh-bridge](/docs/installation#updating). See [One connection per run](/docs/ssh-access#one-connection-per-run). |
 | Connection times out | Wrong port or a firewall. | Put the port into the destination, `deploy@host:2222`, or add a `Host` block in `~/.ssh/config` and use the alias as the destination. |
 | `the destination already carries the user, host, and port` | A destination and `pull_user`, `pull_host`, or `pull_port` were set in the same place, or split values from an env var or flag were set over a config that uses `pull_destination`. | Remove the split values or move them into the destination. A destination override over a split-form config is fine. |
 | The host is only reachable through a bastion or a client such as Teleport | Plain `ssh host` cannot reach it. | Put `ProxyJump` or the client's `ProxyCommand` into a `Host` block, as that tool documents, and use the alias as the destination. |
@@ -26,6 +27,8 @@ There is no key or password option, by design. Configure access in `~/.ssh/confi
 | --- | --- | --- |
 | Remote `wp` missing or unusable | No WP-CLI on the host. | Handled automatically: a temporary `wp-cli.phar` is downloaded to the remote temp directory and removed afterwards. The run only fails if that phar cannot execute either, directly or through `php`. |
 | `mariadb-dump` not found | A host exposing only the legacy MySQL client names. | Handled automatically. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
+| The export fails with `exit status 255` and no message | The host disables PHP's `exec()`, which `wp db export` needs. | Handled automatically on current versions. See [Disabled PHP functions](/docs/troubleshooting/disabled-php-functions). |
+| `PHP function check failed` or `does not allow re-enabling them` | The export needs a PHP function the host disables, and the CLI cannot confirm or apply the per-command override. | See [When it still fails](/docs/troubleshooting/disabled-php-functions#when-it-still-fails). |
 | Remote temp directory not writable | `/tmp` is restricted. | Point `pull_remote_tmp_dir` or `push_remote_tmp_dir` at a writable directory inside the account. |
 | The import fails halfway | Usually a database size or timeout limit. | Try `--skip-files` to isolate the database step, and check the remote error in full. |
 
