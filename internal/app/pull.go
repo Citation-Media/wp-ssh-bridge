@@ -326,6 +326,16 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 			}
 		}
 	}
+	if clone && preferredLocalURL(projectRoot, cfg) == "" {
+		// A clone moves a live site. Without a configured target URL, the URL constants
+		// would fall back to a development host such as https://localhost, so the clone
+		// keeps the source URL and rewrites only what a domain mapping names.
+		if len(cfg.PullDomainReplacements) == 0 {
+			a.UI.Info("Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.")
+			return nil
+		}
+		return a.replaceSiteURLs(ctx, projectRoot, cfg)
+	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
 		return err
 	}

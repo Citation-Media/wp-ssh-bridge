@@ -883,3 +883,62 @@ func TestURLHelpers(t *testing.T) {
 		t.Fatalf("sqlQuote() = %q", got)
 	}
 }
+
+// postPullClone runs the clone's post-import URL step against a copied wp-config.php
+// and a fake wp that reports the source site URL.
+func postPullClone(t *testing.T, cfg Config) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	wpConfig := "<?php\ndefine( 'DB_NAME', 'target_db' );\n/* That's all, stop editing! Happy publishing. */\n"
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte(wpConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "wp.log")
+	installFakeCommand(t, dir, "wp", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\ncase \"$*\" in *'option get home'*|*'option get siteurl'*) printf 'https://source.example.com\\n' ;; esac\n")
+	stdout := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+	cfg.LocalWPPath = "."
+	adapter := standaloneAdapter{runtime: runtimeContext{Mode: modeStandalone, Root: dir}}
+	if err := app.postPull(context.Background(), adapter, cfg, true); err != nil {
+		t.Fatalf("postPull(clone) error = %v\n%s", err, stdout.String())
+	}
+	contents, err := os.ReadFile(filepath.Join(dir, "wp-config.php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := os.ReadFile(logPath)
+	return string(contents), string(log), stdout.String()
+}
+
+func TestCloneWithoutTargetURLKeepsSourceURL(t *testing.T) {
+	wpConfig, wpLog, stdout := postPullClone(t, Config{})
+	if strings.Contains(wpConfig, "localhost") || strings.Contains(wpConfig, "WP_HOME") {
+		t.Fatalf("a clone without a target URL must not rewrite URL constants:\n%s", wpConfig)
+	}
+	if strings.Contains(wpLog, "search-replace") {
+		t.Fatalf("a clone without a target URL must not rewrite database URLs:\n%s", wpLog)
+	}
+	if !strings.Contains(stdout, "Keeping the source site URL: no target URL is configured") {
+		t.Fatalf("missing notice about the kept source URL:\n%s", stdout)
+	}
+}
+
+func TestCloneWithTargetURLMovesSite(t *testing.T) {
+	wpConfig, wpLog, _ := postPullClone(t, Config{LocalURL: "https://target.example.com"})
+	if strings.Contains(wpConfig, "localhost") || !strings.Contains(wpConfig, "'https://target.example.com'") {
+		t.Fatalf("URL constants should follow the configured target URL:\n%s", wpConfig)
+	}
+	if !strings.Contains(wpLog, "search-replace https://source.example.com https://target.example.com") {
+		t.Fatalf("database URLs should move to the configured target URL:\n%s", wpLog)
+	}
+}
+
+func TestCloneWithDomainMappingDoesNotFallBackToLocalhost(t *testing.T) {
+	wpConfig, wpLog, _ := postPullClone(t, Config{PullDomainReplacements: []DomainReplacement{{Old: "source.example.com", New: "target.example.com"}}})
+	if strings.Contains(wpConfig, "localhost") {
+		t.Fatalf("a domain mapping without a protocol must not write a localhost fallback:\n%s", wpConfig)
+	}
+	if !strings.Contains(wpLog, "search-replace source.example.com target.example.com") {
+		t.Fatalf("the configured mapping should still rewrite the database:\n%s", wpLog)
+	}
+}

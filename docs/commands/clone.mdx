@@ -145,6 +145,22 @@ It removes pre-existing content in the resolved target directory before the sync
 
 `--clean-target` exists only on `clone`. It is rejected on `pull` and `push`.
 
+## The target URL
+
+A clone moves the site to another domain only when you name one. Without a target URL, it keeps the source URL, which is what a migration to a new host under the same domain needs:
+
+```text
+• Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.
+```
+
+| You configure | Database URLs | `WP_HOME`, `WP_SITEURL`, `DOMAIN_CURRENT_SITE` in `wp-config.php` |
+| --- | --- | --- |
+| Nothing | Unchanged, source URL | Unchanged, as copied from the source |
+| A domain mapping such as `source.example.com` to `target.example.com` | Rewritten by the mapping | Unchanged, as copied from the source |
+| `local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`, or a mapping to a complete URL such as `https://target.example.com` | Rewritten to that URL | Set to that URL |
+
+If the copied `wp-config.php` defines `WP_HOME` or `WP_SITEURL` and the domain changes, give the complete target URL with `local_url`, so the constants move with the database.
+
 ## Maintenance mode during the import
 
 When a WordPress site is already installed at the target, the clone puts it into maintenance mode while the database is imported and lifts it again afterwards, including on failure. A migration usually targets an empty directory and a new database instead. There is no site to protect then, and WP-CLI could not activate maintenance mode anyway, so the import runs without it:
@@ -229,7 +245,8 @@ Unless you accept all of that, stay on the local-orchestrated path.
 | `unknown command "clone"` | The binary predates the rename from `migrate`. [Update it](/docs/installation#updating). |
 | `unknown config key "migrate_db_host"` | Old config keys. Rename `migrate_db_*` to `clone_db_*`. |
 | Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
-| The cloned site shows the source domain | No domain mapping was configured, or `--skip-search-replace` was set. Add the mapping and rerun. |
+| The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design; set `local_url` or add the mapping and rerun. |
+| The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
 | Old files from the previous install remain | Clones are additive. Use `--clean-target` if that is what you want. |
 | `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 
