@@ -62,7 +62,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     2. `wp db export` on the source, into the remote temp directory.
     3. Download the dump, then delete it remotely. The cleanup is retried during error handling.
     4. Sync files with rsync `--delete`, minus the exclusions.
-    5. Enable local maintenance mode.
+    5. Enable local maintenance mode, when a WordPress site is already installed locally.
     6. Import the dump locally, then delete the local copy of it.
     7. Disable maintenance mode, including when the import failed.
     8. Rewrite `wp-config.php` URL constants for the local environment.
@@ -73,7 +73,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
   <Tab title="Push">
 
     1. Preflight against the push target.
-    2. Enable maintenance mode on the target for the whole operation.
+    2. Enable maintenance mode on the target for the whole operation, when a WordPress site is already installed there.
     3. Export the local database with WP-CLI.
     4. Upload the dump and import it on the target with remote WP-CLI. The target's current URL is captured beforehand when `push_url` is not set.
     5. Sync files to the remote root, excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and `.wp-ssh/`.
@@ -88,7 +88,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     3. Export and download the source database.
     4. Sync files additively, including uploads and `wp-config.php`.
     5. Write the target database credentials into the copied `wp-config.php`.
-    6. Import the database using those credentials.
+    6. Import the database using those credentials, in maintenance mode when a WordPress site is already installed at the target and `--clean-target` is not set.
     7. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
 
   </Tab>
@@ -104,7 +104,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 
 :::note[The rules that matter]
 - A pull never writes to the source host, apart from a temporary dump that is deleted again.
-- Maintenance mode wraps every database import, on both sides, and is lifted even when the run fails.
+- Maintenance mode wraps every database import into an installed WordPress site, on both sides, and is lifted even when the run fails. A destination without an installed site, such as an empty directory or a new database, has nothing to protect and is imported without it.
 - Remote temporary files and the MariaDB compatibility shim are removed on success and by a cleanup trap on failure.
 - PHP functions a host disables are re-enabled only for the `wp db export` process that needs them, never in the host's PHP configuration.
 - `wp-config.php` is never pushed, so a target keeps its own credentials.

@@ -99,7 +99,7 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
     Local `ssh`, local WP-CLI when the database is involved, SSH access to the target, remote path readable, remote temp directory writable, and remote WP-CLI. Nothing is uploaded until all of it passes.
   </Step>
   <Step title="Maintenance mode on the target">
-    The remote site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`.
+    The remote site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed on the target yet, as on the first push into an empty directory, there is nothing to protect and the push runs without it.
   </Step>
   <Step title="Database export, upload, import">
     Your local database is exported with WP-CLI, uploaded to the remote temp directory, and imported there with remote WP-CLI. Before the import, the target's current URL is captured when `push_url` is not set.

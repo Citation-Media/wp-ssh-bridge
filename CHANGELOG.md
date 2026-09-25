@@ -2,6 +2,12 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
+## [0.8.1] - 2026-09-25
+
+### Fixed
+
+- Clone into an empty target. Maintenance mode needs an installed WordPress site, so a clone into an empty directory or a new database stopped with `Enabling local maintenance mode failed` before the import. The CLI now checks with `wp core is-installed` and imports without maintenance mode when no site is installed yet, and `clone --clean-target` skips it outright because the previous site is being replaced. The same check covers a fresh project's first pull and the first push into an empty target directory.
+
 ## [0.8.0] - 2026-09-25
 
 ### Added
@@ -76,6 +82,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
+[0.8.1]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.5.3...v0.6.0
