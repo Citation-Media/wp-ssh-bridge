@@ -38,7 +38,7 @@ func (a *App) tarPipeFromRemote(ctx context.Context, projectRoot string, target 
 	defer pr.Close()
 	defer pw.Close()
 
-	sshArgList := sshArgv(target, sshTarget(target), remoteCmd)
+	sshArgList := a.sshArgv(target, sshTarget(target), remoteCmd)
 	sshCmd := exec.CommandContext(ctx, sshArgList[0], sshArgList[1:]...)
 	sshCmd.Dir = projectRoot
 	sshCmd.Stdout = pw
@@ -115,7 +115,7 @@ func (a *App) tarPipeToRemote(ctx context.Context, projectRoot string, target Re
 	var tarStderr bytes.Buffer
 	tarCmd.Stderr = &tarStderr
 
-	sshArgList := sshArgv(target, sshTarget(target), remoteCmd)
+	sshArgList := a.sshArgv(target, sshTarget(target), remoteCmd)
 	sshCmd := exec.CommandContext(ctx, sshArgList[0], sshArgList[1:]...)
 	sshCmd.Dir = projectRoot
 	sshCmd.Stdin = pr

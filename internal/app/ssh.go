@@ -23,9 +23,16 @@ func sshTarget(target RemoteTarget) string {
 }
 
 // sshArgv returns the complete ssh command line: the program, the port, the
-// non-interactive options, then extra — usually the destination and the remote
-// command. Callers exec argv[0] with the rest.
-func sshArgv(target RemoteTarget, extra ...string) []string {
+// non-interactive options, the shared-connection options when the login has one,
+// then extra — usually the destination and the remote command. Callers exec argv[0]
+// with the rest.
+func (a *App) sshArgv(target RemoteTarget, extra ...string) []string {
+	return plainSSHArgv(target, append(a.sshSessionArgs(target), extra...)...)
+}
+
+// plainSSHArgv builds the ssh command line without the shared connection, for commands
+// that do not connect (ssh -G) or that open and close the shared connection itself.
+func plainSSHArgv(target RemoteTarget, extra ...string) []string {
 	args := []string{"ssh"}
 	if port := target.port(); port != "" {
 		args = append(args, "-p", port)
@@ -35,26 +42,12 @@ func sshArgv(target RemoteTarget, extra ...string) []string {
 }
 
 // sshCommandString returns the rsync -e value for SSH transport.
-func sshCommandString(target RemoteTarget) string {
-	return strings.Join(sshArgv(target), " ")
-}
-
-// runSSH executes a remote command through ssh without a local shell.
-func (a *App) runSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
-	stdout := bytes.Buffer{}
-	stderr := bytes.Buffer{}
-	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
-	if err == nil {
-		return nil
-	}
-	a.writeCapturedOutput("remote", stdout.String(), false)
-	a.writeCapturedOutput("remote", stderr.String(), true)
-	return err
+func (a *App) sshCommandString(target RemoteTarget) string {
+	return strings.Join(a.sshArgv(target), " ")
 }
 
 func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
+	args := a.sshArgv(target, sshTarget(target), remoteCommand)
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	err := a.runSSHWithWriters(ctx, projectRoot, args, &stdout, &stderr)
@@ -67,7 +60,7 @@ func (a *App) runSSHQuietSuccess(ctx context.Context, projectRoot string, target
 }
 
 func (a *App) runSSHWithFilteredWarnings(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
+	args := a.sshArgv(target, sshTarget(target), remoteCommand)
 	return a.runSSHArgsWithFilteredWarnings(ctx, projectRoot, args)
 }
 
@@ -85,7 +78,7 @@ func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot st
 }
 
 func (a *App) runSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
+	args := a.sshArgv(target, sshTarget(target), remoteCommand)
 	return a.runSSHWithWriters(ctx, projectRoot, args, io.Discard, io.Discard)
 }
 
@@ -110,7 +103,7 @@ func (a *App) writeCapturedOutput(label string, output string, stderr bool) {
 
 // outputSSH executes a remote command and captures stdout for URL and table probes.
 func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
+	args := a.sshArgv(target, sshTarget(target), remoteCommand)
 	stderr := bytes.Buffer{}
 	output, err := a.outputSSHWithStderr(ctx, projectRoot, args, &stderr)
 	if err != nil {
@@ -120,7 +113,7 @@ func (a *App) outputSSH(ctx context.Context, projectRoot string, target RemoteTa
 }
 
 func (a *App) outputSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) (string, error) {
-	args := sshArgv(target, sshTarget(target), remoteCommand)
+	args := a.sshArgv(target, sshTarget(target), remoteCommand)
 	return a.outputSSHWithStderr(ctx, projectRoot, args, io.Discard)
 }
 
@@ -141,7 +134,7 @@ func (a *App) downloadOverSSH(ctx context.Context, projectRoot string, target Re
 	if err != nil {
 		return err
 	}
-	args := sshArgv(target, sshTarget(target), "cat "+shellQuote(remotePath))
+	args := a.sshArgv(target, sshTarget(target), "cat "+shellQuote(remotePath))
 	stderr := bytes.Buffer{}
 	runErr := a.runSSHWithWriters(ctx, projectRoot, args, file, &stderr)
 	closeErr := file.Close()
@@ -159,7 +152,7 @@ func (a *App) uploadOverSSH(ctx context.Context, projectRoot string, target Remo
 		return err
 	}
 	defer file.Close()
-	args := sshArgv(target, sshTarget(target), "cat > "+shellQuote(remotePath))
+	args := a.sshArgv(target, sshTarget(target), "cat > "+shellQuote(remotePath))
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = projectRoot
 	cmd.Stdin = file

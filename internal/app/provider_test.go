@@ -59,7 +59,7 @@ func TestProviderDBPullFallsBackToSCPWhenRemoteRsyncIsMissing(t *testing.T) {
 	rsyncLog := filepath.Join(dir, "rsync.log")
 	// The fallback downloads the dump with "ssh <host> cat <file>", so the fake ssh
 	// records that call and answers the rsync probe with failure.
-	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *'command -v rsync'*) exit 1 ;;\n  *' cat '*) printf '%s\\n' \"$*\" >> "+shellQuote(sshLog)+" ;;\nesac\n")
+	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *'command -v rsync'*) exit 1 ;;\n  *' cat '*) printf '%s\\n' \"$*\" >> "+shellQuote(sshLog)+" ;;\n  *'cli info --format=json'*) printf '{\"php_binary_path\":\"/usr/bin/php\",\"wp_cli_phar_path\":\"phar:///usr/local/bin/wp\"}\\n' ;;\n  *reenable=*) printf 'reenable=\\n' ;;\nesac\n")
 	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+shellQuote(rsyncLog)+"\nexit 1\n")
 
 	stdout := bytes.Buffer{}

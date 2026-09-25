@@ -18,6 +18,12 @@ import (
 // Run executes the CLI and returns a process exit code.
 func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	cli := newApp(stdin, stdout, stderr)
+	// Preflight opens one shared SSH connection per remote login. It stays open for
+	// the whole run and closes when the command finishes, fails, or is interrupted.
+	cli.sshSessions = &sshSessionPool{}
+	stopSignalCleanup := cli.closeSSHSessionsOnSignal()
+	defer stopSignalCleanup()
+	defer cli.closeSSHSessions()
 	if err := cli.run(args); err != nil {
 		fmt.Fprintf(stderr, "Error: %s\n", err)
 		return 1

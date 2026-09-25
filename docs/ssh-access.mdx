@@ -51,6 +51,14 @@ If that line shows the wrong user or host, fix the `Host` block; nothing in the 
 An alias is the cleanest answer to "everyone has a different SSH user". Commit `pull_destination: "prod"`, and let each developer own the `Host prod` block in their `~/.ssh/config`. No inline overrides, no unversioned values.
 :::
 
+## One connection per run
+
+Each run authenticates once per SSH login. The first preflight check opens an OpenSSH control master for the login, and every later check, WP-CLI command, and rsync or tar transfer in the same run goes through it. An agent that asks for approval, such as the one in 1Password, therefore asks once per login instead of once per command.
+
+The connection closes when the command finishes, fails, or is interrupted with Ctrl+C, and its socket directory under `/tmp/wpssh-*` is removed. If the CLI is killed before it can clean up, the connection closes itself after ten idle minutes. A command whose shared connection has gone away opens a connection of its own, so a dropped connection never fails a run by itself.
+
+The CLI sets `ControlMaster`, `ControlPath`, and `ControlPersist` for its own connections, which overrides the same options from `~/.ssh/config` for those connections only. With the DDEV provider, each provider step such as `db-pull` or `files-pull` is a separate process and authenticates once.
+
 ## What the CLI deliberately does not do
 
 - It has no key, passphrase, or password option, and never will. Those live in OpenSSH and in your agent.

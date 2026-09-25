@@ -64,7 +64,7 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP
 			return err
 		}
 	} else {
-		args := append(rsyncArchiveArgs(), "-e", sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
+		args := append(rsyncArchiveArgs(), "-e", a.sshCommandString(target), localDump, sshTarget(target)+":"+remoteDumpGZ)
 		if err := a.runStep("Uploading database export to push target", "Database export uploaded to push target", func() error {
 			return a.runExternal(ctx, projectRoot, "rsync", args...)
 		}); err != nil {
@@ -119,7 +119,7 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config, use
 	for _, exclude := range buildPushRsyncExcludes() {
 		args = append(args, "--exclude="+exclude)
 	}
-	args = append(args, "-e", sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
+	args = append(args, "-e", a.sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
 	return a.runStep("Syncing WordPress files to push target", "Push target files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
 	})
@@ -185,6 +185,11 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 		return nil
 	}
 
+	// Provider post-push runs in its own process without preflight, so it opens the
+	// shared connection for its remote search-replace commands here.
+	if err := a.openSSHSession(ctx, projectRoot, target); err != nil {
+		return fmt.Errorf("push target SSH connection failed: %w", err)
+	}
 	for _, pair := range uniqueReplacementPairs(pairs) {
 		if err := a.runRemoteSearchReplace(ctx, projectRoot, target, pair.old, pair.new); err != nil {
 			return err
@@ -385,13 +390,7 @@ func readPushURLCache(projectRoot string, target RemoteTarget) string {
 		return ""
 	}
 	expected := fmt.Sprintf("%s:%s", sshTarget(target), trimTrailingSlash(target.RemotePath))
-	values := map[string]string{}
-	for _, line := range strings.Split(string(contents), "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if ok {
-			values[key] = value
-		}
-	}
+	values := envMap(strings.Split(string(contents), "\n"))
 	if values["target"] != expected {
 		return ""
 	}

@@ -15,6 +15,7 @@ type preflightRemoteNeeds struct {
 	Target                        RemoteTarget
 	NeedWPCLI                     bool
 	NeedMariaDBCompatibilityCheck bool
+	NeedPHPFunctionCheck          bool
 	NeedPathReadable              bool
 	NeedPathWritable              bool
 	AllowCreatePath               bool
@@ -56,6 +57,7 @@ func (a *App) preflightPull(ctx context.Context, adapter runtimeAdapter, cfg Con
 				Target:                        cfg.pullTarget(),
 				NeedWPCLI:                     !opts.SkipDB,
 				NeedMariaDBCompatibilityCheck: !opts.SkipDB,
+				NeedPHPFunctionCheck:          !opts.SkipDB,
 				NeedPathReadable:              true,
 				NeedTmpWritable:               !opts.SkipDB,
 			},
@@ -167,6 +169,16 @@ func (a *App) runPreflight(ctx context.Context, plan preflightPlan, cfg Config) 
 			a.setRemoteMariaDBCompatibility(remote.Target, needsCompatibility)
 			if needsCompatibility {
 				a.UI.Success("%s MariaDB client compatibility enabled (temporary mysql/mysqldump aliases)", sentenceCase(remote.Label))
+			}
+		}
+		if remote.NeedPHPFunctionCheck {
+			override, err := a.detectRemotePHPFunctionCompatibility(ctx, plan.ProjectRoot, remote.Target, remote.Label)
+			if err != nil {
+				return err
+			}
+			a.setRemotePHPFunctionOverride(remote.Target, override)
+			if override.required() {
+				a.UI.Success("%s PHP function compatibility enabled (%s allowed for WP-CLI db export only)", sentenceCase(remote.Label), strings.Join(override.Reenable, ", "))
 			}
 		}
 	}
@@ -335,6 +347,11 @@ func (a *App) checkLocalWritableDirectory(path string) error {
 
 func (a *App) checkRemoteEnvironment(ctx context.Context, projectRoot string, needs preflightRemoteNeeds) error {
 	return a.runStep("Checking "+needs.Label+" environment", sentenceCase(needs.Label)+" environment verified", func() error {
+		// The first remote check authenticates the shared connection that every later
+		// check and transfer to this login reuses.
+		if err := a.openSSHSession(ctx, projectRoot, needs.Target); err != nil {
+			return fmt.Errorf("fatal: %s SSH connection failed: %w", needs.Label, err)
+		}
 		if err := a.runSSHQuietSuccess(ctx, projectRoot, needs.Target, remotePreflightCommand(needs)); err != nil {
 			return fmt.Errorf("fatal: %s environment check failed: %w", needs.Label, err)
 		}
