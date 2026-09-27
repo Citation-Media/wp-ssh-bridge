@@ -316,9 +316,9 @@ func (a *App) filesImport() {
 // postPull applies local cleanup after a database or file pull.
 func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
 	projectRoot := adapter.Root()
-	// Clone writes the target DB credentials before import (see runPullPipeline),
-	// so it only moves the site URL and keeps blocked plugins and the runtime's
-	// dev-mode post-pull hooks are skipped.
+	// Clone writes the target DB credentials before import (see runPullPipeline), so
+	// afterwards it only moves the site URL: blocked plugins stay, and the runtime's
+	// dev-mode post-pull hooks do not run.
 	if clone {
 		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
 	}
@@ -365,18 +365,19 @@ func (a *App) moveClonedSiteURL(ctx context.Context, projectRoot string, cfg Con
 	return a.applySiteURLReplacements(ctx, projectRoot, cfg, pairs)
 }
 
-// rewriteWPConfigURLDefinesContents applies the URL replacements to the WP_HOME,
-// WP_SITEURL, and DOMAIN_CURRENT_SITE defines that exist. One pass over each define
-// with the longest match first keeps a target that contains the source host, such as
-// example.com.staging.test, from being rewritten a second time.
+// wpConfigURLDefines matches the WP_HOME, WP_SITEURL, and DOMAIN_CURRENT_SITE defines.
+var wpConfigURLDefines = regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"](?:WP_HOME|WP_SITEURL|DOMAIN_CURRENT_SITE)['"]\s*,.*?\);`)
+
+// rewriteWPConfigURLDefinesContents applies the URL replacements to the URL defines that
+// exist. One pass over each define with the longest match first keeps a target that
+// contains the source host, such as example.com.staging.test, from being rewritten a
+// second time.
 func rewriteWPConfigURLDefinesContents(contents string, pairs []replacementPair) string {
 	replacements := make([]string, 0, 2*len(pairs))
 	for _, pair := range pairs {
 		replacements = append(replacements, pair.old, pair.new)
 	}
-	replacer := strings.NewReplacer(replacements...)
-	defines := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"](?:WP_HOME|WP_SITEURL|DOMAIN_CURRENT_SITE)['"]\s*,.*?\);`)
-	return defines.ReplaceAllStringFunc(contents, replacer.Replace)
+	return wpConfigURLDefines.ReplaceAllStringFunc(contents, strings.NewReplacer(replacements...).Replace)
 }
 
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.

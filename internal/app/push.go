@@ -33,7 +33,7 @@ func (a *App) dbPush(ctx context.Context, projectRoot string, cfg Config, useSCP
 		// empty target has none, and continuing would leave the local URLs in the target
 		// database, so stop before anything is uploaded unless something else names it.
 		if remoteURL == "" && !cfg.SkipSearchReplace && len(cfg.PushDomainReplacements) == 0 {
-			return errors.New("fatal: the push target URL is unknown because the target has no installed WordPress site to read it from, so the local URLs would stay in the target database. Set push_url, WP_SSH_PUSH_URL, or --push-url, add a push domain mapping, or pass --skip-search-replace to keep the local URLs")
+			return errors.New("fatal: the push target URL is unknown because it could not be read from the target, which usually has no installed WordPress site yet, so the local URLs would stay in the target database. Set push_url, WP_SSH_PUSH_URL, or --push-url, add a push domain mapping, or pass --skip-search-replace to keep the local URLs")
 		}
 		if remoteURL != "" {
 			if err := writePushURLCache(projectRoot, target, remoteURL); err != nil {
