@@ -98,7 +98,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | Key | Environment variable | Purpose |
 | --- | --- | --- |
 | `local_wp_path` | `WP_SSH_LOCAL_WP_PATH` or `WP_SSH_PULL_LOCAL_WP_PATH` | Local WordPress root, relative to the project. Set it when WordPress lives in `web`, `public`, or similar. |
-| `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for the post-pull search-replace. Only needed to override the detected value. |
+| `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for the post-pull search-replace. Only needed to override the detected value. For `clone`, the target site URL; without it or a pull domain mapping, the clone keeps the source URL. |
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |

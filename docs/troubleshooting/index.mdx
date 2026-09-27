@@ -31,6 +31,7 @@ There is no key or password option, by design. Configure access in `~/.ssh/confi
 | `PHP function check failed` or `does not allow re-enabling them` | The export needs a PHP function the host disables, and the CLI cannot confirm or apply the per-command override. | See [When it still fails](/docs/troubleshooting/disabled-php-functions#when-it-still-fails). |
 | Remote temp directory not writable | `/tmp` is restricted. | Point `pull_remote_tmp_dir` or `push_remote_tmp_dir` at a writable directory inside the account. |
 | The import fails halfway | Usually a database size or timeout limit. | Try `--skip-files` to isolate the database step, and check the remote error in full. |
+| `the push target URL is unknown` | A first push into an empty target has no installed site to read the target URL from. | Set `push_url` or `--push-url`. See [Migrate a site](/docs/migrate-a-site) for a complete move. |
 
 ## Local files
 

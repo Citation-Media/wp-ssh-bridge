@@ -145,6 +145,16 @@ It removes pre-existing content in the resolved target directory before the sync
 
 `--clean-target` exists only on `clone`. It is rejected on `pull` and `push`.
 
+## The target URL
+
+A clone moves the site to another domain only when you name one. Without a target URL, it keeps the source URL, which is what a migration to a new host under the same domain needs:
+
+```text
+• Keeping the source site URL: no target URL is configured. Set local_url, WP_SSH_PULL_LOCAL_URL, or --local-url, or add a pull domain mapping, to move the clone to another domain.
+```
+
+To move the site, name the target with `local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`, or with a domain mapping such as `source.example.com` to `target.example.com`. The database is rewritten, and the `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` constants get the same replacements, but only where the copied `wp-config.php` already defines them. A `WP_SITEURL` in a subdirectory keeps its path, and a site that keeps its URLs in the database gets no new constants.
+
 ## Maintenance mode during the import
 
 When a WordPress site is already installed at the target, the clone puts it into maintenance mode while the database is imported and lifts it again afterwards, including on failure. A migration usually targets an empty directory and a new database instead. There is no site to protect then, and WP-CLI could not activate maintenance mode anyway, so the import runs without it:
@@ -159,67 +169,9 @@ With `--clean-target`, the previous site is replaced, so maintenance mode is ski
 • Skipping local maintenance mode: --clean-target replaces the destination site
 ```
 
-## Migration walkthrough
+## Migrating a site
 
-<Steps>
-  <Step title="Prepare the target database">
-
-    Create the database and user on the new host, and note the credentials. The CLI writes them into `wp-config.php`; it does not create them.
-
-  </Step>
-  <Step title="Configure the domain rewrite">
-
-    If the new site answers under a different domain, add the mapping before you clone, so URLs are rewritten during the import instead of in a second pass.
-
-    ```bash
-    wp-ssh-bridge domains add --old source.example.com --new target.example.com --direction pull
-    ```
-
-  </Step>
-  <Step title="Clone into a working directory">
-
-    ```bash
-    mkdir -p ~/migrations/example && cd ~/migrations/example
-    wp-ssh-bridge clone --silent \
-      --destination deploy@source.example.com \
-      --remote-path /home/source/public_html \
-      --db-host db.example.com \
-      --db-name target_db \
-      --db-user target_user \
-      --db-password "$TARGET_DB_PASSWORD"
-    ```
-
-  </Step>
-  <Step title="Verify the copy">
-
-    ```bash
-    wp config get DB_HOST --path=.
-    wp config get DB_NAME --path=.
-    wp option get home --path=.
-    wp plugin list --path=.
-    ```
-
-    Use a plain `wp` against the target path, not `ddev wp`. The target is a standalone install.
-
-  </Step>
-  <Step title="Move it to the new host">
-
-    Upload the tree to the new host's web root, point DNS at it, and load the site. The database is already imported and `wp-config.php` already has the right credentials.
-
-  </Step>
-</Steps>
-
-## Server-to-server transfers
-
-The implemented path is local-orchestrated: source host, to your machine, to the target tree. A direct server-to-server copy can be faster, but it changes what has to be true:
-
-- the source server needs SSH reachability to the target server
-- the source server needs target credentials or forwarded agent access
-- the target host keys must be trusted from the source server
-- many shared hosts block outbound SSH or ship minimal transfer tooling
-- failures are harder to diagnose with two remote hosts in play
-
-Unless you accept all of that, stay on the local-orchestrated path.
+[Migrate a site](/docs/migrate-a-site) walks through a complete move to a new host, either by running `clone` on the new server, which then connects to the old one, or through your own machine followed by a [`push`](/docs/commands/push). The CLI always runs on the machine that receives the site; the old host never sends to the new one directly.
 
 ## When something fails
 
@@ -229,7 +181,8 @@ Unless you accept all of that, stay on the local-orchestrated path.
 | `unknown command "clone"` | The binary predates the rename from `migrate`. [Update it](/docs/installation#updating). |
 | `unknown config key "migrate_db_host"` | Old config keys. Rename `migrate_db_*` to `clone_db_*`. |
 | Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
-| The cloned site shows the source domain | No domain mapping was configured, or `--skip-search-replace` was set. Add the mapping and rerun. |
+| The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design; set `local_url` or add the mapping and rerun. |
+| The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
 | Old files from the previous install remain | Clones are additive. Use `--clean-target` if that is what you want. |
 | `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 

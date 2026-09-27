@@ -1,0 +1,146 @@
+---
+title: Migrate a site
+description: Move a live WordPress site to a new host with wp-ssh-bridge clone, either directly on the new server or through your own machine.
+sidebar:
+  order: 7
+  icon: truck
+---
+
+A migration copies a live site's database, files, and uploads to a new host and keeps it running there as a real install. [`clone`](/docs/commands/clone) does that. The CLI always runs on the machine that receives the site, which gives you two routes:
+
+| | On the new server | Through your machine |
+| --- | --- | --- |
+| Where the CLI runs | On the new host, which connects to the old one | On your machine, which then pushes to the new host |
+| What it needs | SSH from the new host to the old one | PHP, the MySQL or MariaDB client, and a local database on your machine |
+| Choose it when | The new host allows outbound SSH | The new host cannot reach the old one |
+
+## Before you start
+
+- SSH access to the old host and to the new host. See [SSH access](/docs/ssh-access).
+- An empty database and a user for it on the new host. The CLI writes the credentials into `wp-config.php`, but it does not create them.
+- The target URL. For the same domain on a new host there is nothing to set. For a new domain, note the complete URL, for example `https://new.example.com`.
+- A lower DNS TTL a day ahead, if the domain moves with the site, so the switch takes effect quickly.
+- The old site stays online until the new one is verified.
+
+## On the new server
+
+The new host pulls the site straight from the old one. Nothing passes through your machine except the SSH session.
+
+<Steps>
+  <Step title="Connect with agent forwarding">
+
+    ```bash
+    ssh -A deploy@new.example.com
+    ssh deploy@old.example.com true
+    ```
+
+    `-A` lets the new host use the keys of your local SSH agent, so no private key is copied to a server. An agent that asks for approval, such as the one in 1Password, asks on your machine. The second command must succeed before you go on. If the new host blocks outbound SSH, use the route through your machine instead.
+
+  </Step>
+  <Step title="Install the CLI outside the web root">
+
+    ```bash
+    curl -fsSL https://wp-ssh-bridge.citation.media/install.sh | sh -s -- --dir "$HOME/bin"
+    ```
+
+  </Step>
+  <Step title="Clone into the new web root">
+
+    ```bash
+    mkdir -p ~/migration && cd ~/migration
+    ~/bin/wp-ssh-bridge clone --silent \
+      --local-wp-path /var/www/new-site \
+      --destination deploy@old.example.com \
+      --remote-path /home/old/public_html \
+      --db-host localhost \
+      --db-name new_db \
+      --db-user new_user \
+      --db-password "$NEW_DB_PASSWORD"
+    ```
+
+    Run it from a working directory outside the web root and point `--local-wp-path` at the web root. The CLI stages the complete database dump in its working directory, which must not be reachable over HTTP.
+
+    Add `--local-url https://new.example.com` when the domain changes, and `--clean-target` when the web root holds a host placeholder page that should go. Without a target URL the site keeps its URL, which is right for a move under the same domain.
+
+  </Step>
+  <Step title="Verify the new site">
+
+    ```bash
+    wp option get home --path=/var/www/new-site
+    wp core is-installed --path=/var/www/new-site && echo installed
+    ```
+
+    Then load the site before the DNS switch, through a hosts file entry or the host's preview address, and log in.
+
+  </Step>
+</Steps>
+
+## Through your machine
+
+When the new host cannot open an SSH connection to the old one, clone the site into a local directory first, then push it to the new host. Your machine needs PHP, the `mysql` or `mariadb` client that WP-CLI imports with, and a MySQL or MariaDB server, for example in Docker.
+
+<Steps>
+  <Step title="Clone into a local directory">
+
+    ```bash
+    mkdir -p ~/migrations/example && cd ~/migrations/example
+    wp-ssh-bridge clone --silent \
+      --destination deploy@old.example.com \
+      --remote-path /home/old/public_html \
+      --db-host 127.0.0.1 \
+      --db-name migration \
+      --db-user root \
+      --db-password "$LOCAL_DB_PASSWORD"
+    wp config get table_prefix --path=.
+    ```
+
+    The local copy keeps the source URL. Note the table prefix for the next step.
+
+  </Step>
+  <Step title="Create wp-config.php on the new host">
+
+    A push never overwrites the target's `wp-config.php`, so the new host needs one with the new database and the same table prefix. With WP-CLI on the new host:
+
+    ```bash
+    ssh -t deploy@new.example.com 'mkdir -p /var/www/new-site && cd /var/www/new-site && wp core download && wp config create --dbname=new_db --dbuser=new_user --dbprefix=wp_ --prompt=dbpass'
+    ```
+
+  </Step>
+  <Step title="Push to the new host">
+
+    ```bash
+    wp-ssh-bridge push \
+      --destination deploy@new.example.com \
+      --remote-path /var/www/new-site \
+      --push-url https://new.example.com
+    ```
+
+    The push imports the database, copies the files except `wp-config.php`, and rewrites the source URL to `--push-url`; for the same domain, pass that same URL. On an empty target the push stops before uploading anything unless `--push-url` is set, because there is no installed site to read the target URL from.
+
+  </Step>
+  <Step title="Verify the new site">
+
+    ```bash
+    ssh deploy@new.example.com 'cd /var/www/new-site && wp option get home && wp core is-installed && echo installed'
+    ```
+
+  </Step>
+</Steps>
+
+## After the move
+
+1. Switch DNS to the new host.
+2. Flush caches on the new host and in any CDN.
+3. Resave permalinks with `wp rewrite flush` if pretty URLs return 404.
+4. Send a test mail from the site, since mail plugins and SMTP credentials came along with the copy.
+5. Remove the working directory, `~/migration` on the new server or `~/migrations/example` on your machine. It holds the CLI's scratch files.
+6. Take the old site offline once DNS has settled.
+
+## When something fails
+
+| Symptom | Where to look |
+| --- | --- |
+| The clone or push stops at `Enabling … maintenance mode` | Update the CLI; an empty target is imported without maintenance mode. See [Maintenance mode during the import](/docs/commands/clone#maintenance-mode-during-the-import). |
+| The new site keeps or shows the wrong domain | Set the target URL. See [The target URL](/docs/commands/clone#the-target-url). |
+| The export fails with `exit status 255` and no message | The old host disables PHP functions WP-CLI needs. See [Disabled PHP functions](/docs/troubleshooting/disabled-php-functions). |
+| `Permission denied (publickey)` from the new host | Agent forwarding is not active. Reconnect with `ssh -A` and check `ssh-add -L` on the new host. |
