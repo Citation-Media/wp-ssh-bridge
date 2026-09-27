@@ -65,9 +65,10 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     5. Enable local maintenance mode, when a WordPress site is already installed locally.
     6. Import the dump locally, then delete the local copy of it.
     7. Disable maintenance mode, including when the import failed.
-    8. Rewrite `wp-config.php` URL constants for the local environment.
-    9. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
-    10. Deactivate and delete blocked plugins that are actually installed.
+    8. Pseudonymize users and comments with bulk SQL, unless `skip_anonymize` is set.
+    9. Rewrite `wp-config.php` URL constants for the local environment.
+    10. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
+    11. Deactivate and delete blocked plugins that are actually installed.
 
   </Tab>
   <Tab title="Push">
@@ -77,8 +78,9 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     3. Export the local database with WP-CLI.
     4. Upload the dump and import it on the target with remote WP-CLI. The target's current URL is captured beforehand when `push_url` is not set.
     5. Sync files to the remote root, excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and `.wp-ssh/`.
-    6. Search-replace URLs on the target, including the multisite domain tables.
-    7. Disable maintenance mode.
+    6. Pseudonymize users and comments on the target, only with `--anonymize` or `push_anonymize`.
+    7. Search-replace URLs on the target, including the multisite domain tables.
+    8. Disable maintenance mode.
 
   </Tab>
   <Tab title="Clone">
@@ -89,7 +91,8 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     4. Sync files additively, including uploads and `wp-config.php`.
     5. Write the target database credentials into the copied `wp-config.php`.
     6. Import the database using those credentials, in maintenance mode when a WordPress site is already installed at the target and `--clean-target` is not set.
-    7. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
+    7. Pseudonymize users and comments, only with `--anonymize` or `clone_anonymize`.
+    8. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
 
   </Tab>
 </Tabs>
@@ -111,7 +114,16 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 - Push is rejected in wp-env projects, where the local tree would erase the target's plugins and uploads.
 - Clone is rejected in DDEV and wp-env projects, where the import would land in a container database.
 - Clones are additive unless you explicitly ask for `--clean-target`.
+- Pulls pseudonymize users and comments so real identities do not accumulate on laptops; clone and push leave them alone unless you pass `--anonymize`, because a migration or a production push needs the real accounts.
 :::
+
+## Anonymization
+
+A pulled database is a copy of real people. `wp-ssh-bridge` therefore treats pseudonymization as part of the pull, not as an afterthought: right after the import, and before any URL work, it rewrites the `users` and `usermeta` tables and every per-site `comments` table with a handful of `UPDATE` statements through `wp db query`, wrapped in a transaction. Logins, nicenames, emails, display names, profile fields, WooCommerce billing and shipping addresses, comment authors, comment texts, IP addresses, user agents, login sessions, and Akismet's stored copies of comments are replaced with values derived from the row ID, such as `user-42` and `user-42@example.ddev.site`. Passwords stay, so you can still sign in, now as `user-<ID>`.
+
+Doing it in SQL rather than through the WordPress API matters twice: it is one round trip per table group instead of one per user, and WordPress never runs the hooks that would email "your address was changed" to the real people. Because logins carry a unique key, the rename happens in two passes through temporary names, so an existing account literally called `user-3` cannot collide with the account that is about to become `user-3`. On multisite, super admins are resolved before the rename and written back afterwards, since WordPress stores them by login. The object cache is flushed at the end so a persistent cache does not keep serving the old names.
+
+The email domain is the host of the destination URL, which cannot receive mail for a local copy, and `example.invalid` when no host is known. `anonymize_email_domain` in the config file overrides it; there is deliberately no flag or environment variable for it. `pull` anonymizes by default and `--skip-anonymize` or `skip_anonymize` turns it off; `clone` and `push` need `--anonymize`, `clone_anonymize`, or `push_anonymize`. Every field is listed on the [pull page](/docs/commands/pull#users-and-comments-are-anonymized).
 
 ## URL rewriting
 

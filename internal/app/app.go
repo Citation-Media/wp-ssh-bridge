@@ -97,6 +97,8 @@ Common flags:
   --skip-import              Pull only; download the database without importing it
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
+  --anonymize                Pseudonymize user and comment data after the database import (pull default; opt-in for clone/push)
+  --skip-anonymize           Keep original user and comment data for this run
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
@@ -159,6 +161,7 @@ func (a *App) commandInit(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
+	cfg = opts.applyAnonymizeFor(cfg, anonymizeClone, anonymizePush)
 	if opts.Integration != "" {
 		cfg.Integration = opts.Integration
 	}
@@ -246,6 +249,7 @@ func (a *App) commandClone(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
+	cfg = opts.applyAnonymizeFor(cfg, anonymizeClone)
 	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPullConfig(&cfg); err != nil {
@@ -316,6 +320,7 @@ func (a *App) commandPush(args []string) error {
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
 	cfg = opts.applyGenericAsPush(cfg)
+	cfg = opts.applyAnonymizeFor(cfg, anonymizePush)
 	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPushConfig(&cfg); err != nil {
@@ -455,7 +460,7 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		a.filesImport()
 		return nil
 	case "post-pull":
-		return a.postPull(ctx, adapter, cfg, false)
+		return a.postPull(ctx, adapter, cfg, false, true)
 	case "db-push":
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
@@ -808,7 +813,10 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if !shouldImportDB {
 		cfg.SkipSearchReplace = true
 	}
-	return a.postPull(ctx, adapter, cfg, opts.Clone)
+	if opts.SkipImport && !opts.SkipDB && cfg.anonymizeEnabled(anonymizeOperationForPull(opts.Clone)) {
+		a.UI.Warning("Skipping anonymization because the database was downloaded without import (--skip-import); %s still contains the original user and comment data.", filepath.Join(downloadsDir(root), "db.sql.gz"))
+	}
+	return a.postPull(ctx, adapter, cfg, opts.Clone, shouldImportDB)
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
@@ -884,6 +892,8 @@ type configOptions struct {
 	PluginRemoveFile    string
 	LocalURL            string
 	SkipSearchReplace   bool
+	Anonymize           bool
+	SkipAnonymize       bool
 	CloneDBHost         string
 	CloneDBName         string
 	CloneDBUser         string
@@ -928,6 +938,8 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
+	fs.BoolVar(&opts.Anonymize, "anonymize", false, "pseudonymize user and comment data after the database import (pull default; opt-in for clone and push)")
+	fs.BoolVar(&opts.SkipAnonymize, "skip-anonymize", false, "keep original user and comment data for this run")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
 		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
@@ -941,6 +953,9 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	}
 	if err := opts.rejectSplitAddressWithDestination(name); err != nil {
 		return opts, err
+	}
+	if opts.Anonymize && opts.SkipAnonymize {
+		return opts, errors.New("--anonymize and --skip-anonymize cannot be combined")
 	}
 	return opts, nil
 }
@@ -1084,6 +1099,12 @@ func (opts configOptions) apply(cfg Config) Config {
 	if opts.SkipSearchReplace {
 		cfg.SkipSearchReplace = true
 	}
+	if opts.SkipAnonymize {
+		cfg.SkipAnonymize = true
+	}
+	if opts.Anonymize {
+		cfg.SkipAnonymize = false
+	}
 	if opts.CloneDBHost != "" {
 		cfg.CloneDBHost = opts.CloneDBHost
 	}
@@ -1098,6 +1119,23 @@ func (opts configOptions) apply(cfg Config) Config {
 	}
 	if opts.CloneDBPrefix != "" {
 		cfg.CloneDBPrefix = opts.CloneDBPrefix
+	}
+	return cfg
+}
+
+// applyAnonymizeFor turns --anonymize into the opt-in setting for the given operations.
+// Pull needs none because it anonymizes by default; apply already lifts a configured skip.
+func (opts configOptions) applyAnonymizeFor(cfg Config, operations ...anonymizeOperation) Config {
+	if !opts.Anonymize {
+		return cfg
+	}
+	for _, operation := range operations {
+		switch operation {
+		case anonymizeClone:
+			cfg.CloneAnonymize = true
+		case anonymizePush:
+			cfg.PushAnonymize = true
+		}
 	}
 	return cfg
 }
@@ -1259,6 +1297,10 @@ func (p prompter) fillPullConfigFields(cfg *Config, requireTarget bool) error {
 		return err
 	}
 	cfg.SkipSearchReplace, err = p.promptBool("Skip URL search-replace", cfg.SkipSearchReplace)
+	if err != nil {
+		return err
+	}
+	cfg.SkipAnonymize, err = p.promptBool("Skip automatic anonymization of users and comments on pull", cfg.SkipAnonymize)
 	return err
 }
 
@@ -1314,6 +1356,10 @@ func (p prompter) fillPushConfigFields(cfg *Config, requireTarget bool) error {
 		return err
 	}
 	cfg.SkipSearchReplace, err = p.promptBool("Skip URL search-replace", cfg.SkipSearchReplace)
+	if err != nil {
+		return err
+	}
+	cfg.PushAnonymize, err = p.promptBool("Anonymize users and comments on push", cfg.PushAnonymize)
 	return err
 }
 

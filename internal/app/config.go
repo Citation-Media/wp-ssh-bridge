@@ -33,6 +33,10 @@ type Config struct {
 	PullDomainReplacements []DomainReplacement
 	PushDomainReplacements []DomainReplacement
 	SkipSearchReplace      bool
+	SkipAnonymize          bool
+	CloneAnonymize         bool
+	PushAnonymize          bool
+	AnonymizeEmailDomain   string
 	CloneDBHost            string
 	CloneDBName            string
 	CloneDBUser            string
@@ -85,6 +89,9 @@ func loadConfigPath(path string) (Config, error) {
 	}
 
 	cfg.applyEnv(os.Environ())
+	if err := cfg.validateAnonymize(); err != nil {
+		return cfg, fmt.Errorf("invalid config in %s: %w", path, err)
+	}
 	return cfg, nil
 }
 
@@ -179,6 +186,14 @@ func readConfigFile(path string) (Config, error) {
 			cfg.Integration = value
 		case "skip_search_replace":
 			cfg.SkipSearchReplace = parseBool(value)
+		case "skip_anonymize":
+			cfg.SkipAnonymize = parseBool(value)
+		case "clone_anonymize":
+			cfg.CloneAnonymize = parseBool(value)
+		case "push_anonymize":
+			cfg.PushAnonymize = parseBool(value)
+		case "anonymize_email_domain":
+			cfg.AnonymizeEmailDomain = value
 		case "clone_db_host":
 			cfg.CloneDBHost = value
 		case "clone_db_name":
@@ -315,6 +330,10 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
+	writeBoolValue(&body, "skip_anonymize", cfg.SkipAnonymize, defaults.SkipAnonymize)
+	writeBoolValue(&body, "clone_anonymize", cfg.CloneAnonymize, defaults.CloneAnonymize)
+	writeBoolValue(&body, "push_anonymize", cfg.PushAnonymize, defaults.PushAnonymize)
+	writeStringValue(&body, "anonymize_email_domain", cfg.AnonymizeEmailDomain, defaults.AnonymizeEmailDomain)
 	writeStringValue(&body, "clone_db_host", cfg.CloneDBHost, defaults.CloneDBHost)
 	writeStringValue(&body, "clone_db_name", cfg.CloneDBName, defaults.CloneDBName)
 	writeStringValue(&body, "clone_db_user", cfg.CloneDBUser, defaults.CloneDBUser)
@@ -395,6 +414,15 @@ func (cfg *Config) applyEnv(env []string) {
 	}
 	if value, ok := values["WP_SSH_PUSH_SKIP_SEARCH_REPLACE"]; ok {
 		cfg.SkipSearchReplace = parseBool(value)
+	}
+	if value, ok := values["WP_SSH_SKIP_ANONYMIZE"]; ok {
+		cfg.SkipAnonymize = parseBool(value)
+	}
+	if value, ok := values["WP_SSH_CLONE_ANONYMIZE"]; ok {
+		cfg.CloneAnonymize = parseBool(value)
+	}
+	if value, ok := values["WP_SSH_PUSH_ANONYMIZE"]; ok {
+		cfg.PushAnonymize = parseBool(value)
 	}
 }
 
@@ -641,6 +669,9 @@ func (cfg Config) envArgs() string {
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_CLONE_IMAGES=%t", cfg.CloneImages))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_SKIP_ANONYMIZE=%t", cfg.SkipAnonymize))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_CLONE_ANONYMIZE=%t", cfg.CloneAnonymize))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_ANONYMIZE=%t", cfg.PushAnonymize))
 
 	return strings.Join(pairs, ",")
 }
@@ -724,6 +755,12 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace
+	base.SkipAnonymize = overlay.SkipAnonymize || base.SkipAnonymize
+	base.CloneAnonymize = overlay.CloneAnonymize || base.CloneAnonymize
+	base.PushAnonymize = overlay.PushAnonymize || base.PushAnonymize
+	if overlay.AnonymizeEmailDomain != "" {
+		base.AnonymizeEmailDomain = overlay.AnonymizeEmailDomain
+	}
 	return base
 }
 

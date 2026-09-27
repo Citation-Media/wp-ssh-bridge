@@ -72,7 +72,7 @@ Run this from a DDEV WordPress project to create provider files:
 wp-ssh-bridge init
 ```
 
-The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, and search-replace behavior. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In wp-env and standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
+The interactive setup asks for the pull source, optional push target, local WordPress path, media behavior, search-replace behavior, whether the automatic anonymization of users and comments on pull should be skipped, and whether pushes should anonymize users and comments. In DDEV mode it writes `.ddev/wp-ssh.yaml` and provider files. In wp-env and standalone mode it writes `.wp-ssh.yaml` and does not create DDEV provider files.
 
 When it runs inside a DDEV project, it reads `ddev describe -j` and `.ddev/config.yaml` to default the provider name, local URL, docroot, and temp directories before writing config.
 
@@ -282,6 +282,56 @@ wp-env has no pull/push lifecycle to hook into the way DDEV does, so no provider
 
 Use this deliberately. `afterStart` runs on every start, not only on a fresh environment, so a full pull on each `wp-env start` is usually the wrong trade. Prefer `afterReset`, or keep the pull an explicit command.
 
+## Anonymization
+
+`pull` pseudonymizes the WordPress user records and comments on the destination right after the database import. It runs automatically for every pull, including the native `ddev pull` provider hook, so local copies never keep real user identities or comment data. `clone` and `push` keep the original records unless anonymization is requested explicitly, for example for a clone or push to a staging host. The source database is never modified.
+
+| Operation | Default | Enable | Disable |
+| --- | --- | --- | --- |
+| `pull` | on | - | `skip_anonymize: true`, `WP_SSH_SKIP_ANONYMIZE=true`, or `--skip-anonymize` |
+| `clone` | off | `--anonymize`, `clone_anonymize: true`, or `WP_SSH_CLONE_ANONYMIZE=true` | `--skip-anonymize` |
+| `push` | off | `--anonymize`, `push_anonymize: true`, or `WP_SSH_PUSH_ANONYMIZE=true` | `--skip-anonymize` |
+
+`skip_anonymize` disables anonymization for every command. `--anonymize` and `--skip-anonymize` apply to the current run and cannot be combined. They are the only anonymization flags; the email domain is set in the config file only and has neither a flag nor an environment variable.
+
+The CLI rewrites the destination `users` and `usermeta` tables with bulk SQL through `wp db query` inside one transaction, so WordPress never sends email-change notifications to the original addresses and a failure leaves no half-rewritten records:
+
+| Field | Value after anonymization |
+| --- | --- |
+| `user_login`, `user_nicename` | `user-<ID>` |
+| `user_email` | `user-<ID>@<domain>` |
+| `display_name` | `User <ID>` |
+| `user_url`, `user_activation_key` | empty |
+| `first_name` / `last_name` (usermeta) | `User` / `<ID>` |
+| `nickname` (usermeta) | `user-<ID>` |
+| `description` (usermeta) | `Anonymized user profile.` |
+| WooCommerce `billing_*` / `shipping_*` usermeta | `User` / `<ID>` for names, `Example Street 1`, `Example City`, `12345`, `user-<ID>@<domain>` for `billing_email`; company, second address line, and phone emptied; country and state kept |
+| `session_tokens` (usermeta) | deleted (contains IP addresses and user agents) |
+
+Comments are cleaned in a second step that covers every per-site comments table on multisite. Date, status, type, post, and thread structure stay intact; the author identity and the text are replaced:
+
+| Field | Value after anonymization |
+| --- | --- |
+| `comment_author` | `User <user_id>` for registered authors, `Guest <comment_ID>` otherwise |
+| `comment_author_email` | `user-<user_id>@<domain>` for registered authors, `guest-<comment_ID>@<domain>` otherwise |
+| `comment_author_url`, `comment_author_IP`, `comment_agent` | empty |
+| `comment_content` | `Anonymized comment <comment_ID>.` |
+| `akismet_*` commentmeta | deleted (stores a copy of the submitted comment) |
+
+Passwords are kept, so after an anonymized pull you can sign in as `user-<ID>` with the original password (for example `user-1` for the first administrator) or reset it with `wp user update user-1 --user_pass=...`. On multisite the CLI captures the super admin logins before the rename and rewrites the network `site_admins` option afterwards so network administrators keep their role. Not changed: WooCommerce orders and the customer lookup table, and other plugin-specific personal data.
+
+`<domain>` comes from `anonymize_email_domain` when set. Otherwise the CLI uses the destination site host: the local URL for `pull`, the configured target URL for `clone`, and `push_url` (or the detected target URL) for `push`. When no host can be detected it falls back to `example.invalid`, a reserved domain that can never receive mail. The object cache is flushed afterwards so cached user objects do not keep the original values.
+
+```bash
+wp-ssh-bridge clone --silent --anonymize --destination deploy@source.example.com --remote-path /home/source/public_html --db-host db.example.com --db-name staging_db --db-user staging_user --db-password staging_password
+```
+
+```bash
+ddev pull wp-ssh --environment=WP_SSH_SKIP_ANONYMIZE=true -y
+```
+
+Anonymization runs as the first database change after import, before URL search-replace, so the original records are rewritten even when a later step fails. It is skipped with a warning when `pull --skip-import` downloads the dump without importing it; the dump in the downloads directory then still contains the original user records.
+
 ## WP-CLI Compatibility
 
 Pull and push preflight checks verify WP-CLI before database or file changes start. The CLI checks the local host in standalone mode, the DDEV web container in DDEV mode, the wp-env `cli` container in wp-env mode, the pull source, and the push target when configured.
@@ -338,7 +388,7 @@ Use `--config-file` or `WP_SSH_CONFIG_FILE` to select another YAML file. Relativ
 wp-ssh-bridge pull --silent --config-file .ddev/wp-ssh.production.yaml
 ```
 
-Generated config files only persist values that differ from the CLI/runtime defaults. For example, default values such as `provider: "wp-ssh"`, `pull_remote_tmp_dir: "/tmp"`, `push_remote_tmp_dir: "/tmp"`, `clone_images: false`, and `skip_search_replace: false` are omitted.
+Generated config files only persist values that differ from the CLI/runtime defaults. For example, default values such as `provider: "wp-ssh"`, `pull_remote_tmp_dir: "/tmp"`, `push_remote_tmp_dir: "/tmp"`, `clone_images: false`, `skip_search_replace: false`, and `skip_anonymize: false` are omitted.
 
 | Key | Environment Override | Purpose |
 | --- | --- | --- |
@@ -361,6 +411,10 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `pull_domain_replacements` | - | Optional pull-time old-to-new domain/URL replacements. Prefer protocol-less domains for multisite mappings. |
 | `push_domain_replacements` | - | Optional push-time old-to-new domain/URL replacements. Usually the inverse of pull replacements. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
+| `skip_anonymize` | `WP_SSH_SKIP_ANONYMIZE` | Keep original user and comment data on every command. Pull anonymizes by default. Defaults to `false`. |
+| `clone_anonymize` | `WP_SSH_CLONE_ANONYMIZE` | Anonymize users and comments on the clone target after import. Defaults to `false`. |
+| `push_anonymize` | `WP_SSH_PUSH_ANONYMIZE` | Anonymize users and comments on the push target after import. Defaults to `false`. |
+| `anonymize_email_domain` | - | Email domain for pseudonymized user and comment addresses. Config file only. Defaults to the destination site host, then `example.invalid`. |
 | `clone_db_host` | `WP_SSH_CLONE_DB_HOST` | Target DB host written to `wp-config.php` during `clone`. |
 | `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Target DB name written to `wp-config.php` during `clone`. |
 | `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Target DB user written to `wp-config.php` during `clone`. |
@@ -435,6 +489,7 @@ wp-ssh-bridge provider generate --kind all
 - Rsyncs the upstream WordPress root into the local WordPress root.
 - Excludes `.git`, `.ddev`, DDEV config, `*.log` files at any depth, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled. File pulls use plain rsync `--delete`; WordPress-tree log files are hidden sender-side so they are not copied and are deleted locally without deleting local-only project state such as DDEV's own logs.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
+- Pseudonymizes user logins, emails, names, profile, WooCommerce address data, and comment authors and texts with bulk SQL right after the database import: always on pull, on request for clone and push.
 - Runs URL search-replace through `ddev wp`, including configured multisite domain mappings, protocol and host-only replacement pairs, per-blog search-replace, and multisite `site` and `blogs` domain tables.
 - Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -163,14 +162,30 @@ func (a *App) filesPushTar(ctx context.Context, projectRoot string, cfg Config) 
 	})
 }
 
-// postPush performs remote URL replacement after DDEV finishes db/files push.
+// postPush anonymizes imported users and comments when configured and performs remote URL
+// replacement after DDEV finishes db/files push.
 func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) error {
-	if cfg.SkipSearchReplace {
+	anonymize := cfg.anonymizeEnabled(anonymizePush)
+	if !anonymize && cfg.SkipSearchReplace {
 		return nil
 	}
 	target := cfg.pushTarget()
 	if err := cfg.validatePushRequired(); err != nil {
 		return err
+	}
+	newURL := firstNonEmpty(cfg.PushURL, readPushURLCache(projectRoot, target))
+	if anonymize {
+		// Provider post-push runs in its own process without preflight, so it opens the
+		// shared connection for its remote commands here.
+		if err := a.openSSHSession(ctx, projectRoot, target); err != nil {
+			return fmt.Errorf("push target SSH connection failed: %w", err)
+		}
+		if err := a.anonymizeRemoteData(ctx, projectRoot, target, cfg, newURL); err != nil {
+			return err
+		}
+	}
+	if cfg.SkipSearchReplace {
+		return nil
 	}
 
 	pairs := []replacementPair{}
@@ -179,7 +194,6 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 	}
 
 	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"), localSiteURL(projectRoot, cfg))
-	newURL := firstNonEmpty(cfg.PushURL, readPushURLCache(projectRoot, target))
 	if oldURL != "" && newURL != "" {
 		autoPairs := replacementPairsForURLs(oldURL, newURL)
 		if len(autoPairs) == 0 {
@@ -298,7 +312,7 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 	}
 
 	prefix := strings.TrimSpace(a.remoteWPOutput(ctx, projectRoot, target, "db", "prefix"))
-	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
+	if validateTablePrefix(prefix) != nil {
 		return nil
 	}
 
@@ -326,7 +340,7 @@ func (a *App) remoteIsMultisite(ctx context.Context, projectRoot string, target 
 }
 
 func (a *App) remoteTableExists(ctx context.Context, projectRoot string, target RemoteTarget, table string) bool {
-	output := a.remoteWPOutput(ctx, projectRoot, target, "db", "tables", "--all-tables-with-prefix", "--format=csv")
+	output := a.remoteWPOutput(ctx, projectRoot, target, wpTablesArgs...)
 	return lineSetContains(output, table)
 }
 
@@ -340,11 +354,16 @@ func (a *App) runRemoteWPSilent(ctx context.Context, projectRoot string, target 
 
 // remoteWPOutput captures WP-CLI output from the push target and suppresses failures.
 func (a *App) remoteWPOutput(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {
-	output, err := a.outputSSH(ctx, projectRoot, target, remoteWPCommand(target, args...))
+	output, err := a.remoteWPOutputErr(ctx, projectRoot, target, args...)
 	if err != nil {
 		return ""
 	}
 	return output
+}
+
+// remoteWPOutputErr returns raw remote WP-CLI output for callers that need error handling.
+func (a *App) remoteWPOutputErr(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) (string, error) {
+	return a.outputSSH(ctx, projectRoot, target, remoteWPCommand(target, args...))
 }
 
 func (a *App) remoteWPOutputSilent(ctx context.Context, projectRoot string, target RemoteTarget, args ...string) string {

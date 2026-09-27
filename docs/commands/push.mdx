@@ -104,6 +104,9 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
   <Step title="Database export, upload, import">
     Your local database is exported with WP-CLI, uploaded to the remote temp directory, and imported there with remote WP-CLI. Before the import, the target's current URL is captured when `push_url` is not set.
   </Step>
+  <Step title="Anonymization on the target, if asked">
+    Only with `--anonymize` or `push_anonymize: true`: users and comments on the target are pseudonymized with bulk SQL through remote WP-CLI, exactly as a [pull](/docs/commands/pull#users-and-comments-are-anonymized) does locally, using the target URL host for the addresses. Meant for staging targets; a push keeps real data unless you ask.
+  </Step>
   <Step title="File sync">
     rsync mirrors your local WordPress root onto the remote root, with the exclusions below. Without rsync, the tar-over-SSH fallback is used, which does not remove stale files.
   </Step>
@@ -133,6 +136,8 @@ That list is deliberately short. A push is meant to make the target match your l
 | `--skip-files` | Database only. |
 | `--skip-db` | Files only. |
 | `--skip-search-replace` | Do not rewrite URLs on the target. |
+| `--anonymize` | Pseudonymize users and comments on the target after the import. Off by default; `push_anonymize: true` or `WP_SSH_PUSH_ANONYMIZE=true` turns it on for a target permanently. |
+| `--skip-anonymize` | Keep the real users and comments for this run, overriding `push_anonymize`. |
 | `--skip-maintenance-mode` | Leave the target site reachable during the push. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--push-destination`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--destination`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
@@ -171,8 +176,11 @@ See [Configuration](/docs/configuration#domain-mappings) for the details.
       --push-user deploy \
       --push-host staging.example.com \
       --push-remote-path /home/staging/public_html \
-      --push-url https://staging.example.com
+      --push-url https://staging.example.com \
+      --anonymize
     ```
+
+    `--anonymize` on `init` writes `push_anonymize: true`, so every push from this file pseudonymizes the users and comments on staging. Leave it out of a production config.
 
   </Step>
   <Step title="Dry-run the file side first">

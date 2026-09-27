@@ -314,18 +314,27 @@ func (a *App) filesImport() {
 }
 
 // postPull applies local cleanup after a database or file pull.
-func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
+// dbImported reports whether this run imported a database; anonymization only runs then.
+func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool, dbImported bool) error {
 	projectRoot := adapter.Root()
 	// Clone writes the target DB credentials before import (see runPullPipeline), so
-	// afterwards it only moves the site URL: blocked plugins stay, and the runtime's
-	// dev-mode post-pull hooks do not run.
+	// afterwards it only anonymizes when asked and moves the site URL: blocked plugins
+	// stay, and the runtime's dev-mode post-pull hooks do not run.
 	if clone {
+		if err := a.anonymizeAfterImport(ctx, projectRoot, cfg, anonymizeClone, dbImported); err != nil {
+			return err
+		}
 		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
 	}
 	for _, hook := range adapter.PostPullHooks() {
 		if err := hook(ctx, a, projectRoot, cfg); err != nil {
 			return err
 		}
+	}
+	// Anonymization runs as the first database change after import so the original
+	// user records are rewritten even when a later URL replacement step fails.
+	if err := a.anonymizeAfterImport(ctx, projectRoot, cfg, anonymizePull, dbImported); err != nil {
+		return err
 	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
 		return err
@@ -1007,7 +1016,7 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 	}
 
 	prefix := a.wpOutput(ctx, projectRoot, cfg, "db", "prefix")
-	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
+	if validateTablePrefix(prefix) != nil {
 		return nil
 	}
 
@@ -1036,8 +1045,11 @@ func (a *App) isMultisite(ctx context.Context, projectRoot string, cfg Config) b
 }
 
 // wpTableExists checks table presence through WP-CLI.
+// wpTablesArgs lists every table with the WordPress prefix; csv output puts them on one line.
+var wpTablesArgs = []string{"db", "tables", "--all-tables-with-prefix", "--format=csv"}
+
 func (a *App) wpTableExists(ctx context.Context, projectRoot string, cfg Config, table string) bool {
-	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "tables", "--all-tables-with-prefix", "--format=csv")
+	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, wpTablesArgs...)
 	if err != nil {
 		return false
 	}
@@ -1099,7 +1111,7 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		if err := a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets))), nil
+		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluralNoun(len(targets), "plugin")), nil
 	})
 }
 
@@ -1311,11 +1323,12 @@ func pluginsWithStatus(plugins []string, statuses map[string]string, status stri
 	return matching
 }
 
-func pluginNoun(count int) string {
+// pluralNoun appends an s for counts other than one.
+func pluralNoun(count int, singular string) string {
 	if count == 1 {
-		return "plugin"
+		return singular
 	}
-	return "plugins"
+	return singular + "s"
 }
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {
@@ -1447,13 +1460,29 @@ func flushPrefixed(writer io.Writer) {
 	}
 }
 
+// lineSetContains matches whole entries in WP-CLI list output. `wp db tables --format=csv`
+// prints all names comma-separated on one line, so commas separate entries as well.
 func lineSetContains(output string, value string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.TrimSpace(line) == value {
+	for _, entry := range parseTableList(output) {
+		if entry == value {
 			return true
 		}
 	}
 	return false
+}
+
+// parseTableList splits `wp db tables` output in both list (newline) and csv (comma) formats.
+func parseTableList(output string) []string {
+	entries := strings.FieldsFunc(output, func(char rune) bool {
+		return char == '\n' || char == '\r' || char == ','
+	})
+	tables := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			tables = append(tables, entry)
+		}
+	}
+	return tables
 }
 
 func isTruthyConfigValue(value string) bool {

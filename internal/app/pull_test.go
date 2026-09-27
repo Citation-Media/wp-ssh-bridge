@@ -657,6 +657,13 @@ func TestLineSetContains(t *testing.T) {
 	if lineSetContains(output, "wp_site_meta") {
 		t.Fatal("lineSetContains() matched partial table name")
 	}
+	// `wp db tables --format=csv` prints every table comma-separated on one line.
+	if !lineSetContains("wp_options,wp_site,wp_blogs\n", "wp_site") {
+		t.Fatal("lineSetContains() missed table in csv output")
+	}
+	if lineSetContains("wp_options,wp_site,wp_blogs\n", "wp_sit") {
+		t.Fatal("lineSetContains() matched partial table name in csv output")
+	}
 }
 
 func TestReplaceSiteURLsWarnsWhenURLDetectionFails(t *testing.T) {
@@ -898,7 +905,7 @@ func postPullClone(t *testing.T, cfg Config, wpConfig string) (string, string, s
 	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
 	cfg.LocalWPPath = "."
 	adapter := standaloneAdapter{runtime: runtimeContext{Mode: modeStandalone, Root: dir}}
-	if err := app.postPull(context.Background(), adapter, cfg, true); err != nil {
+	if err := app.postPull(context.Background(), adapter, cfg, true, true); err != nil {
 		t.Fatalf("postPull(clone) error = %v\n%s", err, stdout.String())
 	}
 	contents, err := os.ReadFile(filepath.Join(dir, "wp-config.php"))

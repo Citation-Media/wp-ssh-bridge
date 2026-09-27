@@ -25,6 +25,7 @@ Clone pulls:
 - keep blocked plugins and do not run blocked-plugin cleanup
 - skip DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
 - still run configured URL search-replace unless `--skip-search-replace` is set
+- keep the original user and comment data unless `--anonymize`, `clone_anonymize: true`, or `WP_SSH_CLONE_ANONYMIZE=true` is set; then users and comments are pseudonymized on the target right after the import (see `references/general-usage.md`), with the email domain defaulting to the target URL host, then `example.invalid`
 - be additive by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
 
 Clone mode is a top-level `clone` command. Do not recommend `pull --clone` or `push --clone`.
@@ -67,7 +68,7 @@ wp-ssh-bridge clone --silent \
   --db-password target_password
 ```
 
-Add `--db-prefix wp_` only when the target table prefix should differ from the copied source `wp-config.php`.
+Add `--db-prefix wp_` only when the target table prefix should differ from the copied source `wp-config.php`. Add `--anonymize` for staging-style targets that must not keep real user identities; never for a production target.
 
 ## Emptying The Target (`--clean-target`)
 
@@ -141,6 +142,12 @@ wp config get DB_HOST --path=/path/to/wordpress
 wp config get DB_NAME --path=/path/to/wordpress
 wp option get home --path=/path/to/wordpress
 wp plugin list --path=/path/to/wordpress
+```
+
+When the clone ran with `--anonymize`, also confirm the target users are pseudonymized:
+
+```bash
+wp user list --fields=ID,user_email,display_name --path=/path/to/wordpress
 ```
 
 The target is a standalone WordPress install, so verify with a direct `wp` against the target path (not `ddev wp`).

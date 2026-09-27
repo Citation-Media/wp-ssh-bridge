@@ -94,7 +94,7 @@ When the new host cannot open an SSH connection to the old one, clone the site i
     wp config get table_prefix --path=.
     ```
 
-    The local copy keeps the source URL. Note the table prefix for the next step.
+    The local copy keeps the source URL and, like every clone, the real users and comments; a migration needs them. Add `--anonymize` only when the result is a staging copy. Note the table prefix for the next step.
 
   </Step>
   <Step title="Create wp-config.php on the new host">

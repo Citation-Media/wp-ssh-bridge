@@ -46,6 +46,12 @@ clone_images: false                            # include wp-content/uploads on p
 skip_search_replace: false
 plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
 
+# --- Anonymization of users and comments ---
+skip_anonymize: false                          # pull anonymizes by default; true keeps real data everywhere
+clone_anonymize: false                         # opt in for clone targets such as staging
+push_anonymize: false                          # opt in for push targets such as staging
+anonymize_email_domain: "example.ddev.site"    # optional; defaults to the destination site host
+
 # --- Domain rewrites, both directions ---
 pull_domain_replacements:
   - old: "example.com"
@@ -102,6 +108,17 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |
+
+### Anonymization
+
+`pull` pseudonymizes users and comments after every database import; `clone` and `push` only when asked. [Pull](/docs/commands/pull#users-and-comments-are-anonymized) lists exactly which fields change.
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `skip_anonymize` | `WP_SSH_SKIP_ANONYMIZE` | Keep the original user and comment data on every command. Defaults to `false`, so a pull anonymizes. |
+| `clone_anonymize` | `WP_SSH_CLONE_ANONYMIZE` | Anonymize the clone target after the import. Defaults to `false`. |
+| `push_anonymize` | `WP_SSH_PUSH_ANONYMIZE` | Anonymize the push target after the import. Defaults to `false`. Never enable it for a production target. |
+| `anonymize_email_domain` | — | Domain of the pseudonymized addresses, `user-<ID>@<domain>`. Config file only, by design: it is a project decision, not a per-run one. Defaults to the destination site host, then `example.invalid`. |
 
 ### Clone target database
 
@@ -351,6 +368,8 @@ These apply to `pull`, `push`, and `clone` unless noted.
 | `--skip-import` | Pull only. Download the database without importing it. |
 | `--clone-images` | Include `wp-content/uploads` during a pull. |
 | `--skip-search-replace` | Skip URL replacement. |
+| `--anonymize` | Pseudonymize users and comments on the destination. Pull does this by default; on `clone` and `push` the flag opts in for this run, on `init` it sets `clone_anonymize` and `push_anonymize`. |
+| `--skip-anonymize` | Keep the original user and comment data for this run. Cannot be combined with `--anonymize`. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during write operations. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--clean-target` | Clone only. Remove pre-existing target content before syncing. Destructive. |

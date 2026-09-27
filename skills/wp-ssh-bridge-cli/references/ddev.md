@@ -47,6 +47,7 @@ The CLI handles DDEV detection and provider command wiring. Focus on values DDEV
 - Local WordPress path only when the DDEV docroot is not enough.
 - Whether uploads/media should be cloned during pull.
 - Whether URL search-replace should be skipped.
+- Whether the automatic anonymization of users and comments on pull should be skipped (`skip_anonymize: true` in `.ddev/wp-ssh.yaml`, or `WP_SSH_SKIP_ANONYMIZE=true` inline) and whether pushes to a staging target should anonymize users and comments (`push_anonymize: true` or `WP_SSH_PUSH_ANONYMIZE=true`). The DDEV post-pull and post-push hooks apply it, so it also works with native `ddev pull` and `ddev push`.
 - Multisite/custom domain mappings, especially when production hostnames must resolve locally.
 - A project-specific blocked-plugin list when embedded defaults are not enough.
 
@@ -109,6 +110,18 @@ For push overrides:
 ddev push wp-ssh \
   --environment=WP_SSH_PUSH_USER=deploy,WP_SSH_PUSH_HOST=staging.example.com,WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html,WP_SSH_PUSH_URL=https://staging.example.com \
   -y
+```
+
+Pulls anonymize users and comments by default. For a one-off pull that keeps the original data:
+
+```bash
+ddev pull wp-ssh --environment=WP_SSH_SKIP_ANONYMIZE=true -y
+```
+
+For a one-off anonymized push to a staging target:
+
+```bash
+ddev push wp-ssh --environment=WP_SSH_PUSH_ANONYMIZE=true -y
 ```
 
 Do not suggest `ddev pull wp-ssh --destination deploy@host` or `--user`; those flags belong to direct `wp-ssh-bridge pull`, not native DDEV pull. Use `--environment=WP_SSH_PULL_DESTINATION=...` there.
@@ -177,6 +190,19 @@ After a successful pull:
 ```bash
 ddev wp option get home
 ddev wp plugin list
+```
+
+The pull output shows `User records anonymized (user-<ID>@<domain>)` and `Comment records anonymized in N tables`. Confirm with:
+
+```bash
+ddev wp user list --fields=ID,user_login,user_email,display_name
+ddev wp comment list --fields=comment_ID,comment_author,comment_author_email --number=5
+```
+
+Sign in as `user-<ID>` (for example `user-1`) with the original password, or reset it:
+
+```bash
+ddev wp user update user-1 --user_pass=local-password
 ```
 
 After a push, ask the user to verify the target site in a browser. If they report a wrong target URL or failed push, show the exact error or wrong value and ask whether they want to debug before suggesting the next step.

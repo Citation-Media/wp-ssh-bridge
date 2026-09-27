@@ -5,7 +5,7 @@ sidebar:
   icon: download
 ---
 
-`pull` brings the remote site to you. It exports the source database with WP-CLI, downloads it, syncs the files, imports the database locally, rewrites every URL for your environment, and removes plugins that only belong on production.
+`pull` brings the remote site to you. It exports the source database with WP-CLI, downloads it, syncs the files, imports the database locally, pseudonymizes the users and comments, rewrites every URL for your environment, and removes plugins that only belong on production.
 
 It is the command you run before you start working, and again whenever the local copy has gone stale.
 
@@ -115,6 +115,9 @@ A pull never modifies the remote site. It creates a temporary database dump in t
   <Step title="Maintenance mode and import">
     The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
   </Step>
+  <Step title="Anonymization">
+    Users and comments are pseudonymized with bulk SQL, as the first change after the import so the real identities are gone even if a later step fails. See [below](#users-and-comments-are-anonymized) for the exact fields, and `--skip-anonymize` to keep them.
+  </Step>
   <Step title="URL rewrites">
     A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database.
   </Step>
@@ -144,6 +147,55 @@ blocked plugin directories         from the block list
 
 `wp-config.php` is pulled and sanitised in DDEV mode, and preserved in Generic and wp-env mode, where the local file already carries working database credentials.
 
+## Users and comments are anonymized
+
+A local copy rarely needs real names, addresses, or email addresses, and a laptop is the wrong place to keep them. So every pull pseudonymizes the user records and comments right after the import. The source database is never touched; only your local copy changes.
+
+The rewrite is plain SQL against the `users`, `usermeta`, and every per-site `comments` table, run in one transaction per table group, so WordPress sends no "your email was changed" notifications to the real addresses and a failure leaves nothing half-rewritten.
+
+| What | Becomes |
+| --- | --- |
+| Login and nicename | `user-<ID>` |
+| Email | `user-<ID>@<domain>` |
+| Display name | `User <ID>` |
+| First and last name, nickname, biography | `User`, `<ID>`, `user-<ID>`, `Anonymized user profile.` |
+| Website, activation key, login sessions | Cleared |
+| WooCommerce billing and shipping address | `User <ID>`, `Example Street 1`, `Example City`, `12345`; company, second address line, and phone cleared; country and state kept |
+| Comment author name and email | `User <user_id>` for registered authors, `Guest <comment_ID>` for everyone else |
+| Comment URL, IP address, user agent | Cleared |
+| Comment text | `Anonymized comment <comment_ID>.` |
+| Akismet comment meta | Deleted, because it stores a copy of the submitted comment |
+
+`<domain>` is the host of your local site URL, for example `example.ddev.site`, so the addresses can never reach a real inbox. Set `anonymize_email_domain` in the config file to choose another; without any host it falls back to the reserved `example.invalid`. Passwords are kept, so you sign in as `user-1` with the first administrator's original password, or set a new one:
+
+<Tabs inline param="integration" syncKey="integration">
+  <Tab title="Generic">
+
+    ```bash
+    wp user update user-1 --user_pass=local-password
+    ```
+
+  </Tab>
+  <Tab title="DDEV">
+
+    ```bash
+    ddev wp user update user-1 --user_pass=local-password
+    ```
+
+  </Tab>
+  <Tab title="wp-env">
+
+    ```bash
+    npx wp-env run cli wp user update user-1 --user_pass=local-password
+    ```
+
+  </Tab>
+</Tabs>
+
+On multisite, super admins are looked up before the rename and written back to the network's `site_admins` option afterwards, so they keep their role under the new logins. Comment dates, statuses, types, and threads are untouched, as is everything else in the database: WooCommerce orders, the customer lookup table, and other plugin data still hold real people.
+
+Keep the real data for one run with `--skip-anonymize`, or permanently with `skip_anonymize: true` (`WP_SSH_SKIP_ANONYMIZE=true` for native `ddev pull`). With `--skip-import` nothing is imported, so nothing is anonymized either; the CLI warns that the downloaded dump still contains the original records.
+
 ## Flags
 
 | Flag | Effect |
@@ -154,6 +206,7 @@ blocked plugin directories         from the block list
 | `--skip-import` | Downloads the database without importing it. Search-replace is skipped too. |
 | `--clone-images` | Include `wp-content/uploads`. Off by default because media is usually the bulk of a site. |
 | `--skip-search-replace` | Leave URLs untouched after the import. |
+| `--skip-anonymize` | Keep the real users and comments. Anonymization is on by default for pulls. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
@@ -181,6 +234,10 @@ wp-ssh-bridge pull --silent --config-file .wp-ssh.staging.yaml
 wp-ssh-bridge pull --silent --skip-files --skip-import
 ```
 
+```bash title="Keep the real users and comments this once"
+wp-ssh-bridge pull --silent --skip-anonymize
+```
+
 ## Verify
 
 <Tabs inline param="integration" syncKey="integration">
@@ -189,6 +246,7 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
     ```bash
     wp option get home
     wp plugin list
+    wp user list --fields=ID,user_login,user_email
     ```
 
   </Tab>
@@ -197,6 +255,7 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
     ```bash
     ddev wp option get home
     ddev wp plugin list
+    ddev wp user list --fields=ID,user_login,user_email
     ```
 
   </Tab>
@@ -205,12 +264,13 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
     ```bash
     npx wp-env run cli wp option get home
     npx wp-env run cli wp plugin list
+    npx wp-env run cli wp user list --fields=ID,user_login,user_email
     ```
 
   </Tab>
 </Tabs>
 
-The home URL should be local, and production-only plugins should be gone.
+The home URL should be local, production-only plugins should be gone, and every user should be a `user-<ID>` with a `user-<ID>@…` address. The pull output reports `User records anonymized (user-<ID>@<domain>)` and `Comment records anonymized in N tables`.
 
 ## When something fails
 
@@ -220,6 +280,8 @@ The home URL should be local, and production-only plugins should be gone.
 | Remote path errors | `pull_remote_path` must be absolute and contain `wp-config.php`. |
 | `mariadb-dump` not found | A host that ships only the legacy MySQL client names. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
 | Local files not writable | Fix ownership on the local WordPress directory, then run again. The error names the exact path. |
+| My usual username no longer logs in | Expected after a pull: logins are now `user-<ID>`. Sign in as `user-1` with the unchanged password, or set one with `wp user update user-1 --user_pass=…`. Pull with `--skip-anonymize` to keep the real accounts. |
+| `Skipping anonymization because the database was downloaded without import` | `--skip-import` leaves the dump unimported, so it still holds the real user data. Import it yourself, or pull without `--skip-import`. |
 | Warning about stale files | The tar fallback is in use because rsync is missing on one side. Install rsync, or accept that removed files stay behind. |
 
 More in [Troubleshooting](/docs/troubleshooting).

@@ -95,6 +95,19 @@ npm install --save-dev @wordpress/env
 | Redirects to production on every request | A hard-coded constant in `wp-config.php` survived. | The post-pull step rewrites `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE`. If a plugin or a `sunrise.php` sets its own, handle that file by hand. |
 | The pushed target shows the local domain | `push_url` was missing and the target's home URL was unusable. | Set `push_url`, then rerun the push with `--skip-files`. |
 
+## Users and comments after a pull
+
+Pulls pseudonymize users and comments by default; see [the pull page](/docs/commands/pull#users-and-comments-are-anonymized) for what changes.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| My usual username or email no longer logs in | Logins are now `user-<ID>`; passwords are unchanged. | Sign in as `user-1` with the original password, or run `wp user update user-1 --user_pass=…`. Use `--skip-anonymize` or `skip_anonymize: true` to keep the real accounts. |
+| `Skipping anonymization because the database was downloaded without import` | `--skip-import` leaves the dump unimported, so nothing could be rewritten. | Import the dump yourself and anonymize by hand, or pull without `--skip-import`. |
+| A multisite super admin lost the network role | The install predates the super admin restore, or `wp super-admin list` failed during the pull. | Re-grant it: `wp super-admin add user-<ID>`. Update the binary. |
+| `anonymize_email_domain must be a hostname` | The config value contains characters other than letters, digits, dots, and hyphens. | Set a plain host such as `example.ddev.site`, or remove the key to use the destination host. |
+| `--anonymize and --skip-anonymize cannot be combined` | Both flags were passed. | Pass one of them. |
+| Staging still shows real users after a push or clone | Push and clone keep real data unless asked. | Pass `--anonymize`, or set `push_anonymize: true` or `clone_anonymize: true` in that target's config. |
+
 ## Command names after the rename
 
 The `migrate` command became [`clone`](/docs/commands/clone).

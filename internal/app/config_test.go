@@ -38,12 +38,16 @@ func TestWriteReadConfigFile(t *testing.T) {
 			{Old: "site.ddev.site", New: "example.com"},
 			{Old: "shop.ddev.site", New: "shop.example.com"},
 		},
-		SkipSearchReplace: true,
-		CloneDBHost:       "db.example.com",
-		CloneDBName:       "target_db",
-		CloneDBUser:       "target_user",
-		CloneDBPassword:   "target_pass",
-		CloneDBPrefix:     "wp_",
+		SkipSearchReplace:    true,
+		SkipAnonymize:        true,
+		CloneAnonymize:       true,
+		PushAnonymize:        true,
+		AnonymizeEmailDomain: "dev.example.test",
+		CloneDBHost:          "db.example.com",
+		CloneDBName:          "target_db",
+		CloneDBUser:          "target_user",
+		CloneDBPassword:      "target_pass",
+		CloneDBPrefix:        "wp_",
 	}
 
 	if err := writeConfigFile(path, cfg, defaultConfig()); err != nil {
@@ -71,6 +75,10 @@ func TestWriteReadConfigFile(t *testing.T) {
 		"clone_db_user: \"target_user\"",
 		"clone_db_password: \"target_pass\"",
 		"clone_db_prefix: \"wp_\"",
+		"skip_anonymize: true",
+		"clone_anonymize: true",
+		"push_anonymize: true",
+		"anonymize_email_domain: \"dev.example.test\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("written config missing %q:\n%s", want, text)
@@ -151,6 +159,10 @@ func TestWriteConfigFileOmitsDefaultValues(t *testing.T) {
 		"push_remote_tmp_dir:",
 		"clone_images:",
 		"skip_search_replace:",
+		"skip_anonymize:",
+		"clone_anonymize:",
+		"push_anonymize:",
+		"anonymize_email_domain:",
 	} {
 		if strings.Contains(text, omitted) {
 			t.Fatalf("default key %q should be omitted:\n%s", omitted, text)
@@ -296,6 +308,9 @@ func TestEnvArgsIncludePullAndPushDefaults(t *testing.T) {
 		"WP_SSH_PUSH_URL=https://staging.example.com",
 		"WP_SSH_LOCAL_WP_PATH=public",
 		"WP_SSH_PUSH_SKIP_SEARCH_REPLACE=true",
+		"WP_SSH_SKIP_ANONYMIZE=false",
+		"WP_SSH_CLONE_ANONYMIZE=false",
+		"WP_SSH_PUSH_ANONYMIZE=false",
 		"WP_SSH_CLONE_DB_HOST=db.example.com",
 		"WP_SSH_CLONE_DB_NAME=target",
 	} {
@@ -569,5 +584,60 @@ func TestEnvDestinationReplacesTheSplitAddressFromTheFile(t *testing.T) {
 	same.applyEnv([]string{"WP_SSH_PULL_DESTINATION=prod", "WP_SSH_PULL_USER=ci"})
 	if err := same.validatePullRequired(); err == nil {
 		t.Fatal("a destination and a split value in the environment should still conflict")
+	}
+}
+
+func TestApplyEnvSupportsAnonymize(t *testing.T) {
+	t.Parallel()
+	cfg := Config{}
+	cfg.applyEnv([]string{
+		"WP_SSH_SKIP_ANONYMIZE=yes",
+		"WP_SSH_CLONE_ANONYMIZE=true",
+		"WP_SSH_PUSH_ANONYMIZE=1",
+		"WP_SSH_ANONYMIZE_EMAIL_DOMAIN=dev.example.test",
+	})
+	if !cfg.SkipAnonymize || !cfg.CloneAnonymize || !cfg.PushAnonymize {
+		t.Fatalf("anonymize env values not applied: %#v", cfg)
+	}
+	// The email domain is a config-file-only detail and must not be settable from the environment.
+	if cfg.AnonymizeEmailDomain != "" {
+		t.Fatalf("anonymize_email_domain unexpectedly applied from env: %#v", cfg)
+	}
+	if strings.Contains((Config{AnonymizeEmailDomain: "dev.example.test"}).envArgs(), "ANONYMIZE_EMAIL_DOMAIN") {
+		t.Fatal("envArgs() exported anonymize_email_domain")
+	}
+
+	cfg = Config{PushAnonymize: true, SkipAnonymize: true}
+	cfg.applyEnv([]string{"WP_SSH_PUSH_ANONYMIZE=false", "WP_SSH_SKIP_ANONYMIZE=false"})
+	if cfg.PushAnonymize || cfg.SkipAnonymize {
+		t.Fatalf("false env values did not disable configured values: %#v", cfg)
+	}
+
+	merged := mergeConfig(defaultConfig(), Config{SkipAnonymize: true, CloneAnonymize: true, PushAnonymize: true, AnonymizeEmailDomain: "dev.example.test"})
+	if !merged.SkipAnonymize || !merged.CloneAnonymize || !merged.PushAnonymize || merged.AnonymizeEmailDomain != "dev.example.test" {
+		t.Fatalf("mergeConfig() dropped anonymize values: %#v", merged)
+	}
+}
+
+func TestAnonymizeEnabledDefaultsPerOperation(t *testing.T) {
+	t.Parallel()
+	cfg := Config{}
+	if !cfg.anonymizeEnabled(anonymizePull) {
+		t.Fatal("pull should anonymize by default")
+	}
+	if cfg.anonymizeEnabled(anonymizeClone) || cfg.anonymizeEnabled(anonymizePush) {
+		t.Fatal("clone and push must not anonymize without explicit opt-in")
+	}
+
+	cfg = Config{CloneAnonymize: true, PushAnonymize: true}
+	if !cfg.anonymizeEnabled(anonymizeClone) || !cfg.anonymizeEnabled(anonymizePush) {
+		t.Fatal("explicit clone/push opt-in ignored")
+	}
+
+	cfg.SkipAnonymize = true
+	for _, operation := range []anonymizeOperation{anonymizePull, anonymizeClone, anonymizePush} {
+		if cfg.anonymizeEnabled(operation) {
+			t.Fatalf("skip_anonymize did not disable %s", operation)
+		}
 	}
 }

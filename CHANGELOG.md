@@ -6,9 +6,17 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Added
 
+- Add user and comment anonymization for pull, clone, and push, including the DDEV post-pull/post-push hooks. Right after the database import the destination user records are pseudonymized with bulk SQL in one transaction: `user_login` and `user_nicename` become `user-<ID>`, `user_email` becomes `user-<ID>@<domain>`, `display_name` becomes `User <ID>`, `user_url` and `user_activation_key` are cleared, the `first_name`, `last_name`, `nickname`, and `description` meta get generic placeholders, WooCommerce `billing_*`/`shipping_*` address meta is replaced with example values, and `session_tokens` meta is deleted. Multisite super admins are re-granted after the login rename. Comments are anonymized as well in every per-site comments table: `comment_author`, `comment_author_email`, URL, IP address, and user agent are pseudonymized, `comment_content` becomes `Anonymized comment <comment_ID>.`, and `akismet_*` commentmeta is deleted.
+- Add `skip_anonymize` (`WP_SSH_SKIP_ANONYMIZE`, `--skip-anonymize`), `clone_anonymize` (`WP_SSH_CLONE_ANONYMIZE`), `push_anonymize` (`WP_SSH_PUSH_ANONYMIZE`), the `--anonymize` flag for clone and push, and the config-file-only `anonymize_email_domain`. The email domain defaults to the destination site host and falls back to `example.invalid`.
 - Document how to migrate a site: running `clone` on the new server, which connects to the old one with a forwarded SSH agent, or cloning through your own machine and pushing to the new host. See [Migrate a site](https://wp-ssh-bridge.citation.media/docs/migrate-a-site).
 
+### Changed
+
+- `pull` now anonymizes users and comments by default. Set `skip_anonymize: true` or pass `--skip-anonymize` to keep the original records. After an anonymized pull, sign in as `user-<ID>` with the unchanged password. `clone` and `push` only anonymize when explicitly requested.
+
 ### Fixed
+
+- Parse `wp db tables --format=csv` output correctly when checking for multisite `site` and `blogs` tables. WP-CLI prints the names comma-separated on one line, so the domain replacement for those tables was silently skipped.
 
 - Stop a push into a target without an installed site before anything is uploaded when no target URL is known. The target URL is read from the site the import replaces, so a first push into an empty directory found none, imported anyway, and left the local URLs in the target database. The push now asks for `push_url`, `WP_SSH_PUSH_URL`, or `--push-url` unless a push domain mapping or `--skip-search-replace` covers the URLs.
 

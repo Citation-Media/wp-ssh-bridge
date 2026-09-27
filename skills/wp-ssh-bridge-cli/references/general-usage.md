@@ -72,6 +72,8 @@ push_url: "https://staging.example.com"
 local_wp_path: "."
 clone_images: false
 skip_search_replace: false
+skip_anonymize: false
+push_anonymize: false
 
 # Optional. Pins the runtime instead of detecting it: ddev, wp-env, or standalone.
 # Also available as --integration and WP_SSH_INTEGRATION. A pin is strict and fails
@@ -215,6 +217,8 @@ Use these only when the user needs a partial or special operation:
 --skip-import            pull only; download DB without importing
 --clone-images           include wp-content/uploads during pull
 --skip-search-replace    skip URL replacement
+--anonymize              clone/push: pseudonymize user and comment data after the database import
+--skip-anonymize         keep original user and comment data for this run (pull anonymizes by default)
 --skip-maintenance-mode  do not enable WordPress maintenance mode around the import
 --force-scp              use the tar-over-SSH transport even when rsync exists
 --yes, -y                confirm direct operation
@@ -238,6 +242,46 @@ Flags that select where things are, accepted by every command:
 
 For clone pulls (host-to-host site migrations), use `references/clone.md` instead of this general workflow.
 
+## Anonymization
+
+`pull` anonymizes users and comments automatically right after the database import and before URL search-replace. Every user becomes login and nicename `user-<ID>`, email `user-<ID>@<domain>`, display name `User <ID>`; first/last name, nickname, bio, and WooCommerce billing/shipping address meta get generic placeholders, `session_tokens` are deleted, passwords stay unchanged. Comment authors become `User <user_id>` or `Guest <comment_ID>` with matching emails and empty URL/IP/user agent, and the comment text becomes `Anonymized comment <comment_ID>.`. Sign in afterwards as `user-<ID>` with the original password or reset it:
+
+```bash
+wp user update user-1 --user_pass=local-password --path=/path/to/wordpress
+```
+
+Keep the original records for one pull or permanently:
+
+```bash
+wp-ssh-bridge pull --silent --skip-anonymize
+```
+
+```yaml
+skip_anonymize: true
+```
+
+`clone` and `push` only anonymize on request, for example for a staging target:
+
+```bash
+wp-ssh-bridge push --silent --anonymize
+```
+
+```yaml
+push_anonymize: true
+clone_anonymize: true
+anonymize_email_domain: "staging.example.com"
+```
+
+Env mode:
+
+```bash
+export WP_SSH_SKIP_ANONYMIZE=true
+export WP_SSH_CLONE_ANONYMIZE=true
+export WP_SSH_PUSH_ANONYMIZE=true
+```
+
+Leave `anonymize_email_domain` empty to use the destination site host (fallback `example.invalid`). The domain is a config-file value only; there is no flag or environment variable for it, so users who need more control edit the config file. Do not enable it for a production push target. `pull --skip-import` cannot anonymize because nothing is imported; the CLI warns and the downloaded dump keeps the original records.
+
 ## Verification
 
 Use the checks that match the local WordPress path:
@@ -245,6 +289,12 @@ Use the checks that match the local WordPress path:
 ```bash
 wp option get home --path=/path/to/wordpress
 wp plugin list --path=/path/to/wordpress
+```
+
+After an anonymized pull, confirm that no original addresses remain:
+
+```bash
+wp user list --fields=ID,user_login,user_email,display_name --path=/path/to/wordpress
 ```
 
 ## Troubleshooting

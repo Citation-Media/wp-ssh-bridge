@@ -16,6 +16,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 | Production plugins | Deactivated and deleted | Kept |
 | Development rewrites | Yes, including `WP_ENVIRONMENT_TYPE=development` | No |
 | URL search-replace | Yes | Yes, from your configured mappings |
+| Users and comments | Pseudonymized | Kept, unless `--anonymize` |
 | Pre-existing target files | Mirrored with `--delete` | Kept, unless `--clean-target` |
 
 :::warning[Standalone only]
@@ -41,7 +42,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 
     The source flags describe where to read from. The `--db-*` flags describe the database the cloned site will use once it lives on its new host. They are written into the copied `wp-config.php` before the database is imported, so the import and the finished site agree on the same credentials.
 
-    Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`.
+    Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`. Add `--anonymize` when the clone must not carry real user identities, for example a staging copy; never for a production target.
 
   </Tab>
   <Tab title="DDEV">
@@ -122,12 +123,21 @@ clone_db_prefix: "wp_"
 pull_domain_replacements:
   - old: "source.example.com"
     new: "target.example.com"
+
+# For a staging copy: pseudonymize users and comments on the target.
+clone_anonymize: true
 ```
 
 ```bash
 export WP_SSH_CLONE_DB_PASSWORD='…'
 wp-ssh-bridge clone --silent
 ```
+
+## Anonymizing the clone
+
+A clone keeps the real user accounts and comments by default, because a migration wants them. For a staging copy, pass `--anonymize`, set `clone_anonymize: true`, or export `WP_SSH_CLONE_ANONYMIZE=true`. The rewrite then runs on the target right after the import, before the URL search-replace, and changes exactly what a [pull](/docs/commands/pull#users-and-comments-are-anonymized) changes: logins become `user-<ID>`, addresses `user-<ID>@<domain>`, names and WooCommerce addresses become placeholders, comments lose their authors and text. The domain is the target URL host from `local_url` or your domain mapping; without one it is `example.invalid`.
+
+Passwords are kept, so the first administrator signs in as `user-1` with the original password. `--skip-anonymize` overrides a configured `clone_anonymize` for one run.
 
 ## Emptying the target first
 
