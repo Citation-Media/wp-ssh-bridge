@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -298,7 +297,7 @@ func (a *App) replaceRemoteMultisiteDomains(ctx context.Context, projectRoot str
 	}
 
 	prefix := strings.TrimSpace(a.remoteWPOutput(ctx, projectRoot, target, "db", "prefix"))
-	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
+	if !validTablePrefix.MatchString(prefix) {
 		return nil
 	}
 

@@ -65,9 +65,10 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     5. Enable local maintenance mode, when a WordPress site is already installed locally.
     6. Import the dump locally, then delete the local copy of it.
     7. Disable maintenance mode, including when the import failed.
-    8. Rewrite `wp-config.php` URL constants for the local environment.
-    9. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
-    10. Deactivate and delete blocked plugins that are actually installed.
+    8. Point the local `$table_prefix` at the imported tables when the source uses a different prefix. Tables are not renamed.
+    9. Rewrite `wp-config.php` URL constants for the local environment.
+    10. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
+    11. Deactivate and delete blocked plugins that are actually installed.
 
   </Tab>
   <Tab title="Push">

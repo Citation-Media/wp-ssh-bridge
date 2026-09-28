@@ -115,6 +115,9 @@ A pull never modifies the remote site. It creates a temporary database dump in t
   <Step title="Maintenance mode and import">
     The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
   </Step>
+  <Step title="Table prefix">
+    The imported tables keep the source table prefix. When your local `wp-config.php` uses a different `$table_prefix`, for example `wp_` locally and `abc_` on the source, the local value is changed to the source prefix before anything loads WordPress. The tables are not renamed, so a later push sends the prefix the target expects. Tables under the old local prefix stay in the database and are reported with a warning.
+  </Step>
   <Step title="URL rewrites">
     A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database.
   </Step>
@@ -220,6 +223,7 @@ The home URL should be local, and production-only plugins should be gone.
 | Remote path errors | `pull_remote_path` must be absolute and contain `wp-config.php`. |
 | `mariadb-dump` not found | A host that ships only the legacy MySQL client names. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
 | Local files not writable | Fix ownership on the local WordPress directory, then run again. The error names the exact path. |
+| WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. Set the source prefix where your config defines it. |
 | Warning about stale files | The tar fallback is in use because rsync is missing on one side. Install rsync, or accept that removed files stay behind. |
 
 More in [Troubleshooting](/docs/troubleshooting).

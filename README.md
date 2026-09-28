@@ -151,6 +151,14 @@ One-shot overrides are supported:
 wp-ssh-bridge pull --silent --destination deploy@example.com --remote-path /home/example/public_html
 ```
 
+### Table Prefix
+
+The pulled database keeps the pull source table prefix, including prefixed option and user meta keys such as `<prefix>user_roles` and `<prefix>capabilities`. When the local `wp-config.php` uses a different `$table_prefix` (for example after the source changed its prefix, or with a preserved standalone or wp-env config), post-pull rewrites the local `$table_prefix` to the source prefix once the imported `<prefix>options` table exists. Tables stay as imported, so a later push sends the prefix the target expects.
+
+- Tables under the previous local prefix are left in the database and reported with a warning; drop them manually if they are no longer needed.
+- When `wp-config.php` has no `$table_prefix` assignment (for example Bedrock, which sets it in `config/application.php`), or another file overrides it, the CLI warns instead of guessing. Set the prefix there.
+- In wp-env mode the change is written to the `wp-config.php` wp-env generated. If wp-env regenerates that file, pull again.
+
 ### Clone
 
 Use `clone` when pulling a WordPress site as a standalone copy, for example when migrating it to a new host, instead of a local development copy. Clone mode still exports/imports the database, syncs files, and runs configured URL search-replace, but it skips DDEV/dev rewrites and blocked-plugin cleanup.
@@ -167,7 +175,7 @@ wp-ssh-bridge clone --silent \
   --db-password target_password
 ```
 
-Clone pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. There is no `push --clone`; cloning to a remote target needs a separate target `wp-config.php` rewrite design.
+Clone pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. Without `--db-prefix`, the target `$table_prefix` follows the source like a normal pull; with it, the configured prefix is kept as set and imported tables are not renamed. There is no `push --clone`; cloning to a remote target needs a separate target `wp-config.php` rewrite design.
 
 ## Push
 
@@ -435,6 +443,7 @@ wp-ssh-bridge provider generate --kind all
 - Rsyncs the upstream WordPress root into the local WordPress root.
 - Excludes `.git`, `.ddev`, DDEV config, `*.log` files at any depth, cache/backup folders, blocked plugins, and uploads unless `clone_images` is enabled. File pulls use plain rsync `--delete`; WordPress-tree log files are hidden sender-side so they are not copied and are deleted locally without deleting local-only project state such as DDEV's own logs.
 - Sanitizes `wp-config.php` for DDEV-managed DB settings.
+- Aligns the local `$table_prefix` with the pulled database when the source prefix differs.
 - Runs URL search-replace through `ddev wp`, including configured multisite domain mappings, protocol and host-only replacement pairs, per-blog search-replace, and multisite `site` and `blogs` domain tables.
 - Removes only blocked local-only plugins reported by `wp plugin list`, using WP-CLI deactivate/delete commands.
 - Pushes the local database to a separate SSH target with remote WP-CLI import.

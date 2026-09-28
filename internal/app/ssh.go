@@ -65,6 +65,12 @@ func (a *App) runSSHWithFilteredWarnings(ctx context.Context, projectRoot string
 }
 
 func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot string, args []string) error {
+	_, err := a.outputSSHArgsWithFilteredWarnings(ctx, projectRoot, args)
+	return err
+}
+
+// outputSSHArgsWithFilteredWarnings also returns stdout, which stays hidden on success.
+func (a *App) outputSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot string, args []string) (string, error) {
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	filteredStderr := newDuplicateSummaryWriter(&stderr, isRepeatedWarningLine, "Warning: repeated similar warnings suppressed")
@@ -74,7 +80,7 @@ func (a *App) runSSHArgsWithFilteredWarnings(ctx context.Context, projectRoot st
 		a.writeCapturedOutput("remote", stdout.String(), false)
 		a.writeCapturedOutput("remote", stderr.String(), true)
 	}
-	return err
+	return stdout.String(), err
 }
 
 func (a *App) runSSHSilent(ctx context.Context, projectRoot string, target RemoteTarget, remoteCommand string) error {

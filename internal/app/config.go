@@ -581,7 +581,7 @@ func (cfg Config) validateCloneDBCredentials(required bool) error {
 			return fmt.Errorf("%s must not contain newlines", key)
 		}
 	}
-	if cfg.CloneDBPrefix != "" && regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(cfg.CloneDBPrefix) {
+	if cfg.CloneDBPrefix != "" && !validTablePrefix.MatchString(cfg.CloneDBPrefix) {
 		return fmt.Errorf("clone_db_prefix must contain only letters, numbers, and underscores")
 	}
 	return nil

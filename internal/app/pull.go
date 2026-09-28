@@ -67,12 +67,16 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		mariaDBSetup,
 		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
 		fmt.Sprintf("%s --allow-root db export %s;", wpExport, shellQuote(remoteDump)),
+		remoteTablePrefixCommand,
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		mariaDBCleanup + ";",
 		"trap - EXIT",
 	}, " ")
+	exportOutput := ""
 	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
-		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
+		var err error
+		exportOutput, err = a.outputSSHArgsWithFilteredWarnings(ctx, projectRoot, a.sshArgv(target, sshTarget(target), remoteCommand))
+		return err
 	}); err != nil {
 		return err
 	}
@@ -85,6 +89,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 			a.UI.Warning("Could not remove remote database export: %s", err)
 		}
 	}()
+	if err := a.recordPullSourceTablePrefix(projectRoot, exportOutput); err != nil {
+		return err
+	}
 
 	localDump := filepath.Join(downloadDir, "db.sql.gz")
 	if err := os.Remove(localDump); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -319,13 +326,20 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 	// Clone writes the target DB credentials before import (see runPullPipeline), so
 	// afterwards it only moves the site URL: blocked plugins stay, and the runtime's
 	// dev-mode post-pull hooks do not run.
+	if !clone {
+		for _, hook := range adapter.PostPullHooks() {
+			if err := hook(ctx, a, projectRoot, cfg); err != nil {
+				return err
+			}
+		}
+	}
+	// The prefix must match the imported tables before any WP-CLI call loads WordPress,
+	// and after the hooks, which point the DDEV config at the local database.
+	if err := a.alignPulledTablePrefix(ctx, projectRoot, cfg, clone); err != nil {
+		return err
+	}
 	if clone {
 		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
-	}
-	for _, hook := range adapter.PostPullHooks() {
-		if err := hook(ctx, a, projectRoot, cfg); err != nil {
-			return err
-		}
 	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
 		return err
@@ -1007,7 +1021,7 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 	}
 
 	prefix := a.wpOutput(ctx, projectRoot, cfg, "db", "prefix")
-	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
+	if !validTablePrefix.MatchString(prefix) {
 		return nil
 	}
 
@@ -1099,7 +1113,7 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		if err := a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets))), nil
+		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluralNoun(len(targets), "plugin")), nil
 	})
 }
 
@@ -1311,11 +1325,11 @@ func pluginsWithStatus(plugins []string, statuses map[string]string, status stri
 	return matching
 }
 
-func pluginNoun(count int) string {
+func pluralNoun(count int, singular string) string {
 	if count == 1 {
-		return "plugin"
+		return singular
 	}
-	return "plugins"
+	return singular + "s"
 }
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {

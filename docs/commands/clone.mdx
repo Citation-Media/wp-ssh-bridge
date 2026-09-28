@@ -41,7 +41,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 
     The source flags describe where to read from. The `--db-*` flags describe the database the cloned site will use once it lives on its new host. They are written into the copied `wp-config.php` before the database is imported, so the import and the finished site agree on the same credentials.
 
-    Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`.
+    Without `--db-prefix`, the target keeps the source table prefix. Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`. The imported tables are not renamed, so the target database must already use that prefix.
 
   </Tab>
   <Tab title="DDEV">
