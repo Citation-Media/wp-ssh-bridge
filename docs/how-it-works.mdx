@@ -68,6 +68,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     8. Rewrite `wp-config.php` URL constants for the local environment.
     9. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
     10. Deactivate and delete blocked plugins that are actually installed.
+    11. Rebuild page builder CSS for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
 
   </Tab>
   <Tab title="Push">
@@ -78,7 +79,8 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     4. Upload the dump and import it on the target with remote WP-CLI. The target's current URL is captured beforehand when `push_url` is not set.
     5. Sync files to the remote root, excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and `.wp-ssh/`.
     6. Search-replace URLs on the target, including the multisite domain tables.
-    7. Disable maintenance mode.
+    7. Rebuild page builder CSS on the target for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
+    8. Disable maintenance mode.
 
   </Tab>
   <Tab title="Clone">
@@ -90,6 +92,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     5. Write the target database credentials into the copied `wp-config.php`.
     6. Import the database using those credentials, in maintenance mode when a WordPress site is already installed at the target and `--clean-target` is not set.
     7. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
+    8. Rebuild page builder CSS for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
 
   </Tab>
 </Tabs>

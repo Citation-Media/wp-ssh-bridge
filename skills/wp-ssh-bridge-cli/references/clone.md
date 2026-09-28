@@ -25,6 +25,7 @@ Clone pulls:
 - keep blocked plugins and do not run blocked-plugin cleanup
 - skip DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
 - still run configured URL search-replace unless `--skip-search-replace` is set
+- rebuild page builder CSS (Elementor, Bricks, Beaver Builder) on the target unless `--skip-cache-rebuild` is set; failures are warnings only
 - be additive by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
 
 Clone mode is a top-level `clone` command. Do not recommend `pull --clone` or `push --clone`.

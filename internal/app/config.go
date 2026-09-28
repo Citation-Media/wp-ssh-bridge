@@ -33,6 +33,7 @@ type Config struct {
 	PullDomainReplacements []DomainReplacement
 	PushDomainReplacements []DomainReplacement
 	SkipSearchReplace      bool
+	SkipCacheRebuild       bool
 	CloneDBHost            string
 	CloneDBName            string
 	CloneDBUser            string
@@ -179,6 +180,8 @@ func readConfigFile(path string) (Config, error) {
 			cfg.Integration = value
 		case "skip_search_replace":
 			cfg.SkipSearchReplace = parseBool(value)
+		case "skip_cache_rebuild":
+			cfg.SkipCacheRebuild = parseBool(value)
 		case "clone_db_host":
 			cfg.CloneDBHost = value
 		case "clone_db_name":
@@ -315,6 +318,7 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeDomainReplacements(&body, "pull_domain_replacements", cfg.PullDomainReplacements)
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
+	writeBoolValue(&body, "skip_cache_rebuild", cfg.SkipCacheRebuild, defaults.SkipCacheRebuild)
 	writeStringValue(&body, "clone_db_host", cfg.CloneDBHost, defaults.CloneDBHost)
 	writeStringValue(&body, "clone_db_name", cfg.CloneDBName, defaults.CloneDBName)
 	writeStringValue(&body, "clone_db_user", cfg.CloneDBUser, defaults.CloneDBUser)
@@ -395,6 +399,9 @@ func (cfg *Config) applyEnv(env []string) {
 	}
 	if value, ok := values["WP_SSH_PUSH_SKIP_SEARCH_REPLACE"]; ok {
 		cfg.SkipSearchReplace = parseBool(value)
+	}
+	if value, ok := values["WP_SSH_SKIP_CACHE_REBUILD"]; ok {
+		cfg.SkipCacheRebuild = parseBool(value)
 	}
 }
 
@@ -641,6 +648,7 @@ func (cfg Config) envArgs() string {
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_CLONE_IMAGES=%t", cfg.CloneImages))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_SKIP_CACHE_REBUILD=%t", cfg.SkipCacheRebuild))
 
 	return strings.Join(pairs, ",")
 }
@@ -724,6 +732,7 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace
+	base.SkipCacheRebuild = overlay.SkipCacheRebuild || base.SkipCacheRebuild
 	return base
 }
 

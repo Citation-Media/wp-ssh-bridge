@@ -361,6 +361,7 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `pull_domain_replacements` | - | Optional pull-time old-to-new domain/URL replacements. Prefer protocol-less domains for multisite mappings. |
 | `push_domain_replacements` | - | Optional push-time old-to-new domain/URL replacements. Usually the inverse of pull replacements. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE` or `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip post-pull and post-push URL replacement. |
+| `skip_cache_rebuild` | `WP_SSH_SKIP_CACHE_REBUILD` | Skip rebuilding page builder CSS after pull, clone, and push. Also available as `--skip-cache-rebuild`. |
 | `clone_db_host` | `WP_SSH_CLONE_DB_HOST` | Target DB host written to `wp-config.php` during `clone`. |
 | `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Target DB name written to `wp-config.php` during `clone`. |
 | `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Target DB user written to `wp-config.php` during `clone`. |
@@ -440,6 +441,7 @@ wp-ssh-bridge provider generate --kind all
 - Pushes the local database to a separate SSH target with remote WP-CLI import.
 - Pushes the full local WordPress app while excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and the CLI scratch directory (`.wp-ssh/`).
 - Runs post-push URL search-replace on the remote target with WP-CLI, including multisite `site` and `blogs` domain tables.
+- Rebuilds page builder CSS after the database transfer of pull, clone, and push: `wp elementor flush-css`, `wp bricks regenerate_assets`, and `wp beaver clearcache`, with `--network` on multisite where supported. Builders whose WP-CLI command is not registered are skipped. Failures are reported as warnings and do not abort the operation. Bricks only writes CSS files when its CSS loading method is set to external files.
 
 ## Release Versioning
 
