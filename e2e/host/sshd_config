@@ -1,0 +1,7 @@
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AllowAgentForwarding yes
+AllowUsers site
+HostKey /etc/ssh/ssh_host_ed25519_key
