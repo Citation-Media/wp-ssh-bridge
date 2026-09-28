@@ -15,7 +15,7 @@ An SMTP plugin carrying production credentials into a local copy is the one that
 
 ## The list
 
-These 45 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
+These 46 slugs are built into the binary. You do not configure them and you cannot switch them off individually.
 
 ### Backup, migration, and restore
 
@@ -83,6 +83,16 @@ Only the widely used ones are listed, each with at least a hundred thousand inst
 :::note[Optimisers that work locally stay]
 Plugins that convert images on your own machine without calling out, such as Imsanity, WebP Express, and Converter for Media, are deliberately not on the list. They cost nothing, leak nothing, and removing them would change how a local copy serves images. The line is whether a plugin talks to an outside service on someone else's account.
 :::
+
+### CDN and edge cache
+
+It holds an API token for the production Cloudflare zone. On a development copy, saving a post or changing a setting can purge the live site's cache or rewrite its zone settings.
+
+```text
+cloudflare
+```
+
+This is the official Cloudflare plugin. Third-party Cloudflare cache plugins are not on the list; add the one your project uses to your own list below.
 
 ## Adding your own
 

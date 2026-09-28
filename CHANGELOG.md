@@ -6,6 +6,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Added
 
+- Block the official Cloudflare plugin (`cloudflare`) during pulls. It holds an API token for the production zone, so a development copy could purge or reconfigure the live site's cache. It is excluded from the file sync and removed from the local site like the other blocked plugins.
 - Document how to migrate a site: running `clone` on the new server, which connects to the old one with a forwarded SSH agent, or cloning through your own machine and pushing to the new host. See [Migrate a site](https://wp-ssh-bridge.citation.media/docs/migrate-a-site).
 
 ### Fixed

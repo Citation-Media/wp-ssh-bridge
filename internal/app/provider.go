@@ -71,6 +71,10 @@ optimole-wp
 tiny-compress-images
 robin-image-optimizer
 resmushit-image-optimizer
+
+# CDN and edge cache plugins. They hold an API token for the production zone,
+# so a development copy can purge or reconfigure the live site's cache.
+cloudflare
 `
 
 // providerYAML renders the DDEV provider that delegates to this host CLI.
