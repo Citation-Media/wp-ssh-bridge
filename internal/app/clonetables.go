@@ -116,6 +116,7 @@ type tablePlan struct {
 	drops        []string
 	renames      []tableRename
 	unowned      int
+	kept         int
 }
 
 // planCloneTables makes the imported database the target's only WordPress install
@@ -145,8 +146,14 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 	if err != nil {
 		return tablePlan{}, fmt.Errorf("list target database tables: %w", err)
 	}
+	// db_reset defaults to the previous installation. database declares the whole target
+	// database replaceable; none still guards foreign tables but removes nothing.
+	reset := defaultString(cfg.DBReset, dbResetInstallation)
 	owned := map[string]bool{}
-	if previous.prefix != "" && previous.sameDatabase(current) {
+	switch {
+	case reset == dbResetDatabase:
+		owned = foldSet(existing)
+	case previous.prefix != "" && previous.sameDatabase(current):
 		owned = foldSet(installationTables(existing, previous.prefix))
 	}
 	imported := foldSet(dumpTables)
@@ -157,6 +164,9 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 			renamed := plan.finalPrefix + table[len(sourcePrefix):]
 			if imported[strings.ToLower(renamed)] {
 				return tablePlan{}, fmt.Errorf("cannot rename %s to %s for clone_db_prefix (--db-prefix): the source database also contains %s", table, renamed, renamed)
+			}
+			if reset == dbResetNone && foldSet(existing)[strings.ToLower(renamed)] {
+				return tablePlan{}, fmt.Errorf("cannot rename %s to %s for clone_db_prefix (--db-prefix): db_reset none keeps the existing %s", table, renamed, renamed)
 			}
 			plan.renames = append(plan.renames, tableRename{from: table, to: renamed})
 			written = append(written, renamed)
@@ -176,6 +186,9 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 		}
 	}
 	sort.Strings(plan.drops)
+	if reset == dbResetNone {
+		plan.kept, plan.drops = len(plan.drops), nil
+	}
 	for _, table := range installationTables(existing, plan.finalPrefix) {
 		if !owned[strings.ToLower(table)] && !imported[strings.ToLower(table)] {
 			plan.unowned++
@@ -185,19 +198,20 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 }
 
 // planPullTables decides which local tables the pulled database replaces, following
-// pull_db_reset. By default DDEV and wp-env remove everything the dump does not recreate,
+// db_reset. By default DDEV and wp-env remove everything the dump does not recreate,
 // as `ddev import-db` does, because each project has a database of its own. A standalone
 // project may share its database with other local sites, so by default only the tables
 // of the installation its wp-config.php describes go.
 func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config, mode runtimeMode, dumpTables []string) tablePlan {
-	reset := cfg.PullDBReset
-	if reset == "" {
-		reset = pullDBResetDatabase
+	// none keeps the tables but still reports them, within the runtime's default scope.
+	scope := cfg.DBReset
+	if scope == "" || scope == dbResetNone {
+		scope = dbResetDatabase
 		if mode == modeStandalone {
-			reset = pullDBResetInstallation
+			scope = dbResetInstallation
 		}
 	}
-	if reset == pullDBResetNone || len(dumpTables) == 0 {
+	if len(dumpTables) == 0 {
 		return tablePlan{}
 	}
 	existing, err := a.localTableNames(ctx, projectRoot, cfg)
@@ -206,7 +220,7 @@ func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config
 		return tablePlan{}
 	}
 	owned := existing
-	if reset == pullDBResetInstallation {
+	if scope == dbResetInstallation {
 		prefix := a.localTablePrefix(ctx, projectRoot, cfg)
 		if prefix == "" {
 			a.UI.Warning("Could not read the local $table_prefix; tables the pulled database does not contain are left in place.")
@@ -222,6 +236,9 @@ func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config
 		}
 	}
 	sort.Strings(plan.drops)
+	if cfg.DBReset == dbResetNone {
+		plan.kept, plan.drops = len(plan.drops), nil
+	}
 	return plan
 }
 
@@ -264,6 +281,9 @@ func (a *App) applyTablePlan(ctx context.Context, projectRoot string, cfg Config
 		}); err != nil {
 			return err
 		}
+	}
+	if plan.kept > 0 {
+		a.UI.Warning("%d %s the imported database does not contain %s kept because db_reset is none.", plan.kept, pluralNoun(plan.kept, "table"), pluralVerb(plan.kept))
 	}
 	if plan.unowned > 0 {
 		a.UI.Warning("%d %s under the prefix %s in the target database %s not part of the clone and no WordPress config at the target used them; they were left in place.", plan.unowned, pluralNoun(plan.unowned, "table"), plan.finalPrefix, pluralVerb(plan.unowned))

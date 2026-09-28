@@ -232,3 +232,44 @@ func TestCloneRefusesDBPrefixWithoutSourcePrefix(t *testing.T) {
 		t.Fatalf("error = %v, want a missing source prefix error", err)
 	}
 }
+
+func TestCloneDBResetDatabaseReplacesTheWholeTargetDatabase(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "target_db")
+	writeFile(t, pullSourcePrefixPath(dir), "wp_\n")
+	// No previous config points at these tables; db_reset database declares them replaceable.
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "other_app_data")
+
+	log, _, err := cloneTables(t, dir, Config{DBReset: dbResetDatabase}, cloneTarget{}, []string{"wp_options", "wp_posts"})
+	if err != nil {
+		t.Fatalf("clone tables error = %v", err)
+	}
+	if !strings.Contains(log, "DROP TABLE `other_app_data`, `wp_users`") {
+		t.Fatalf("db_reset database should drop every table the dump lacks:\n%s", log)
+	}
+}
+
+func TestCloneDBResetNoneKeepsThePreviousInstallation(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "target_db")
+	writeFile(t, pullSourcePrefixPath(dir), "wp_\n")
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_old_plugin", "blog_options", "blog_users")
+
+	previous := cloneTarget{prefix: "wp_", dbName: "target_db", dbHost: "localhost"}
+	log, stderr, err := cloneTables(t, dir, Config{DBReset: dbResetNone}, previous, []string{"wp_options", "wp_users"})
+	if err != nil {
+		t.Fatalf("clone tables error = %v", err)
+	}
+	if strings.Contains(log, "DROP") {
+		t.Fatalf("db_reset none must not drop tables:\n%s", log)
+	}
+	if !strings.Contains(stderr, "1 table the imported database does not contain is kept because db_reset is none") {
+		t.Fatalf("missing kept-tables warning:\n%s", stderr)
+	}
+
+	// The guard against overwriting foreign tables stays on with none.
+	_, _, err = cloneTables(t, dir, Config{DBReset: dbResetNone}, previous, []string{"blog_options"})
+	if err == nil || !strings.Contains(err.Error(), "already contains blog_options") {
+		t.Fatalf("error = %v, want the overwrite guard", err)
+	}
+}

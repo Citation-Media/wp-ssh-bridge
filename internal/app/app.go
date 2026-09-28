@@ -104,7 +104,7 @@ Common flags:
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --skip-cache-rebuild       Skip rebuilding page builder CSS after the database transfer
-  --db-reset string          Pull only: local tables to remove after the import (database, installation, none)
+  --db-reset string          Tables to remove after the import that the dump lacks: database, installation, or none
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
@@ -961,7 +961,7 @@ type configOptions struct {
 	LocalURL            string
 	SkipSearchReplace   bool
 	SkipCacheRebuild    bool
-	PullDBReset         string
+	DBReset             string
 	CloneDBHost         string
 	CloneDBName         string
 	CloneDBUser         string
@@ -1007,7 +1007,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	fs.BoolVar(&opts.SkipCacheRebuild, "skip-cache-rebuild", false, "skip rebuilding page builder CSS after the database transfer")
-	fs.StringVar(&opts.PullDBReset, "db-reset", "", "pull only: local tables to remove after the import: database, installation, or none")
+	fs.StringVar(&opts.DBReset, "db-reset", "", "tables to remove after the import when the dump does not contain them: database, installation, or none")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
 		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
@@ -1063,11 +1063,6 @@ func (opts configOptions) rejectOperationFlags(command string) error {
 }
 
 func (opts configOptions) validateCloneCommand(cfg Config) error {
-	// A clone decides from the target's previous wp-config.php what it may remove, so the
-	// pull-side reset mode does not apply.
-	if opts.PullDBReset != "" {
-		return errors.New("--db-reset applies to pull only; a clone removes only the tables of the installation it replaces")
-	}
 	return cfg.validateCloneDBCredentials(!opts.SkipFiles)
 }
 
@@ -1172,8 +1167,8 @@ func (opts configOptions) apply(cfg Config) Config {
 	if opts.SkipCacheRebuild {
 		cfg.SkipCacheRebuild = true
 	}
-	if opts.PullDBReset != "" {
-		cfg.PullDBReset = opts.PullDBReset
+	if opts.DBReset != "" {
+		cfg.DBReset = opts.DBReset
 	}
 	if opts.CloneDBHost != "" {
 		cfg.CloneDBHost = opts.CloneDBHost

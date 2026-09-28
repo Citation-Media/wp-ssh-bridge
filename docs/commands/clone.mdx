@@ -97,6 +97,7 @@ Target database, written into `wp-config.php`:
 | `--db-user` | `clone_db_user` | `WP_SSH_CLONE_DB_USER` |
 | `--db-password` | `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` |
 | `--db-prefix` (optional) | `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` |
+| `--db-reset` (optional) | `db_reset` | `WP_SSH_DB_RESET` |
 
 :::tip[Keep the password out of version control]
 Put the source and the non-secret target values in the config file, and pass the password through the environment:
@@ -169,14 +170,22 @@ The previous installation is the one the target's own `wp-config.php` described 
 - Tables under other prefixes, and other WordPress installations sharing the database, even when their prefix starts with the same characters, such as `wp_shop_` next to `wp_`. An installation is recognised by its own `options` and `users` tables.
 - Tables under the cloned site's prefix that no config at the target accounted for. The clone warns about them instead.
 
-Before the import, the clone checks every table the import and a `--db-prefix` rename would write. If one of them already exists and does not belong to the previous installation, it stops with `the target database already contains …` and changes nothing. Shared hosting often gives one database to several sites, so the clone never resets the whole database.
+Before the import, the clone checks every table the import and a `--db-prefix` rename would write. If one of them already exists and does not belong to the previous installation, it stops with `the target database already contains …` and changes nothing. Shared hosting often gives one database to several sites, so by default the clone never resets the whole database.
+
+`db_reset`, `WP_SSH_DB_RESET`, or `--db-reset` change what the clone removes:
+
+| Value | Effect |
+| --- | --- |
+| `installation` | The default described above: only the previous installation's tables. |
+| `database` | The whole target database belongs to this site. Every table the dump does not contain is removed, whatever its prefix, and the check for foreign tables finds none. Use it only for a database of its own. |
+| `none` | Nothing is removed; the clone reports how many tables it kept. The check for foreign tables still runs. |
 
 ```text
 ✓ Previous installation tables removed
 ```
 
 :::danger[Back up the target database first]
-Removing the previous installation's tables cannot be undone and has no flag to switch it off. It runs on every clone that imports the database, with or without `--clean-target`.
+Removing tables cannot be undone. It runs on every clone that imports the database, with or without `--clean-target`, unless `db_reset` is `none`.
 :::
 
 ## Maintenance mode during the import
