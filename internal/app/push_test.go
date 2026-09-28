@@ -229,3 +229,64 @@ func TestDBPushWithoutTargetURLContinuesWhenURLsAreHandledOtherwise(t *testing.T
 		}
 	}
 }
+
+func TestLocalDBDumpExportsOnlyTheLocalInstallation(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "")
+	logPath := installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_shop_options", "wp_shop_users", "blog_options")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	if err := app.ensureLocalDBDump(context.Background(), dir, Config{}, filepath.Join(downloadsDir(dir), "db.sql.gz")); err != nil {
+		t.Fatalf("ensureLocalDBDump() error = %v", err)
+	}
+	if !strings.Contains(readTestLog(t, logPath), "db export - --add-drop-table --tables=wp_options,wp_users") {
+		t.Fatalf("push export should list only the local installation:\n%s", readTestLog(t, logPath))
+	}
+}
+
+func TestRemoveLocalDBDumpDropsALeftoverSourceDump(t *testing.T) {
+	dir := t.TempDir()
+	dump := filepath.Join(downloadsDir(dir), "db.sql.gz")
+	writeFile(t, dump, "source dump from pull --skip-import")
+	if err := removeLocalDBDump(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dump); !os.IsNotExist(err) {
+		t.Fatalf("a direct push must not reuse an earlier dump, got err: %v", err)
+	}
+	if err := removeLocalDBDump(dir); err != nil {
+		t.Fatalf("a missing dump is not an error: %v", err)
+	}
+}
+
+func TestCheckPushTablePrefix(t *testing.T) {
+	for name, test := range map[string]struct {
+		remote  string
+		wantErr bool
+	}{
+		"different prefix stops": {remote: "stg_", wantErr: true},
+		"same prefix continues":  {remote: "abc_"},
+		"no WordPress continues": {remote: ""},
+	} {
+		dir := t.TempDir()
+		writeTestWPConfig(t, dir, "abc_", "")
+		installFakeTablesWP(t, dir)
+		installFakeSSH(t, dir, "#!/bin/sh\nprintf '"+test.remote+"\\n'\n")
+		app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+		err := app.checkPushTablePrefix(context.Background(), dir, Config{PushUser: "deploy", PushHost: "staging.example.com", PushRemotePath: "/var/www/html"})
+		if test.wantErr != (err != nil) {
+			t.Fatalf("%s: checkPushTablePrefix() error = %v", name, err)
+		}
+		if test.wantErr && !strings.Contains(err.Error(), "uses the table prefix stg_, but the local database uses abc_") {
+			t.Fatalf("%s: unexpected message: %v", name, err)
+		}
+	}
+}
+
+func TestPushRejectsDBReset(t *testing.T) {
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.commandPush([]string{"--silent", "--db-reset", "none"}); err == nil || !strings.Contains(err.Error(), "--db-reset only applies to pull and clone") {
+		t.Fatalf("commandPush() error = %v, want --db-reset rejected", err)
+	}
+}

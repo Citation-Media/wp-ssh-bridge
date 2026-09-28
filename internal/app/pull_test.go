@@ -969,3 +969,19 @@ func TestRewriteWPConfigURLDefinesContentsReplacesOnce(t *testing.T) {
 		t.Fatalf("rewriteWPConfigURLDefinesContents() =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestSanitizeWPConfigIsSilentWhenAlreadySanitized(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\ndefine('DB_NAME', 'prod');\nrequire_once ABSPATH . 'wp-settings.php';\n")
+	stdout := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+
+	for range 2 {
+		if err := app.sanitizeWPConfig(dir, Config{}); err != nil {
+			t.Fatalf("sanitizeWPConfig() error = %v", err)
+		}
+	}
+	if count := strings.Count(stdout.String(), "Local wp-config.php sanitized"); count != 1 {
+		t.Fatalf("sanitize reported %d times, want once for the pre-import and post-pull runs:\n%s", count, stdout.String())
+	}
+}

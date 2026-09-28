@@ -101,13 +101,13 @@ Check where a push will go before you run it: the push values in the config file
   <Step title="Preflight">
     Local tools, SSH access to the target, the paths on both sides, and WP-CLI are checked first, and nothing is uploaded until all of it passes. [How it works](/docs/how-it-works#preflight) lists every check.
 
-    The push also compares table prefixes. It keeps the target's `wp-config.php`, so when the target uses another `$table_prefix` than your local database, its WordPress would not see the pushed tables. The push stops before anything changes; set the prefix in the target's `wp-config.php` first. A target without WordPress yet skips the check.
+    Unless you pass `--skip-db`, the push then compares table prefixes. It keeps the target's `wp-config.php`, so when the target uses another `$table_prefix` than your local database, its WordPress would not see the pushed tables. The push stops before maintenance mode and before anything is uploaded; set `$table_prefix` in the target's `wp-config.php` to the local prefix first. A target without WordPress yet skips the check.
   </Step>
   <Step title="Maintenance mode on the target">
     The target site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed on the target yet, as on the first push into an empty directory, there is nothing to protect and the push runs without it.
   </Step>
   <Step title="Database export, upload, import">
-    Your local installation's tables are exported with WP-CLI, freshly on every push, uploaded to the remote temp directory, and imported there with remote WP-CLI. Other sites sharing your local database stay behind. Before the import, the target's current URL is captured when `push_url` is not set.
+    Your local installation's tables are exported with WP-CLI, uploaded to the remote temp directory, and imported there with remote WP-CLI. Other sites sharing your local database are [left out](/docs/how-it-works#safety-rules). A direct push exports afresh on every run and never reuses a dump an earlier run left in the scratch directory; a native `ddev push` uploads the dump DDEV exported right before. Before the import, the target's current URL is captured when `push_url` is not set.
   </Step>
   <Step title="File sync">
     rsync mirrors your local WordPress root onto the target's WordPress root, with the exclusions below. Without rsync, the tar-over-SSH fallback is used, which does not remove stale files.

@@ -308,6 +308,9 @@ func (a *App) commandPush(args []string) error {
 	if opts.SkipImport {
 		return errors.New("--skip-import only applies to pull")
 	}
+	if opts.DBReset != "" {
+		return errors.New("--db-reset only applies to pull and clone; a push replaces only the tables it uploads")
+	}
 
 	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
 	if err != nil {
@@ -779,8 +782,13 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	// Read before the file sync replaces the target's wp-config.php, so the previous
 	// installation's tables can be told apart after the import.
 	var previousTarget cloneTarget
+	previousPrefix := ""
 	if opts.Clone && shouldImportDB {
 		previousTarget = a.readCloneTarget(ctx, root, cfg)
+	} else if shouldImportDB && dbResetScope(cfg.DBReset, adapter.Mode()) == dbResetInstallation {
+		// A DDEV pull replaces wp-config.php with the source's, so the local installation's
+		// prefix has to be read before the file sync.
+		previousPrefix = a.localTablePrefix(ctx, root, cfg)
 	}
 
 	if !opts.SkipDB {
@@ -816,10 +824,8 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	// Sanitize it before maintenance mode and the import run WP-CLI against it, so both
 	// reach the DDEV database. postPull runs the hooks again for the provider flow.
 	if !opts.Clone {
-		for _, hook := range adapter.PostPullHooks() {
-			if err := hook(ctx, a, root, cfg); err != nil {
-				return err
-			}
+		if err := a.runPostPullHooks(ctx, adapter, cfg); err != nil {
+			return err
 		}
 	}
 	if shouldImportDB && !opts.SkipMaintenanceMode {
@@ -846,7 +852,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 				plan, err = a.planCloneTables(ctx, root, cfg, previousTarget, dumpTables)
 				return err
 			}
-			plan = a.planPullTables(ctx, root, cfg, adapter.Mode(), dumpTables)
+			plan = a.planPullTables(ctx, root, cfg, adapter.Mode(), previousPrefix, dumpTables)
 			return nil
 		}
 		if err := a.importLocalDB(ctx, root, cfg, beforeImport); err != nil {

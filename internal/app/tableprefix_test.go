@@ -10,59 +10,6 @@ import (
 	"testing"
 )
 
-// installFakeTablesWP fakes a local WP-CLI that resolves wp-config.php like the real one
-// (config get and config list read the current file, so rewrites are observed), lists
-// the given base tables, accepts every other query, and logs each call.
-func installFakeTablesWP(t *testing.T, dir string, tables ...string) string {
-	t.Helper()
-	logPath := filepath.Join(dir, "wp.log")
-	wpConfig := shellQuote(filepath.Join(dir, "wp-config.php"))
-	listing := ""
-	for _, table := range tables {
-		listing += table + `\tBASE TABLE\n`
-	}
-	installFakeCommand(t, dir, "wp", `#!/bin/sh
-printf '%s\n' "$*" >> `+shellQuote(logPath)+`
-config_value() { sed -n "s/^$1\$/\1/p" `+wpConfig+`; }
-case "$*" in
-  *"config get table_prefix"*) config_value "\$table_prefix = '\(.*\)';"; exit 0 ;;
-  *"config list"*)
-    printf '[{"name":"table_prefix","value":"%s"},{"name":"DB_NAME","value":"%s"},{"name":"DB_HOST","value":"%s"}]\n' \
-      "$(config_value "\$table_prefix = '\(.*\)';")" "$(config_value "define('DB_NAME', '\(.*\)');")" "$(config_value "define('DB_HOST', '\(.*\)');")"
-    exit 0 ;;
-  *"SHOW FULL TABLES"*) printf '`+listing+`'; exit 0 ;;
-  *"db query"*) exit 0 ;;
-  *"db export"*) exit 0 ;;
-  *"plugin list"*) printf '[]\n'; exit 0 ;;
-esac
-exit 1
-`)
-	return logPath
-}
-
-// writeTestWPConfig writes a wp-config.php with a literal prefix and, when dbName is set,
-// literal DB_NAME and DB_HOST constants.
-func writeTestWPConfig(t *testing.T, dir string, prefix string, dbName string) string {
-	t.Helper()
-	wpConfig := filepath.Join(dir, "wp-config.php")
-	contents := "<?php\n"
-	if dbName != "" {
-		contents += "define('DB_NAME', '" + dbName + "');\ndefine('DB_HOST', 'localhost');\n"
-	}
-	contents += "$table_prefix = '" + prefix + "';\nrequire_once ABSPATH . 'wp-settings.php';\n"
-	writeFile(t, wpConfig, contents)
-	return wpConfig
-}
-
-func readTestLog(t *testing.T, path string) string {
-	t.Helper()
-	log, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	return string(log)
-}
-
 func TestRemoteExportCommandsExportOnlyTheInstallation(t *testing.T) {
 	t.Parallel()
 	tables := `wp_options\tBASE TABLE\nwp_users\tBASE TABLE\nWP_2_Options\tBASE TABLE\nwp_shop_options\tBASE TABLE\nwp_shop_users\tBASE TABLE\nwp_myplugin_options\tBASE TABLE\nother_options\tBASE TABLE\n`
@@ -156,10 +103,9 @@ func TestRecordPullSourceTablePrefixWarnsOnInvalidPrefix(t *testing.T) {
 func TestAlignLocalTablePrefixFollowsImportedTables(t *testing.T) {
 	dir := t.TempDir()
 	wpConfig := writeTestWPConfig(t, dir, "wp_", "")
-	installFakeTablesWP(t, dir, "wp_options", "wp_posts", "wp_abc_options", "wp_abc_posts", "wp_abc_users")
+	installFakeTablesWP(t, dir, "wp_options", "wp_posts", "wp_abc_options", "wp_abc_posts")
 	stdout := bytes.Buffer{}
-	stderr := bytes.Buffer{}
-	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
 
 	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "wp_abc_"); err != nil {
 		t.Fatalf("alignLocalTablePrefix() error = %v", err)
@@ -173,25 +119,6 @@ func TestAlignLocalTablePrefixFollowsImportedTables(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Local table prefix set to wp_abc_") {
 		t.Fatalf("missing prefix update step:\n%s", stdout.String())
-	}
-	// The imported wp_abc_ install also starts with wp_ and must not count as leftovers.
-	if !strings.Contains(stderr.String(), "The previous prefix wp_ still has 2 tables") {
-		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
-	}
-}
-
-func TestAlignLocalTablePrefixCountsLeftoversWhenNewPrefixIsShorter(t *testing.T) {
-	dir := t.TempDir()
-	writeTestWPConfig(t, dir, "wp_abc_", "")
-	installFakeTablesWP(t, dir, "wp_abc_options", "wp_abc_posts", "wp_abc_users", "wp_options", "wp_users")
-	stderr := bytes.Buffer{}
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
-
-	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "wp_"); err != nil {
-		t.Fatalf("alignLocalTablePrefix() error = %v", err)
-	}
-	if !strings.Contains(stderr.String(), "The previous prefix wp_abc_ still has 3 tables") {
-		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
 	}
 }
 
@@ -329,9 +256,6 @@ func TestPostPullSwitchesDefaultLocalPrefixToSourcePrefix(t *testing.T) {
 	if !strings.Contains(string(got), "$table_prefix = 'abc_';") || strings.Contains(string(got), "$table_prefix = 'wp_';") {
 		t.Fatalf("local prefix should follow the source prefix:\n%s", got)
 	}
-	if !strings.Contains(stderr.String(), "The previous prefix wp_ still has 2 tables") {
-		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
-	}
 	// WordPress-loading commands must only run after the prefix points at the imported tables.
 	log := readTestLog(t, logPath)
 	tables, plugins := strings.Index(log, "SHOW FULL TABLES"), strings.Index(log, "plugin list")
@@ -359,149 +283,5 @@ func TestPostPullCloneSwitchesExistingTargetToSourcePrefix(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "$table_prefix = 'abc_';") {
 		t.Fatalf("clone target should use the source prefix:\n%s", got)
-	}
-}
-
-func TestSanitizeWPConfigIsSilentWhenAlreadySanitized(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\ndefine('DB_NAME', 'prod');\nrequire_once ABSPATH . 'wp-settings.php';\n")
-	stdout := bytes.Buffer{}
-	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
-
-	for range 2 {
-		if err := app.sanitizeWPConfig(dir, Config{}); err != nil {
-			t.Fatalf("sanitizeWPConfig() error = %v", err)
-		}
-	}
-	if count := strings.Count(stdout.String(), "Local wp-config.php sanitized"); count != 1 {
-		t.Fatalf("sanitize reported %d times, want once for the pre-import and post-pull runs:\n%s", count, stdout.String())
-	}
-}
-
-func TestPlanPullTablesDropsEverythingTheDumpDoesNotRecreateInDDEV(t *testing.T) {
-	dir := t.TempDir()
-	writeTestWPConfig(t, dir, "abc_", "")
-	installFakeTablesWP(t, dir, "wp_options", "wp_users", "abc_options", "abc_old_plugin", "other_app_data")
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-
-	plan := app.planPullTables(context.Background(), dir, Config{}, modeDDEV, []string{"abc_options", "abc_users"})
-	want := []string{"abc_old_plugin", "other_app_data", "wp_options", "wp_users"}
-	if strings.Join(plan.drops, ",") != strings.Join(want, ",") {
-		t.Fatalf("drops = %q, want %q", plan.drops, want)
-	}
-}
-
-func TestPlanPullTablesDropsOnlyTheLocalInstallationInStandalone(t *testing.T) {
-	dir := t.TempDir()
-	writeTestWPConfig(t, dir, "wp_", "")
-	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_old_plugin", "wp_shop_options", "wp_shop_users", "blog_options", "abc_options")
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-
-	plan := app.planPullTables(context.Background(), dir, Config{}, modeStandalone, []string{"abc_options", "abc_users"})
-	want := []string{"wp_old_plugin", "wp_options", "wp_users"}
-	if strings.Join(plan.drops, ",") != strings.Join(want, ",") {
-		t.Fatalf("drops = %q, want %q (other sites sharing the database must stay)", plan.drops, want)
-	}
-}
-
-func TestLocalDBDumpExportsOnlyTheLocalInstallation(t *testing.T) {
-	dir := t.TempDir()
-	writeTestWPConfig(t, dir, "wp_", "")
-	logPath := installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_shop_options", "wp_shop_users", "blog_options")
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-
-	if err := app.ensureLocalDBDump(context.Background(), dir, Config{}, filepath.Join(downloadsDir(dir), "db.sql.gz")); err != nil {
-		t.Fatalf("ensureLocalDBDump() error = %v", err)
-	}
-	if !strings.Contains(readTestLog(t, logPath), "db export - --add-drop-table --tables=wp_options,wp_users") {
-		t.Fatalf("push export should list only the local installation:\n%s", readTestLog(t, logPath))
-	}
-}
-
-func TestRemoveLocalDBDumpDropsALeftoverSourceDump(t *testing.T) {
-	dir := t.TempDir()
-	dump := filepath.Join(downloadsDir(dir), "db.sql.gz")
-	writeFile(t, dump, "source dump from pull --skip-import")
-	if err := removeLocalDBDump(dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(dump); !os.IsNotExist(err) {
-		t.Fatalf("a direct push must not reuse an earlier dump, got err: %v", err)
-	}
-	if err := removeLocalDBDump(dir); err != nil {
-		t.Fatalf("a missing dump is not an error: %v", err)
-	}
-}
-
-func TestCheckPushTablePrefix(t *testing.T) {
-	for name, test := range map[string]struct {
-		remote  string
-		wantErr bool
-	}{
-		"different prefix stops": {remote: "stg_", wantErr: true},
-		"same prefix continues":  {remote: "abc_"},
-		"no WordPress continues": {remote: ""},
-	} {
-		dir := t.TempDir()
-		writeTestWPConfig(t, dir, "abc_", "")
-		installFakeTablesWP(t, dir)
-		installFakeSSH(t, dir, "#!/bin/sh\nprintf '"+test.remote+"\\n'\n")
-		app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-
-		err := app.checkPushTablePrefix(context.Background(), dir, Config{PushUser: "deploy", PushHost: "staging.example.com", PushRemotePath: "/var/www/html"})
-		if test.wantErr != (err != nil) {
-			t.Fatalf("%s: checkPushTablePrefix() error = %v", name, err)
-		}
-		if test.wantErr && !strings.Contains(err.Error(), "uses the table prefix stg_, but the local database uses abc_") {
-			t.Fatalf("%s: unexpected message: %v", name, err)
-		}
-	}
-}
-
-func TestPlanPullTablesFollowsDBReset(t *testing.T) {
-	dir := t.TempDir()
-	writeTestWPConfig(t, dir, "wp_", "")
-	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_old_plugin", "blog_options", "blog_users")
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-	dump := []string{"wp_options", "wp_users"}
-
-	for name, test := range map[string]struct {
-		mode  runtimeMode
-		reset string
-		want  string
-	}{
-		"none keeps everything in DDEV":             {mode: modeDDEV, reset: dbResetNone, want: ""},
-		"installation narrows DDEV":                 {mode: modeDDEV, reset: dbResetInstallation, want: "wp_old_plugin"},
-		"database widens standalone":                {mode: modeStandalone, reset: dbResetDatabase, want: "blog_options,blog_users,wp_old_plugin"},
-		"default in standalone is the installation": {mode: modeStandalone, want: "wp_old_plugin"},
-	} {
-		plan := app.planPullTables(context.Background(), dir, Config{DBReset: test.reset}, test.mode, dump)
-		if got := strings.Join(plan.drops, ","); got != test.want {
-			t.Fatalf("%s: drops = %q, want %q", name, got, test.want)
-		}
-	}
-}
-
-func TestDBResetConfigLayers(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".wp-ssh.yaml")
-	writeFile(t, path, "db_reset: \"none\"\n")
-	cfg, err := readConfigFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.DBReset != dbResetNone {
-		t.Fatalf("config file value = %q, want none", cfg.DBReset)
-	}
-	cfg.applyEnv([]string{"WP_SSH_DB_RESET=database"})
-	if cfg.DBReset != dbResetDatabase {
-		t.Fatalf("environment value = %q, want database", cfg.DBReset)
-	}
-	cfg = configOptions{DBReset: "installation"}.apply(cfg)
-	if cfg.DBReset != dbResetInstallation {
-		t.Fatalf("flag value = %q, want installation", cfg.DBReset)
-	}
-	if err := (Config{DBReset: "everything"}).validateDBReset(); err == nil || !strings.Contains(err.Error(), "db_reset must be database, installation, or none") {
-		t.Fatalf("invalid value error = %v", err)
 	}
 }

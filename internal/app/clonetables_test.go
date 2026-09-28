@@ -3,45 +3,11 @@ package app
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
-
-func TestCreateTableCollectorReadsNamesAcrossChunks(t *testing.T) {
-	t.Parallel()
-	dump := "-- dump\nDROP TABLE IF EXISTS `wp_options`;\nCREATE TABLE `wp_options` (\n  `option_id` bigint\n);\n" +
-		"INSERT INTO `wp_options` VALUES " + strings.Repeat("(1,'x'),", 5000) + "(2,'y');\n" +
-		"CREATE TABLE IF NOT EXISTS `wp_odd``name` (\n);\nCREATE TABLE `wp_last` ("
-	collector := &createTableCollector{}
-	for start := 0; start < len(dump); start += 7 {
-		if _, err := collector.Write([]byte(dump[start:min(start+7, len(dump))])); err != nil {
-			t.Fatal(err)
-		}
-	}
-	collector.flush()
-	want := []string{"wp_options", "wp_odd`name", "wp_last"}
-	if !reflect.DeepEqual(collector.tables, want) {
-		t.Fatalf("tables = %q, want %q", collector.tables, want)
-	}
-}
-
-func TestInstallationTablesSeparatesInstallsByTheirUsersTable(t *testing.T) {
-	t.Parallel()
-	tables := []string{
-		"wp_options", "wp_users", "wp_posts",
-		"wp_2_options", "wp_2_posts", // multisite blog: no users table of its own
-		"wp_2019_options", "wp_2019_users", // a second standalone install
-		"wp_myplugin_options", "wp_myplugin_log", // a plugin, not an install
-		"WP_Shop_options", "wp_shop_users", // another install, as lower_case_table_names lists it
-		"other_options",
-	}
-	got := installationTables(tables, "wp_")
-	want := []string{"wp_options", "wp_users", "wp_posts", "wp_2_options", "wp_2_posts", "wp_myplugin_options", "wp_myplugin_log"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("installationTables() = %q, want %q", got, want)
-	}
-}
 
 func TestRenameQueriesMovePrefixDerivedKeys(t *testing.T) {
 	t.Parallel()
@@ -62,7 +28,7 @@ func TestRenameQueriesMovePrefixDerivedKeys(t *testing.T) {
 	}
 }
 
-func TestReadCloneTargetUsesResolvedConfig(t *testing.T) {
+func TestReadCloneTargetUsesResolvedConfigAndSameDatabaseNeedsKnownValues(t *testing.T) {
 	dir := t.TempDir()
 	writeTestWPConfig(t, dir, "old_", "target_db")
 	installFakeTablesWP(t, dir)
@@ -94,7 +60,7 @@ func cloneTables(t *testing.T, dir string, cfg Config, previous cloneTarget, dum
 	if err == nil {
 		err = app.applyTablePlan(context.Background(), dir, cfg, plan)
 	}
-	return readTestLog(t, dir+"/wp.log"), stderr.String(), err
+	return readTestLog(t, filepath.Join(dir, "wp.log")), stderr.String(), err
 }
 
 func TestCloneDropsOnlyThePreviousInstallation(t *testing.T) {

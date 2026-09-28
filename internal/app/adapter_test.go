@@ -15,7 +15,7 @@ func TestStandalonePullKeepsSilentRunValuesOneShot(t *testing.T) {
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	adapter := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: dir})
 
-	cfg := Config{Destination: "deploy@other.example.com", CloneDBPassword: "sekret"}
+	cfg := Config{Destination: "deploy@other.example.com"}
 	if err := adapter.PreparePull(app, cfg, configOptions{Silent: true}); err != nil {
 		t.Fatalf("PreparePull() error = %v", err)
 	}

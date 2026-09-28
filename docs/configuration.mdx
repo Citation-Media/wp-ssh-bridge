@@ -56,7 +56,7 @@ local_url: "https://example.ddev.site"         # only to override what is detect
 clone_images: false                            # include wp-content/uploads on pull
 skip_search_replace: false
 skip_cache_rebuild: false                      # page builder CSS after pull, clone, push
-db_reset: "installation"                  # optional: database, installation, or none
+db_reset: "installation"                       # optional: database, installation, or none
 plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
 
 # --- Domain rewrites, both directions ---
@@ -115,7 +115,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
 | `skip_cache_rebuild` | `WP_SSH_SKIP_CACHE_REBUILD` | Skip rebuilding Elementor, Bricks, and Beaver Builder CSS after a pull, clone, or push. |
-| `db_reset` | `WP_SSH_DB_RESET` | Which tables a pull or clone removes after the import when the imported database does not contain them: `database` (every such table in the database), `installation` (only the tables of the installation the `wp-config.php` described), or `none` (keep them and report). A pull defaults to `database` in DDEV and wp-env and to `installation` in standalone mode; a clone defaults to `installation`. |
+| `db_reset` | `WP_SSH_DB_RESET` | Which tables a pull or clone removes after the import when the imported database does not contain them: `database` (every such table in the database), `installation` (only the tables of the installation the `wp-config.php` described), or `none` (keep them and report). A pull defaults to `database` in DDEV and wp-env and to `installation` in standalone mode; a clone defaults to `installation`. A native `ddev pull` always empties the database. Details in [Pull](/docs/commands/pull#what-happens-in-order) and [Clone](/docs/commands/clone#replacing-an-existing-installation). |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |
 
 ### Clone target database
@@ -354,7 +354,7 @@ wp-ssh-bridge plugins remove
 
 ## Flag reference [#flags]
 
-`init`, `pull`, `push`, and `clone` share one set of flags. Each flag overrides the key of the same meaning for that run, and `init` writes it into the config file. `init` rejects the flags that only make sense during a transfer: `--skip-db`, `--skip-files`, `--skip-import`, and the `--db-*` options.
+`init`, `pull`, `push`, and `clone` share one set of flags. Each flag overrides the key of the same meaning for that run, and `init` writes it into the config file. `init` rejects the flags that only make sense during a transfer: `--skip-db`, `--skip-files`, `--skip-import`, and the clone database options `--db-host`, `--db-name`, `--db-user`, `--db-password`, and `--db-prefix`.
 
 ### Source and target addresses
 

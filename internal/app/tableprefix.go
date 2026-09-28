@@ -19,19 +19,13 @@ var (
 // WP-CLI success and download notices.
 const tablePrefixMarker = "wp-ssh-table-prefix="
 
-// installationTablesAwk lists the base tables of the installation using the prefix p,
-// comma-separated for db export --tables. It applies the rule of installationTables on
-// the host: a longer prefix with its own options and users tables is another
-// installation sharing the database.
-const installationTablesAwk = `{ t = $1; if (t == "") next; n[++c] = t; s[tolower(t)] = 1 } END { lp = tolower(p); for (i = 1; i <= c; i++) { l = tolower(n[i]); if (length(l) > 7 && substr(l, length(l) - 6) == "options") { st = substr(l, 1, length(l) - 7); if (st != lp && index(st, lp) == 1 && ((st "users") in s)) o[st] = 1 } } sep = ""; for (i = 1; i <= c; i++) { l = tolower(n[i]); if (index(l, lp) != 1) continue; skip = 0; for (x in o) if (index(l, x) == 1) skip = 1; if (!skip) { printf "%s%s", sep, n[i]; sep = "," } } }`
-
 // remoteExportCommands exports only the source installation's tables and prints its
 // prefix in the same SSH session, so a database shared with other sites does not travel
 // along. Only the last line of the prefix lookup is the value, since PHP may print
 // notices to stdout first. Without a prefix or a table list the whole database is
 // exported, and a failed lookup never aborts the export.
 func remoteExportCommands(wpExport string, remoteDump string) string {
-	query := wpExport + ` --allow-root --skip-plugins --skip-themes db query "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" --skip-column-names`
+	query := wpExport + ` --allow-root --skip-plugins --skip-themes db query "` + baseTablesQuery + `" --skip-column-names`
 	export := wpExport + " --allow-root db export " + shellQuote(remoteDump)
 	return strings.Join([]string{
 		`wp_ssh_prefix=$({ wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true; } | tail -n 1);`,
@@ -145,20 +139,11 @@ func (a *App) alignLocalTablePrefix(ctx context.Context, projectRoot string, cfg
 		return nil
 	}
 	title := fmt.Sprintf("Updating local table prefix: %s -> %s", defaultString(localPrefix, "unknown"), sourcePrefix)
-	if err := a.runStep(title, "Local table prefix set to "+sourcePrefix, func() error {
+	// The tables under the previous prefix were already handled by the import's table
+	// plan, following db_reset.
+	return a.runStep(title, "Local table prefix set to "+sourcePrefix, func() error {
 		return os.WriteFile(wpConfig, []byte(updated), 0o644)
-	}); err != nil {
-		return err
-	}
-
-	// installationTables leaves out the imported install when its prefix extends the
-	// previous one, and another install sharing the database.
-	if localPrefix != "" {
-		if stale := len(installationTables(tables, localPrefix)); stale > 0 {
-			a.UI.Warning("The previous prefix %s still has %d %s in the database; WordPress no longer uses them.", localPrefix, stale, pluralNoun(stale, "table"))
-		}
-	}
-	return nil
+	})
 }
 
 func (a *App) warnSetTablePrefix(reason string, prefix string) {

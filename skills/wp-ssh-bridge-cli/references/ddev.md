@@ -22,7 +22,7 @@ ddev pull wp-ssh -y                 # native: interactive use
 wp-ssh-bridge pull --silent         # direct: scripts and flags
 ```
 
-   Native `ddev pull` shows DDEV's lifecycle output, lets DDEV import the dump, and runs each provider step as its own process that authenticates separately. It takes no CLI flags; use `--environment=` (see "DDEV Overrides"). The direct pull takes every flag, needs one SSH approval per run, and wraps the import in maintenance mode. Both rewrite URLs, align the table prefix, and remove blocked plugins.
+   Native `ddev pull` shows DDEV's lifecycle output, lets DDEV import the dump, and runs each provider step as its own process that authenticates separately. It takes no CLI flags; use `--environment=` (see "DDEV Overrides"). The direct pull takes every flag, needs one SSH approval per run, wraps the import in maintenance mode, and removes the tables the dump lacks as `db_reset` sets (default `database`); native `ddev pull` always empties the database. Both rewrite URLs, align the table prefix, remove blocked plugins, and rebuild page builder CSS.
 
 4. Push only after the user confirms the push destination, remote path, and target URL:
 
@@ -30,7 +30,7 @@ wp-ssh-bridge pull --silent         # direct: scripts and flags
 ddev push wp-ssh -y
 ```
 
-   A direct `wp-ssh-bridge push` in DDEV prints the resolved target and asks `Continue`; `--yes` or `--silent` skips that prompt.
+   A direct `wp-ssh-bridge push` in DDEV prints the resolved target and asks `Continue`; `--yes` or `--silent` skips that prompt. It exports the local database afresh on every run; native `ddev push` uploads DDEV's own fresh export.
 
 Do not manually reproduce provider steps.
 

@@ -77,7 +77,7 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	exportOutput := ""
 	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
 		var err error
-		exportOutput, err = a.outputSSHArgsWithFilteredWarnings(ctx, projectRoot, a.sshArgv(target, sshTarget(target), remoteCommand))
+		exportOutput, err = a.outputSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
 		return err
 	}); err != nil {
 		return err
@@ -328,10 +328,8 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 	// Clone writes the target DB credentials before import (see runPullPipeline), so the
 	// runtime's dev-mode hooks do not run for it and blocked plugins stay.
 	if !clone {
-		for _, hook := range adapter.PostPullHooks() {
-			if err := hook(ctx, a, projectRoot, cfg); err != nil {
-				return err
-			}
+		if err := a.runPostPullHooks(ctx, adapter, cfg); err != nil {
+			return err
 		}
 	}
 	// The prefix must match the imported tables before any WP-CLI call loads WordPress,
@@ -350,6 +348,18 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 		return err
 	}
 	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
+}
+
+// runPostPullHooks runs the runtime's dev-mode rewrites, such as the DDEV wp-config.php
+// sanitising. They are idempotent, so the direct pipeline runs them before the import and
+// postPull again for the provider flow.
+func (a *App) runPostPullHooks(ctx context.Context, adapter runtimeAdapter, cfg Config) error {
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(ctx, a, adapter.Root(), cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // moveClonedSiteURL moves a cloned live site to its target URL. The URL constants the
@@ -1343,6 +1353,13 @@ func pluralNoun(count int, singular string) string {
 		return singular
 	}
 	return singular + "s"
+}
+
+func pluralVerb(count int) string {
+	if count == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {

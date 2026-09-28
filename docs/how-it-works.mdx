@@ -64,7 +64,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     4. Sync files with rsync `--delete`, minus the exclusions.
     5. In DDEV, sanitise the copied `wp-config.php` so WP-CLI reaches the DDEV database instead of the production one.
     6. Enable local maintenance mode, when a WordPress site is already installed locally.
-    7. Import the dump locally, then delete the local copy of it. Remove the local tables the dump did not contain: by default all of them in DDEV and wp-env and only the local installation's in standalone mode, adjustable with `db_reset`.
+    7. Import the dump locally, then delete the local copy of it. After a successful import, remove the local tables the dump did not contain, as `db_reset` sets.
     8. Point the local `$table_prefix` at the imported tables when the source uses a different prefix. Tables are not renamed.
     9. Rewrite `wp-config.php` URL constants for the local environment, except in wp-env.
     10. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
@@ -72,30 +72,33 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     12. Rebuild page builder CSS for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
     13. Disable maintenance mode, including after a failed step.
 
-    This is the direct `wp-ssh-bridge pull`. A native `ddev pull wp-ssh` lets DDEV import the dump itself, so it runs without maintenance mode; the prefix, URL, plugin, and page builder steps are the same.
+    This is the direct `wp-ssh-bridge pull`. A native `ddev pull wp-ssh` lets DDEV import the dump itself, so it runs without maintenance mode and always empties the database first; the prefix, URL, plugin, and page builder steps are the same.
 
   </Tab>
   <Tab title="Push">
 
-    1. Preflight against the push target, including a stop when its table prefix differs from the local one.
-    2. Enable maintenance mode on the target for the whole operation, when a WordPress site is already installed there.
-    3. Export the local installation's tables with WP-CLI, fresh on every push.
-    4. Upload the dump and import it on the target with remote WP-CLI. The target's current URL is captured beforehand when `push_url` is not set.
-    5. Sync files to the remote root, excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and `.wp-ssh/`.
-    6. Search-replace URLs on the target, including the multisite domain tables.
-    7. Rebuild page builder CSS on the target for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
-    8. Disable maintenance mode.
+    1. Preflight against the push target.
+    2. Stop when the target's `$table_prefix` differs from the local one. A target without WordPress yet skips the check.
+    3. Enable maintenance mode on the target for the whole operation, when a WordPress site is already installed there.
+    4. Export the local installation's tables with WP-CLI, afresh on every run.
+    5. Upload the dump and import it on the target with remote WP-CLI. The target's current URL is captured beforehand when `push_url` is not set.
+    6. Sync files to the remote root, excluding `wp-config.php`, `wp-config-ddev.php`, `.ddev/`, `.git/`, and `.wp-ssh/`.
+    7. Search-replace URLs on the target, including the multisite domain tables.
+    8. Rebuild page builder CSS on the target for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
+    9. Disable maintenance mode, including after a failed step.
+
+    This is the direct `wp-ssh-bridge push`. A native `ddev push wp-ssh` uploads the dump DDEV exported right before and runs without maintenance mode; the prefix check, URL, and page builder steps are the same.
 
   </Tab>
   <Tab title="Clone">
 
     1. Preflight, and a hard stop if the project root is DDEV or wp-env.
     2. Optionally empty the target with `--clean-target`.
-    3. Export and download the source database.
+    3. Export the installation's tables on the source and download the dump.
     4. Sync files additively, including uploads and `wp-config.php`.
     5. Write the target database credentials into the copied `wp-config.php`.
     6. Import the database using those credentials, in maintenance mode when a WordPress site is already installed at the target and `--clean-target` is not set.
-    7. Before the import, stop if it would overwrite a table outside the previous installation. Afterwards, remove the previous installation's tables, and with `--db-prefix` rename the imported tables and prefix-derived keys.
+    7. Before the import, stop if `wp-config.php` resolves to another database or the import would overwrite a table outside the previous installation. After a successful import, remove the previous installation's tables the dump did not contain, as `db_reset` sets, and with `--db-prefix` rename the imported tables and prefix-derived keys.
     8. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
     9. Rebuild page builder CSS for Elementor, Bricks, and Beaver Builder when installed. Failures are warnings only.
 
@@ -112,15 +115,16 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 
 :::note[The rules that matter]
 - A pull never writes to the source host, apart from a temporary dump that is deleted again.
-- Maintenance mode wraps every database import into an installed WordPress site, on both sides, and is lifted even when the run fails. A local WordPress root or target without an installed site, such as an empty directory or a new database, has nothing to protect and is imported without it.
+- In a direct run, maintenance mode wraps every database import into an installed WordPress site, on both sides, and is lifted even when the run fails. A local WordPress root or target without an installed site, such as an empty directory or a new database, has nothing to protect and is imported without it.
 - Remote temporary files and the MariaDB compatibility shim are removed on success and by a cleanup trap on failure.
 - PHP functions a host disables are re-enabled only for the export step's WP-CLI processes that need them, never in the host's PHP configuration.
-- Exports cover the WordPress installation's tables only, so other sites sharing a database never travel along.
-- A pull empties only what belongs to the local site: by default the whole project database in DDEV and wp-env and the local installation's tables in standalone mode; `db_reset` changes that. A push stops when the target's table prefix differs from the local one.
+- Exports cover only the WordPress installation's tables: on the source for a pull or clone, locally for a direct push. Other sites sharing the database never travel along. Another WordPress installation, even one whose prefix starts with the same characters, such as `wp_shop_` next to `wp_`, is recognised by its own `options` and `users` tables. When the prefix or the table list cannot be read, the whole database is exported.
+- After a successful import, a pull removes the local tables the pulled database does not contain: by default every such table in DDEV and wp-env, and only the local installation's in standalone mode. `db_reset` changes that; see [Pull](/docs/commands/pull#what-happens-in-order).
+- A push stops before maintenance mode and the upload when the target's `$table_prefix` differs from the local one.
 - `wp-config.php` is never pushed, so a target keeps its own credentials.
 - Push is rejected in wp-env projects, where the local tree would erase the target's plugins and uploads.
 - Clone is rejected in DDEV and wp-env projects, where the import would land in a container database.
-- Clones are additive for files unless you explicitly ask for `--clean-target`. In the database, a clone removes only the tables of the installation the target's `wp-config.php` described, and stops before overwriting anything else.
+- Clones are additive for files unless you explicitly ask for `--clean-target`. In the database, a clone by default removes only the tables of the installation the target's previous `wp-config.php` described, and stops before overwriting anything else; see [Clone](/docs/commands/clone#replacing-an-existing-installation).
 :::
 
 ## URL rewriting

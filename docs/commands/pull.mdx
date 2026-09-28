@@ -104,16 +104,26 @@ A pull never modifies the source site. It creates a temporary database dump in t
     Local tools, SSH access, the paths on both sides, and WP-CLI are checked first, so a failure stops the run before anything changes. [How it works](/docs/how-it-works#preflight) lists every check.
   </Step>
   <Step title="Database export and download">
-    `wp db export` on the source writes a gzipped dump of the WordPress installation's tables into the remote temp directory. Other sites or applications sharing the source database are left out. The dump is downloaded, then removed remotely, and the cleanup is retried if the run fails.
+    `wp db export` on the source writes a gzipped dump of the WordPress installation's tables into the remote temp directory. Other sites or applications sharing the source database are [left out](/docs/how-it-works#safety-rules). The dump is downloaded, then removed remotely, and the cleanup is retried if the run fails.
   </Step>
   <Step title="File sync">
     rsync mirrors the source WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
   </Step>
   <Step title="Import">
-    In DDEV mode, the copied `wp-config.php` is sanitised first, so the import reaches the DDEV database. The local site then goes into maintenance mode and the dump is imported. After a successful import, the tables the pulled database does not contain are removed, so nothing of the old local copy lingers, not even under another prefix. In DDEV and wp-env the project's database belongs to that project alone, so every such table goes, as `ddev import-db` does. A standalone project may share its database with other local sites, so only the tables of the installation its `wp-config.php` describes go. Change this with `db_reset` or `--db-reset`: `database` removes every table the dump does not contain, `installation` only the local installation's, and `none` keeps them and reports what is left. A native `ddev pull` always empties the database, because DDEV imports the dump itself. Maintenance mode stays on until the last step below has finished. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it. A native `ddev pull` hands the dump to DDEV, which imports it without maintenance mode.
+    In DDEV mode, the copied `wp-config.php` is sanitised first, so the import reaches the DDEV database. The local site then goes into maintenance mode and the dump is imported. Maintenance mode stays on until the last step below has finished. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
+
+    After a successful import, the pull removes the local tables the pulled database does not contain, so nothing of the old local copy lingers, not even under another prefix. Which tables count is decided before the import, and a failed import removes nothing. `db_reset`, `WP_SSH_DB_RESET`, or `--db-reset` choose the scope:
+
+    | Value | Effect |
+    | --- | --- |
+    | `database` | Every table the dump does not contain. The default in DDEV and wp-env, where the project's database belongs to that project alone, as with `ddev import-db`. |
+    | `installation` | Only the tables of the installation the local `wp-config.php` describes. The default in standalone mode, where the database may be shared with other local sites. |
+    | `none` | Nothing is removed; the pull reports how many tables it kept. |
+
+    A native `ddev pull` hands the dump to DDEV, which imports it without maintenance mode and always empties the database first, whatever `db_reset` says.
   </Step>
   <Step title="Table prefix">
-    The imported tables keep the source table prefix. When your local `wp-config.php` uses a different `$table_prefix`, for example `wp_` locally and `abc_` on the source, the local value is changed to the source prefix before anything loads WordPress. The tables are not renamed, so pushing back to the source keeps its prefix. The tables under the old local prefix were already removed in the import step.
+    The imported tables keep the source table prefix. When your local `wp-config.php` uses a different `$table_prefix`, for example `wp_` locally and `abc_` on the source, the local value is changed to the source prefix before anything loads WordPress. The tables are not renamed, so pushing back to the source keeps its prefix. Unless `db_reset` is `none`, the tables under the old local prefix were already removed in the import step.
   </Step>
   <Step title="URL rewrites">
     A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database. wp-env is the exception: its generated `wp-config.php` already points at the local URL.
@@ -162,7 +172,7 @@ blocked plugin directories         from the block list
 | `--skip-search-replace` | Leave URLs untouched after the import. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
 | `--skip-cache-rebuild` | Do not rebuild page builder CSS after the import. |
-| `--db-reset` | Which local tables to remove after the import: `database`, `installation`, or `none`. Defaults to `database` in DDEV and wp-env and `installation` in standalone mode. |
+| `--db-reset` | Which tables to remove after the import when the dump does not contain them: `database`, `installation`, or `none`. Defaults to `database` in DDEV and wp-env and `installation` in standalone mode. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
 | `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |
@@ -231,6 +241,7 @@ The home URL should be local, and production-only plugins should be gone.
 | `mariadb-dump: command not found` | The host ships only the legacy MySQL client names, and the installed binary predates the workaround. | [Update the CLI](/docs/installation#updating). If preflight prints the compatibility line and the export still fails, the host lacks `mysqldump` as well. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
 | Local files not writable | Ownership or permissions on the local WordPress directory. | Fix them, then run again. The error names the exact path. |
 | WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. | Set the source prefix where your config defines it. |
+| Tables the source no longer has remain after a pull | `db_reset` is `none`, or the CLI warned that it could not list the local tables or read the local `$table_prefix`, and left them in place. | Unset `db_reset` or choose `installation` or `database`, fix what the warning names, and pull again. |
 | `scp/tar transport: stale local files not removed (no --delete equivalent)` | rsync is missing on one side, so the tar-over-SSH fallback is in use. | Install rsync on both machines, or accept that files removed on the source stay behind locally. |
 
 More in [Troubleshooting](/docs/troubleshooting).

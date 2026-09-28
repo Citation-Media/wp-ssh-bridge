@@ -99,7 +99,7 @@ When the new host cannot open an SSH connection to the old one, clone the site i
   </Step>
   <Step title="Create wp-config.php on the new host">
 
-    A push never overwrites the target's `wp-config.php`, so the new host needs one with the new database and the same table prefix. With WP-CLI on the new host, replacing `wp_` with the prefix from the previous step:
+    A push never overwrites the target's `wp-config.php`, so the new host needs one with the new database and the same table prefix; with another prefix, the push stops before uploading anything. With WP-CLI on the new host, replacing `wp_` with the prefix from the previous step:
 
     ```bash
     ssh -t deploy@new.example.com 'mkdir -p /var/www/new-site && cd /var/www/new-site && wp core download && wp config create --dbname=new_db --dbuser=new_user --dbprefix=wp_ --prompt=dbpass'
