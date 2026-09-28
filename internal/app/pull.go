@@ -1117,34 +1117,36 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 	})
 }
 
-// importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime.
-func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error {
+// importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime and
+// returns the tables the dump created.
+func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) ([]string, error) {
 	dumpPath := filepath.Join(downloadsDir(root), "db.sql.gz")
 	file, err := os.Open(dumpPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
 
 	gzipReader, err := gzip.NewReader(file)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer gzipReader.Close()
 
 	tempFile, err := os.CreateTemp(downloadsDir(root), "db-*.sql")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
 
-	if _, err := io.Copy(tempFile, gzipReader); err != nil {
+	collector := &createTableCollector{}
+	if _, err := io.Copy(tempFile, io.TeeReader(gzipReader, collector)); err != nil {
 		_ = tempFile.Close()
-		return err
+		return nil, err
 	}
 	if err := tempFile.Close(); err != nil {
-		return err
+		return nil, err
 	}
 
 	importPath := tempPath
@@ -1155,27 +1157,28 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error 
 	} else if isWPEnvRoot(root) {
 		status, ok := wpEnvStatus(root)
 		if !ok {
-			return errors.New("wp-env status is unavailable, so the database dump cannot be mapped into the container; start the environment with wp-env start")
+			return nil, errors.New("wp-env status is unavailable, so the database dump cannot be mapped into the container; start the environment with wp-env start")
 		}
 		// Handing a host path to a command that runs inside the container yields a bare
 		// file-not-found after the whole database has already been downloaded.
 		containerPath, ok := wpEnvContainerPath(status, tempPath)
 		if !ok {
-			return fmt.Errorf("database dump at %s is outside the wp-env WordPress tree at %s, so the container cannot read it", tempPath, status.wordPressRoot())
+			return nil, fmt.Errorf("database dump at %s is outside the wp-env WordPress tree at %s, so the container cannot read it", tempPath, status.wordPressRoot())
 		}
 		importPath = containerPath
 	}
 	if err := a.runStep("Importing database into local WordPress", "Local database imported", func() error {
 		return a.runWPWithFilteredWarnings(ctx, root, cfg, "db", "import", importPath)
 	}); err != nil {
-		return err
+		return nil, err
 	}
 	// The dump is a full production database. Do not leave it behind after a successful
 	// import; in wp-env mode the scratch directory is inside the served document root.
 	if err := os.Remove(dumpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		a.UI.Warning("Could not remove local database export: %s", err)
 	}
-	return nil
+	collector.flush()
+	return collector.tables, nil
 }
 
 // readPluginList returns embedded default plugins plus an optional custom block list.

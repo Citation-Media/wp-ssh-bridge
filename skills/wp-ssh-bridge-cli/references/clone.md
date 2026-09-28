@@ -67,7 +67,9 @@ wp-ssh-bridge clone --silent \
   --db-password target_password
 ```
 
-Without `--db-prefix`, the target `$table_prefix` follows the source. Add `--db-prefix wp_` only when the target table prefix should differ from the copied source `wp-config.php`; imported tables are not renamed, so the target database must already use that prefix.
+Without `--db-prefix`, the target `$table_prefix` follows the source. Add `--db-prefix wp_` only when the target should use another prefix; the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to it. It fails before changing anything when the source database already holds tables under that prefix.
+
+After the import, the clone removes tables of the installation it replaces: tables under the cloned site's prefix that the dump did not create, and tables under the previous target `wp-config.php` prefix when that config used the same database (plain string `DB_NAME` and `DB_HOST`). Tables under other prefixes and other WordPress installs sharing the database stay; the clone never resets the whole database.
 
 ## Emptying The Target (`--clean-target`)
 

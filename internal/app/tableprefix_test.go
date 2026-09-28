@@ -223,3 +223,28 @@ func TestPostPullSwitchesDefaultLocalPrefixToSourcePrefix(t *testing.T) {
 		t.Fatalf("plugin cleanup ran before the prefix was aligned:\n%s", log)
 	}
 }
+
+func TestPostPullCloneSwitchesExistingTargetToSourcePrefix(t *testing.T) {
+	dir := t.TempDir()
+	// A target that already runs WordPress under another prefix, cloned with --skip-files.
+	wpConfig := writePrefixWPConfig(t, dir, "old_")
+	installFakePrefixWP(t, dir, `old_options\nold_posts\nabc_options\nabc_posts\n`)
+	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
+	adapter := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: dir})
+
+	if err := app.postPull(context.Background(), adapter, Config{SkipSearchReplace: true}, true); err != nil {
+		t.Fatalf("postPull() error = %v\nstderr:\n%s", err, stderr.String())
+	}
+	got, err := os.ReadFile(wpConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "$table_prefix = 'abc_';") {
+		t.Fatalf("clone target should use the source prefix:\n%s", got)
+	}
+	if !strings.Contains(stderr.String(), "2 local tables with the previous prefix old_ remain") {
+		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
+	}
+}

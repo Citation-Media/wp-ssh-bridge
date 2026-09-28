@@ -754,6 +754,13 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	useSCP := a.needsScpTransport(ctx, root, cfg.pullTarget(), opts.ForceScpTransport)
+	shouldImportDB := !opts.SkipDB && !opts.SkipImport
+	// Read before the file sync replaces the target's wp-config.php, so the previous
+	// installation's tables can be told apart after the import.
+	var previousTarget cloneTarget
+	if opts.Clone && shouldImportDB {
+		previousTarget = readCloneTarget(root, cfg)
+	}
 
 	if !opts.SkipDB {
 		if err := a.dbPull(ctx, root, cfg, useSCP); err != nil {
@@ -779,7 +786,6 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 
-	shouldImportDB := !opts.SkipDB && !opts.SkipImport
 	if opts.Clone && (shouldImportDB || !opts.SkipFiles) {
 		if err := a.applyCloneWPConfig(root, cfg); err != nil {
 			return err
@@ -801,8 +807,14 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if shouldImportDB {
-		if err := a.importLocalDB(ctx, root, cfg); err != nil {
+		dumpTables, err := a.importLocalDB(ctx, root, cfg)
+		if err != nil {
 			return err
+		}
+		if opts.Clone {
+			if err := a.replaceCloneTables(ctx, root, cfg, previousTarget, dumpTables); err != nil {
+				return err
+			}
 		}
 	}
 	if !shouldImportDB {

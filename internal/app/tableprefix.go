@@ -53,22 +53,29 @@ func (a *App) recordPullSourceTablePrefix(projectRoot string, exportOutput strin
 // later files-only pull cannot reuse it. An explicit clone --db-prefix names the target
 // prefix on purpose and stays as set.
 func (a *App) alignPulledTablePrefix(ctx context.Context, projectRoot string, cfg Config, clone bool) error {
-	path := pullSourcePrefixPath(projectRoot)
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	sourcePrefix, err := readPullSourceTablePrefix(projectRoot)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(pullSourcePrefixPath(projectRoot)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	sourcePrefix := parseTablePrefix(string(data))
 	if sourcePrefix == "" || (clone && cfg.CloneDBPrefix != "") {
 		return nil
 	}
 	return a.alignLocalTablePrefix(ctx, projectRoot, cfg, sourcePrefix)
+}
+
+// readPullSourceTablePrefix returns the prefix recorded by db-pull, or "" without one.
+func readPullSourceTablePrefix(projectRoot string) (string, error) {
+	data, err := os.ReadFile(pullSourcePrefixPath(projectRoot))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return parseTablePrefix(string(data)), nil
 }
 
 // alignLocalTablePrefix points the local wp-config.php at the tables a pulled database

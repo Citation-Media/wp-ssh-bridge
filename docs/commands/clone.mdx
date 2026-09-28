@@ -17,6 +17,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 | Development rewrites | Yes, including `WP_ENVIRONMENT_TYPE=development` | No |
 | URL search-replace | Yes | Yes, from your configured mappings |
 | Pre-existing target files | Mirrored with `--delete` | Kept, unless `--clean-target` |
+| Tables of a previous installation | Kept and reported | Removed after the import |
 
 :::warning[Standalone only]
 `clone` refuses to run in a DDEV or wp-env project root. Both route WP-CLI through a container, so the import would land in the container database instead of the target you specified. Run it against a plain directory. For local onboarding, use [`pull`](/docs/commands/pull) instead.
@@ -41,7 +42,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 
     The source flags describe where to read from. The `--db-*` flags describe the database the cloned site will use once it lives on its new host. They are written into the copied `wp-config.php` before the database is imported, so the import and the finished site agree on the same credentials.
 
-    Without `--db-prefix`, the target keeps the source table prefix. Add `--db-prefix` only when the target table prefix should differ from the one in the source `wp-config.php`. The imported tables are not renamed, so the target database must already use that prefix.
+    Without `--db-prefix`, the target uses the source table prefix. With `--db-prefix`, the imported tables are renamed to that prefix after the import, together with the `user_roles` option of every site and the user meta keys WordPress derives from the prefix.
 
   </Tab>
   <Tab title="DDEV">
@@ -155,6 +156,19 @@ A clone moves the site to another domain only when you name one. Without a targe
 
 To move the site, name the target with `local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`, or with a domain mapping such as `source.example.com` to `target.example.com`. The database is rewritten, and the `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` constants get the same replacements, but only where the copied `wp-config.php` already defines them. A `WP_SITEURL` in a subdirectory keeps its path, and a site that keeps its URLs in the database gets no new constants.
 
+## Replacing an existing installation
+
+A clone makes the imported database the target's only WordPress installation. The import itself only replaces the tables the dump contains, so after it the clone removes the tables a previous installation left behind:
+
+- tables under the prefix the cloned site uses that the dump did not create, such as plugin tables of the old site, and
+- tables under the prefix the target's previous `wp-config.php` used, when that config pointed at the same database.
+
+Tables under other prefixes stay, and so does another WordPress installation whose prefix merely starts with the same characters, such as `wp_shop_` next to `wp_`. Shared hosting often gives one database to several sites, so the clone never resets the whole database.
+
+```text
+✓ Previous installation tables removed
+```
+
 ## Maintenance mode during the import
 
 When a WordPress site is already installed at the target, the clone puts it into maintenance mode while the database is imported and lifts it again afterwards, including on failure. A migration usually targets an empty directory and a new database instead. There is no site to protect then, and WP-CLI could not activate maintenance mode anyway, so the import runs without it:
@@ -183,7 +197,9 @@ With `--clean-target`, the previous site is replaced, so maintenance mode is ski
 | Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
 | The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design; set `local_url` or add the mapping and rerun. |
 | The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
-| Old files from the previous install remain | Clones are additive. Use `--clean-target` if that is what you want. |
+| Old files from the previous install remain | Clones are additive for files. Use `--clean-target` if that is what you want. |
+| Old tables from the previous install remain | The previous `wp-config.php` pointed at another database, or its prefix or database name is not a plain string, so the clone could not tell they belong to it. Drop them manually. |
+| `cannot rename … for --db-prefix` | The source database already holds tables under the `--db-prefix` prefix, so renaming would overwrite them. Choose another prefix or omit `--db-prefix`. |
 | `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 
 More in [Troubleshooting](/docs/troubleshooting).
