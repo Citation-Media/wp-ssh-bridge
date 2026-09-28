@@ -34,6 +34,7 @@ type Config struct {
 	PushDomainReplacements []DomainReplacement
 	SkipSearchReplace      bool
 	SkipCacheRebuild       bool
+	DBReset                string
 	CloneDBHost            string
 	CloneDBName            string
 	CloneDBUser            string
@@ -182,6 +183,8 @@ func readConfigFile(path string) (Config, error) {
 			cfg.SkipSearchReplace = parseBool(value)
 		case "skip_cache_rebuild":
 			cfg.SkipCacheRebuild = parseBool(value)
+		case "db_reset":
+			cfg.DBReset = value
 		case "clone_db_host":
 			cfg.CloneDBHost = value
 		case "clone_db_name":
@@ -319,6 +322,7 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeDomainReplacements(&body, "push_domain_replacements", cfg.PushDomainReplacements)
 	writeBoolValue(&body, "skip_search_replace", cfg.SkipSearchReplace, defaults.SkipSearchReplace)
 	writeBoolValue(&body, "skip_cache_rebuild", cfg.SkipCacheRebuild, defaults.SkipCacheRebuild)
+	writeStringValue(&body, "db_reset", cfg.DBReset, defaults.DBReset)
 	writeStringValue(&body, "clone_db_host", cfg.CloneDBHost, defaults.CloneDBHost)
 	writeStringValue(&body, "clone_db_name", cfg.CloneDBName, defaults.CloneDBName)
 	writeStringValue(&body, "clone_db_user", cfg.CloneDBUser, defaults.CloneDBUser)
@@ -385,6 +389,7 @@ func (cfg *Config) applyEnv(env []string) {
 	cfg.PluginRemoveFile = firstNonEmpty(values["WP_SSH_PULL_PLUGIN_REMOVE_FILE"], cfg.PluginRemoveFile)
 	cfg.LocalURL = firstNonEmpty(values["WP_SSH_PULL_LOCAL_URL"], cfg.LocalURL)
 	cfg.Provider = firstNonEmpty(values["WP_SSH_PROVIDER"], cfg.Provider)
+	cfg.DBReset = firstNonEmpty(values["WP_SSH_DB_RESET"], cfg.DBReset)
 	cfg.CloneDBHost = firstNonEmpty(values["WP_SSH_CLONE_DB_HOST"], cfg.CloneDBHost)
 	cfg.CloneDBName = firstNonEmpty(values["WP_SSH_CLONE_DB_NAME"], cfg.CloneDBName)
 	cfg.CloneDBUser = firstNonEmpty(values["WP_SSH_CLONE_DB_USER"], cfg.CloneDBUser)
@@ -471,8 +476,29 @@ func (target RemoteTarget) addressConfigured() bool {
 	return target.Destination != "" || (target.User != "" && target.Host != "")
 }
 
+// Values of db_reset: which tables a pull or clone removes after the import when the
+// imported database does not contain them.
+const (
+	dbResetDatabase     = "database"
+	dbResetInstallation = "installation"
+	dbResetNone         = "none"
+)
+
+// validateDBReset rejects values other than the three modes; empty picks the
+// runtime's default.
+func (cfg Config) validateDBReset() error {
+	switch cfg.DBReset {
+	case "", dbResetDatabase, dbResetInstallation, dbResetNone:
+		return nil
+	}
+	return fmt.Errorf("db_reset must be %s, %s, or %s, not %q", dbResetDatabase, dbResetInstallation, dbResetNone, cfg.DBReset)
+}
+
 // validatePullRequired ensures source commands cannot be built from unsafe values.
 func (cfg Config) validatePullRequired() error {
+	if err := cfg.validateDBReset(); err != nil {
+		return err
+	}
 	return cfg.pullTarget().validate("pull source", "configure pull_destination (or pull_user and pull_host) and pull_remote_path in wp-ssh.yaml, set WP_SSH_PULL_* env vars, or pass --destination and --remote-path")
 }
 
@@ -491,6 +517,9 @@ func (cfg Config) validateConfiguredPush() error {
 
 // validateInitValues permits partial setup while rejecting unsafe provided values.
 func (cfg Config) validateInitValues() error {
+	if err := cfg.validateDBReset(); err != nil {
+		return err
+	}
 	if err := cfg.pullTarget().validateValues("pull source"); err != nil {
 		return err
 	}
@@ -588,7 +617,7 @@ func (cfg Config) validateCloneDBCredentials(required bool) error {
 			return fmt.Errorf("%s must not contain newlines", key)
 		}
 	}
-	if cfg.CloneDBPrefix != "" && regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(cfg.CloneDBPrefix) {
+	if cfg.CloneDBPrefix != "" && !validTablePrefix.MatchString(cfg.CloneDBPrefix) {
 		return fmt.Errorf("clone_db_prefix must contain only letters, numbers, and underscores")
 	}
 	return nil
@@ -640,6 +669,7 @@ func (cfg Config) envArgs() string {
 	add("WP_SSH_PULL_PLUGIN_REMOVE_FILE", cfg.PluginRemoveFile)
 	add("WP_SSH_PULL_LOCAL_URL", cfg.LocalURL)
 	add("WP_SSH_PROVIDER", cfg.Provider)
+	add("WP_SSH_DB_RESET", cfg.DBReset)
 	add("WP_SSH_CLONE_DB_HOST", cfg.CloneDBHost)
 	add("WP_SSH_CLONE_DB_NAME", cfg.CloneDBName)
 	add("WP_SSH_CLONE_DB_USER", cfg.CloneDBUser)
@@ -660,6 +690,9 @@ func mergeConfig(base Config, overlay Config) Config {
 	}
 	if overlay.Provider != "" {
 		base.Provider = overlay.Provider
+	}
+	if overlay.DBReset != "" {
+		base.DBReset = overlay.DBReset
 	}
 	if overlay.Destination != "" {
 		base.Destination = overlay.Destination

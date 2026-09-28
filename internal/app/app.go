@@ -77,6 +77,7 @@ Usage:
   wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
   wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
   wp-ssh-bridge domains add --old A --new B   Add pull/push domain mappings
+  wp-ssh-bridge domains list                  Show the configured domain mappings
   wp-ssh-bridge plugins remove [wordpress-root]
   wp-ssh-bridge version [--short]
 
@@ -90,7 +91,12 @@ Common flags:
   --push-destination string  Push target SSH destination
   --push-host string         Push target SSH host
   --push-remote-path string  Push target WordPress root
-  --local-wp-path string     Local WordPress root relative to the DDEV project
+  --local-wp-path string     Local WordPress root, relative to the project root or absolute
+  --local-url string         Local site URL
+  --push-url string          Push target site URL
+  --skip-search-replace      Leave URLs untouched after the import
+  --project-root string      Project root (default: detected from the working directory)
+  --yes, -y                  Skip the confirmation prompt of a direct DDEV run
   --clone-images             Include wp-content/uploads
   --skip-db                  Pull/push files only
   --skip-files               Pull/push database only
@@ -98,6 +104,7 @@ Common flags:
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --skip-cache-rebuild       Skip rebuilding page builder CSS after the database transfer
+  --db-reset string          Tables to remove after the import that the dump lacks: database, installation, or none
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
@@ -106,10 +113,10 @@ Clone flags:
   --db-name string           Clone target DB name
   --db-user string           Clone target DB user
   --db-password string       Clone target DB password
-  --db-prefix string         Clone target table prefix
-  --clean-target             Remove pre-existing target content before syncing
+  --db-prefix string         Rename cloned tables to this prefix (default: keep the source prefix)
+  --clean-target             Remove pre-existing target files before syncing
 
-Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
+Run "wp-ssh-bridge init" to configure this project (DDEV, wp-env, or standalone).
 `)
 }
 
@@ -285,9 +292,9 @@ func ensurePushAdapterSupported(adapter runtimeAdapter) error {
 func ensureCloneAdapterSupported(adapter runtimeAdapter) error {
 	switch adapter.Mode() {
 	case modeDDEV:
-		return errors.New("clone does not support DDEV projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a DDEV project root")
+		return errors.New("clone does not support DDEV projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain target directory, not a DDEV project root")
 	case modeWPEnv:
-		return errors.New("clone does not support wp-env projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a wp-env project root")
+		return errors.New("clone does not support wp-env projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain target directory, not a wp-env project root")
 	}
 	return nil
 }
@@ -300,6 +307,9 @@ func (a *App) commandPush(args []string) error {
 	}
 	if opts.SkipImport {
 		return errors.New("--skip-import only applies to pull")
+	}
+	if opts.DBReset != "" {
+		return errors.New("--db-reset only applies to pull and clone; a push replaces only the tables it uploads")
 	}
 
 	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
@@ -465,6 +475,9 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
+		if err := a.checkPushTablePrefix(ctx, runtime.Root, cfg); err != nil {
+			return err
+		}
 		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pushTarget(), false)
 		return a.dbPush(ctx, runtime.Root, cfg, useSCP)
 	case "files-push":
@@ -529,7 +542,7 @@ func (a *App) commandDomains(args []string) error {
 func (a *App) commandDomainsAdd(args []string) error {
 	fs := flag.NewFlagSet("domains add", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
-	projectRoot := fs.String("project-root", "", "DDEV project root")
+	projectRoot := fs.String("project-root", "", "project root (default: detected from the working directory)")
 	configFile := fs.String("config-file", "", "YAML config file path")
 	oldValue := fs.String("old", "", "source domain or URL")
 	newValue := fs.String("new", "", "target domain or URL")
@@ -583,7 +596,7 @@ func (a *App) commandDomainsAdd(args []string) error {
 func (a *App) commandDomainsList(args []string) error {
 	fs := flag.NewFlagSet("domains list", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
-	projectRoot := fs.String("project-root", "", "DDEV project root")
+	projectRoot := fs.String("project-root", "", "project root (default: detected from the working directory)")
 	configFile := fs.String("config-file", "", "YAML config file path")
 	integration := fs.String("integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {
@@ -648,10 +661,12 @@ func (a *App) resolveProjectRoot(explicit string, integration string, configFile
 	if err != nil {
 		return "", err
 	}
-	if runtime.Mode != modeStandalone {
+	// A standalone project is recognised by its config file, so plugin cleanup does not
+	// run against an arbitrary working directory.
+	if runtime.Mode != modeStandalone || fileExists(configPathForRuntime(runtime, configFile)) {
 		return runtime.Root, nil
 	}
-	return "", errors.New("no DDEV or wp-env project found; run from inside a project or pass --project-root")
+	return "", errors.New("no DDEV, wp-env, or configured standalone project found; run from the project root or pass --project-root")
 }
 
 // resolveRuntime chooses the runtime mode, honoring an explicitly pinned integration and
@@ -763,6 +778,18 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	useSCP := a.needsScpTransport(ctx, root, cfg.pullTarget(), opts.ForceScpTransport)
+	shouldImportDB := !opts.SkipDB && !opts.SkipImport
+	// Read before the file sync replaces the target's wp-config.php, so the previous
+	// installation's tables can be told apart after the import.
+	var previousTarget cloneTarget
+	previousPrefix := ""
+	if opts.Clone && shouldImportDB {
+		previousTarget = a.readCloneTarget(ctx, root, cfg)
+	} else if shouldImportDB && dbResetScope(cfg.DBReset, adapter.Mode()) == dbResetInstallation {
+		// A DDEV pull replaces wp-config.php with the source's, so the local installation's
+		// prefix has to be read before the file sync.
+		previousPrefix = a.localTablePrefix(ctx, root, cfg)
+	}
 
 	if !opts.SkipDB {
 		if err := a.dbPull(ctx, root, cfg, useSCP); err != nil {
@@ -788,9 +815,16 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 
-	shouldImportDB := !opts.SkipDB && !opts.SkipImport
 	if opts.Clone && (shouldImportDB || !opts.SkipFiles) {
 		if err := a.applyCloneWPConfig(root, cfg); err != nil {
+			return err
+		}
+	}
+	// A DDEV pull copies the source wp-config.php with production database constants.
+	// Sanitize it before maintenance mode and the import run WP-CLI against it, so both
+	// reach the DDEV database. postPull runs the hooks again for the provider flow.
+	if !opts.Clone {
+		if err := a.runPostPullHooks(ctx, adapter, cfg); err != nil {
 			return err
 		}
 	}
@@ -798,7 +832,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		if opts.Clone && opts.CleanTarget {
 			// The destination's previous site has just been replaced, so there is
 			// nothing left for maintenance mode to protect during the import.
-			a.UI.Info("Skipping local maintenance mode: --clean-target replaces the destination site")
+			a.UI.Info("Skipping local maintenance mode: --clean-target replaces the target site")
 		} else {
 			enabled, err := a.enableLocalMaintenanceMode(ctx, root, cfg)
 			if err != nil {
@@ -810,12 +844,30 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if shouldImportDB {
-		if err := a.importLocalDB(ctx, root, cfg); err != nil {
+		// Plan before the import, while the database still shows what it held, and drop
+		// only after a successful import, so a failed one leaves the previous site intact.
+		var plan tablePlan
+		beforeImport := func(dumpTables []string) (err error) {
+			if opts.Clone {
+				plan, err = a.planCloneTables(ctx, root, cfg, previousTarget, dumpTables)
+				return err
+			}
+			plan = a.planPullTables(ctx, root, cfg, adapter.Mode(), previousPrefix, dumpTables)
+			return nil
+		}
+		if err := a.importLocalDB(ctx, root, cfg, beforeImport); err != nil {
 			return err
 		}
-	}
-	if !shouldImportDB {
+		if err := a.applyTablePlan(ctx, root, cfg, plan); err != nil {
+			return err
+		}
+	} else {
 		cfg.SkipSearchReplace = true
+		// Nothing was imported, so a prefix recorded by this run must not repoint the
+		// local config at older tables.
+		if err := discardPullSourceTablePrefix(root); err != nil {
+			return err
+		}
 	}
 	if err := a.postPull(ctx, adapter, cfg, opts.Clone); err != nil {
 		return err
@@ -839,6 +891,11 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 
 	useSCP := a.needsScpTransport(ctx, root, cfg.pushTarget(), opts.ForceScpTransport)
 
+	if !opts.SkipDB {
+		if err := a.checkPushTablePrefix(ctx, root, cfg); err != nil {
+			return err
+		}
+	}
 	if !opts.SkipMaintenanceMode {
 		target := cfg.pushTarget()
 		enabled, err := a.enableRemoteMaintenanceMode(ctx, root, target)
@@ -851,6 +908,12 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	if !opts.SkipDB {
+		// dbPush reuses a dump that DDEV exported for its native push. A direct push must
+		// export the current local database instead of a file an earlier run left there,
+		// such as the source dump of a pull --skip-import.
+		if err := removeLocalDBDump(root); err != nil {
+			return err
+		}
 		if err := a.dbPush(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}
@@ -904,6 +967,7 @@ type configOptions struct {
 	LocalURL            string
 	SkipSearchReplace   bool
 	SkipCacheRebuild    bool
+	DBReset             string
 	CloneDBHost         string
 	CloneDBName         string
 	CloneDBUser         string
@@ -917,7 +981,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	opts := configOptions{Binary: defaultBinaryPath()}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt; use saved config, environment, and flags")
@@ -942,20 +1006,21 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.PushRemotePath, "push-remote-path", "", "push target WordPress root")
 	fs.StringVar(&opts.PushRemoteTmpDir, "push-remote-tmp-dir", "", "push target temporary directory")
 	fs.StringVar(&opts.PushURL, "push-url", "", "push target public WordPress URL")
-	fs.StringVar(&opts.LocalWPPath, "local-wp-path", "", "local WordPress root relative to project")
+	fs.StringVar(&opts.LocalWPPath, "local-wp-path", "", "local WordPress root, relative to the project root or absolute")
 	fs.BoolVar(&opts.CloneImages, "clone-images", false, "include wp-content/uploads")
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	fs.BoolVar(&opts.SkipCacheRebuild, "skip-cache-rebuild", false, "skip rebuilding page builder CSS after the database transfer")
+	fs.StringVar(&opts.DBReset, "db-reset", "", "tables to remove after the import when the dump does not contain them: database, installation, or none")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
 		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
 		fs.StringVar(&opts.CloneDBUser, "db-user", "", "clone target DB user")
 		fs.StringVar(&opts.CloneDBPassword, "db-password", "", "clone target DB password")
-		fs.StringVar(&opts.CloneDBPrefix, "db-prefix", "", "clone target table prefix")
-		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target content before syncing (rsync --delete or scp/tar target cleanup)")
+		fs.StringVar(&opts.CloneDBPrefix, "db-prefix", "", "rename cloned tables to this prefix (default: keep the source prefix)")
+		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target files before syncing (rsync --delete or scp/tar target cleanup)")
 	}
 	if err := fs.Parse(args); err != nil {
 		return opts, err
@@ -1028,7 +1093,7 @@ func parseProviderInstallCommand(args []string, stderr io.Writer) (providerInsta
 	opts := providerInstallOptions{Binary: defaultBinaryPath()}
 	fs := flag.NewFlagSet("provider install", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
@@ -1108,6 +1173,9 @@ func (opts configOptions) apply(cfg Config) Config {
 	if opts.SkipCacheRebuild {
 		cfg.SkipCacheRebuild = true
 	}
+	if opts.DBReset != "" {
+		cfg.DBReset = opts.DBReset
+	}
 	if opts.CloneDBHost != "" {
 		cfg.CloneDBHost = opts.CloneDBHost
 	}
@@ -1163,7 +1231,7 @@ func parseRuntimeCommand(name string, args []string, stderr io.Writer) (runtimeO
 	opts := runtimeOptions{}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {

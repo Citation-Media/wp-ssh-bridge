@@ -10,13 +10,13 @@ Configuration comes from three layers. Each one overrides the last, so you keep 
 
 <Steps>
   <Step title="YAML config file">
-    `.ddev/wp-ssh.yaml` in DDEV projects, `.wp-ssh.yaml` in wp-env and Generic projects. Written by `init` and safe to commit, because generated files avoid machine-specific absolute paths.
+    `.ddev/wp-ssh.yaml` in DDEV projects, `.wp-ssh.yaml` in wp-env and standalone projects. Safe to commit, because generated files avoid machine-specific absolute paths.
   </Step>
   <Step title="Environment variables">
-    Every key has a `WP_SSH_*` twin. The right place for CI, per-developer SSH users, and passwords. [Secrets managers](/docs/secrets-managers) shows how 1Password and Bitwarden inject them for one run.
+    Every key except the domain mapping lists has a `WP_SSH_*` environment variable. The right place for CI, per-developer values, and passwords. [Secrets managers](/docs/secrets-managers) shows how 1Password, Bitwarden, and Proton Pass inject them for one run.
   </Step>
   <Step title="CLI flags">
-    One-shot overrides. A `--integration` flag passed to `pull` or `push` is never written back to the config; only `init --integration` persists it.
+    Overrides for one run, on top of the file and the environment.
   </Step>
 </Steps>
 
@@ -25,6 +25,17 @@ Point at a different file with `--config-file` or `WP_SSH_CONFIG_FILE`. Relative
 ```bash
 wp-ssh-bridge pull --silent --config-file .wp-ssh.production.yaml
 ```
+
+### What gets written back [#persistence]
+
+`init` writes the config file from the values you give it. After that, these rules decide what reaches the file:
+
+- An interactive `pull`, `push`, or `clone` in a standalone project, and an interactive `pull` in a wp-env project, saves the values you confirmed at its prompts, so the next run does not ask again. The prompts are pre-filled from the file, the environment, and the flags, so whatever you confirm there is written, whichever layer it came from.
+- A `--silent` run prompts for nothing and never writes flag or environment values to the file. That is what makes environment variables and flags one-shot overrides.
+- `clone_db_password` is never written from the environment or a flag, not even by an interactive run.
+- `--integration` passed to `pull`, `push`, or `clone` is never written; only `init --integration` pins the runtime in the file.
+- DDEV runs never prompt for values, so they leave `.ddev/wp-ssh.yaml` as it is.
+- `domains add` edits the domain mappings in the file.
 
 ## A complete config file
 
@@ -45,6 +56,7 @@ local_url: "https://example.ddev.site"         # only to override what is detect
 clone_images: false                            # include wp-content/uploads on pull
 skip_search_replace: false
 skip_cache_rebuild: false                      # page builder CSS after pull, clone, push
+db_reset: "installation"                       # optional: database, installation, or none
 plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
 
 # --- Domain rewrites, both directions ---
@@ -78,7 +90,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `pull_destination` | `WP_SSH_PULL_DESTINATION` | The whole SSH address: `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. Replaces the three keys below. See [SSH access](/docs/ssh-access). |
 | `pull_user` | `WP_SSH_PULL_USER` | SSH user on the source host. Not allowed beside `pull_destination`. |
 | `pull_host` | `WP_SSH_PULL_HOST` | SSH host. |
-| `pull_port` | `WP_SSH_PULL_PORT` | SSH port. Defaults to 22. |
+| `pull_port` | `WP_SSH_PULL_PORT` | SSH port. Without one, the `Port` from `~/.ssh/config` applies, otherwise 22. |
 | `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Absolute path of the source WordPress root, containing `wp-config.php`. |
 | `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Where the database dump is written before download. Defaults to `/tmp`. |
 
@@ -89,7 +101,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `push_destination` | `WP_SSH_PUSH_DESTINATION` | The whole SSH address of the target, in the same forms as `pull_destination`. Replaces the three keys below. |
 | `push_user` | `WP_SSH_PUSH_USER` | SSH user on the target host. Not allowed beside `push_destination`. |
 | `push_host` | `WP_SSH_PUSH_HOST` | SSH host. |
-| `push_port` | `WP_SSH_PUSH_PORT` | SSH port. Defaults to 22. |
+| `push_port` | `WP_SSH_PUSH_PORT` | SSH port. Without one, the `Port` from `~/.ssh/config` applies, otherwise 22. |
 | `push_remote_path` | `WP_SSH_PUSH_REMOTE_PATH` | Absolute path of the target WordPress root. |
 | `push_remote_tmp_dir` | `WP_SSH_PUSH_REMOTE_TMP_DIR` | Target temp directory. Defaults to `/tmp`. |
 | `push_url` | `WP_SSH_PUSH_URL` | Public URL of the target, used for the post-push search-replace. Without it, the CLI reads the target's current home URL before the import. |
@@ -103,6 +115,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
 | `skip_cache_rebuild` | `WP_SSH_SKIP_CACHE_REBUILD` | Skip rebuilding Elementor, Bricks, and Beaver Builder CSS after a pull, clone, or push. |
+| `db_reset` | `WP_SSH_DB_RESET` | Which tables a pull or clone removes after the import when the imported database does not contain them: `database` (every such table in the database), `installation` (only the tables of the installation the `wp-config.php` described), or `none` (keep them and report). A pull defaults to `database` in DDEV and wp-env and to `installation` in standalone mode; a clone defaults to `installation`. A native `ddev pull` always empties the database. Details in [Pull](/docs/commands/pull#what-happens-in-order) and [Clone](/docs/commands/clone#replacing-an-existing-installation). |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |
 
 ### Clone target database
@@ -113,14 +126,14 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Database name. |
 | `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Database user. |
 | `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` | Database password. Prefer the environment variable. |
-| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Table prefix, when it should differ from the source. |
+| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Table prefix, when it should differ from the source. The imported tables are renamed to it. |
 
 ### Runtime and files
 
 | Key | Environment variable | Purpose |
 | --- | --- | --- |
 | `integration` | `WP_SSH_INTEGRATION` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. Strict: it fails rather than falling back. |
-| `provider` | — | DDEV provider name. Defaults to `wp-ssh`. |
+| `provider` | `WP_SSH_PROVIDER` | DDEV provider name. Defaults to `wp-ssh`. |
 | Config path | `WP_SSH_CONFIG_FILE` | Alternative YAML file. Relative paths resolve from the project root. |
 
 ## Setting it up
@@ -132,7 +145,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
     wp-ssh-bridge init
     ```
 
-    Asks only for values it cannot infer. Inside DDEV it reads `ddev describe -j` and `.ddev/config.yaml` first, so the provider name, local URL, docroot, and temp directories are pre-filled.
+    Asks for each value in turn, pre-filled with whatever it could infer, so you mostly confirm with Enter. Inside DDEV it reads `ddev describe -j` and `.ddev/config.yaml` first, so the provider name, local URL, docroot, and temp directories are already filled in.
 
   </Tab>
   <Tab title="Silent">
@@ -154,8 +167,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
     No file at all, for CI or a throwaway run:
 
     ```bash
-    export WP_SSH_PULL_USER=deploy
-    export WP_SSH_PULL_HOST=production.example.com
+    export WP_SSH_PULL_DESTINATION=deploy@production.example.com
     export WP_SSH_PULL_REMOTE_PATH=/home/production/public_html
 
     wp-ssh-bridge pull --silent
@@ -167,7 +179,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 ## What `init` writes
 
 <Tabs inline param="integration" syncKey="integration">
-  <Tab title="Generic">
+  <Tab title="Standalone">
 
     ```text
     .wp-ssh.yaml
@@ -184,16 +196,16 @@ Never put `clone_db_password` in a committed config file, and never put private 
 
     The provider delegates to the host binary with `service: host`, so no shell scripts are installed into the project. Project-local binary paths are written as relative `./...` commands, and local paths such as `local_wp_path` are stored relative to the project root when possible, so the files are safe to commit.
 
-    Regenerate them after updating the binary:
+    Regenerate them after updating the binary. Run it with the binary the provider should call, because that path is what the files record:
 
     ```bash
     ./.ddev/bin/wp-ssh-bridge provider install
     ```
 
-    Print the generated YAML without writing anything:
+    To see the YAML without writing anything, print a template. `provider generate` does not read the project config, so it fills in `wp-ssh-bridge` and `wp-ssh` unless you pass the binary and provider name you want:
 
     ```bash
-    ./.ddev/bin/wp-ssh-bridge provider generate --kind all
+    wp-ssh-bridge provider generate --kind all --binary ./.ddev/bin/wp-ssh-bridge --provider wp-ssh
     ```
 
   </Tab>
@@ -203,7 +215,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
     .wp-ssh.yaml
     ```
 
-    No provider files: wp-env has no pull or push lifecycle to hook into. The file holds only portable values, because the install path and URL are resolved at run time, so it is safe to commit.
+    No provider files: wp-env has no pull or push lifecycle to hook into. The file holds only portable values, because the WordPress path and URL are resolved at run time, so it is safe to commit.
 
     For automation, `.wp-env.json` supports lifecycle scripts:
 
@@ -224,7 +236,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 
 A monorepo with one WordPress site per folder needs no special support. Each folder is its own project with its own config, and three mechanisms cover the variations.
 
-**A config per folder.** In Generic mode the project root is the directory you run the command in, so a config file beside each site is all it takes.
+**A config per folder.** In standalone mode the project root is the directory you run the command in, so a config file beside each site is all it takes.
 
 ```text
 repo/
@@ -239,20 +251,20 @@ repo/
 ```
 
 ```bash
-cd sites/alpha && npx wp-ssh-bridge pull --silent
+cd sites/alpha && wp-ssh-bridge pull --silent
 ```
 
 **Without changing directory.** `--project-root` selects the project, so a script at the repository root can drive any site:
 
 ```bash
-npx wp-ssh-bridge pull --silent --project-root sites/alpha
-npx wp-ssh-bridge pull --silent --project-root sites/beta
+wp-ssh-bridge pull --silent --project-root sites/alpha
+wp-ssh-bridge pull --silent --project-root sites/beta
 ```
 
 **Several environments per site.** `--config-file` picks a named file, resolved from that project root, which is how one site keeps a production and a staging source side by side:
 
 ```bash
-npx wp-ssh-bridge pull --silent \
+wp-ssh-bridge pull --silent \
   --project-root sites/alpha \
   --config-file .wp-ssh.staging.yaml
 ```
@@ -314,7 +326,7 @@ push_domain_replacements:
     new: "shop.example.com"
 ```
 
-In DDEV mode, the local hosts from these mappings are persisted in `.ddev/config.yaml` as `additional_hostnames`, using DDEV's resolved TLD, so they actually resolve in your browser.
+In DDEV mode, the local hosts from these mappings are persisted in `.ddev/config.yaml` as `additional_hostnames`, using DDEV's resolved TLD, so they actually resolve in your browser. `domains add` refreshes that list together with the provider files; run `ddev restart` afterwards so DDEV starts routing the new hostnames.
 
 ## The plugin block list
 
@@ -340,28 +352,82 @@ To run the cleanup on its own, against an already pulled site:
 wp-ssh-bridge plugins remove
 ```
 
-## Operation flags
+## Flag reference [#flags]
 
-These apply to `pull`, `push`, and `clone` unless noted.
+`init`, `pull`, `push`, and `clone` share one set of flags. Each flag overrides the key of the same meaning for that run, and `init` writes it into the config file. `init` rejects the flags that only make sense during a transfer: `--skip-db`, `--skip-files`, `--skip-import`, and the clone database options `--db-host`, `--db-name`, `--db-user`, `--db-password`, and `--db-prefix`.
+
+### Source and target addresses
+
+| Flag | Key | Effect |
+| --- | --- | --- |
+| `--destination` | `pull_destination` | The whole SSH address of the source. On `push`, an alias for `--push-destination`. |
+| `--user`, `--host`, `--port` | `pull_user`, `pull_host`, `pull_port` | The source address as separate values. On `push`, aliases for the `--push-*` forms. Cannot be combined with `--destination`. |
+| `--remote-path` | `pull_remote_path` | Absolute path of the source WordPress root. On `push`, an alias for `--push-remote-path`. |
+| `--remote-tmp-dir` | `pull_remote_tmp_dir` | Source temp directory. On `push`, an alias for `--push-remote-tmp-dir`. |
+| `--push-destination` | `push_destination` | The whole SSH address of the push target. |
+| `--push-user`, `--push-host`, `--push-port` | `push_user`, `push_host`, `push_port` | The target address as separate values. Cannot be combined with `--push-destination`. |
+| `--push-remote-path` | `push_remote_path` | Absolute path of the target WordPress root. |
+| `--push-remote-tmp-dir` | `push_remote_tmp_dir` | Target temp directory. |
+| `--push-url` | `push_url` | Public URL of the push target. |
+
+### Local site
+
+| Flag | Key | Effect |
+| --- | --- | --- |
+| `--local-wp-path` | `local_wp_path` | Local WordPress root, relative to the project root or absolute. |
+| `--local-url` | `local_url` | Local URL for the search-replace, or the target URL of a clone. |
+| `--clone-images` | `clone_images` | Include `wp-content/uploads` during a pull. |
+| `--skip-search-replace` | `skip_search_replace` | Leave URLs untouched after the import. |
+| `--plugin-remove-file` | `plugin_remove_file` | Project-specific plugin block list, added to the built-in defaults. |
+
+### Clone target database
+
+`clone` only. Prefer `WP_SSH_CLONE_DB_PASSWORD` over `--db-password`, which ends up in your shell history.
+
+| Flag | Key | Effect |
+| --- | --- | --- |
+| `--db-host`, `--db-name`, `--db-user`, `--db-password` | `clone_db_host`, `clone_db_name`, `clone_db_user`, `clone_db_password` | Target database credentials, written into the cloned `wp-config.php`. |
+| `--db-prefix` | `clone_db_prefix` | Rename the cloned tables to this prefix. Without it, the source prefix is kept. |
+| `--clean-target` | — | Remove pre-existing target files before syncing. Destructive. |
+
+### Run behaviour
 
 | Flag | Effect |
 | --- | --- |
-| `--silent` | No prompts, no confirmation. Uses config, environment, and flags. |
-| `--yes`, `-y` | Confirm a direct operation without prompting. |
+| `--silent` | No prompts and no confirmation. Uses the config file, the environment, and flags, and writes nothing back. |
+| `--yes`, `-y` | Skip the confirmation prompt of a direct DDEV run. |
 | `--skip-db` | Files only. |
 | `--skip-files` | Database only. |
-| `--skip-import` | Pull only. Download the database without importing it. |
-| `--clone-images` | Include `wp-content/uploads` during a pull. |
-| `--skip-search-replace` | Skip URL replacement. |
+| `--skip-import` | Pull and clone only. Download the database without importing it. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during write operations. |
-| `--skip-cache-rebuild` | Do not rebuild page builder CSS after the database transfer. |
-| `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
-| `--clean-target` | Clone only. Remove pre-existing target content before syncing. Destructive. |
-| `--project-root` | Operate on another project directory. |
-| `--integration` | Pin the runtime for this run. |
-| `--destination`, `--push-destination` | The whole SSH address for the source or target. On `push`, `--destination` is an alias for `--push-destination`. Cannot be combined with the `--user`, `--host`, and `--port` flags it replaces. |
+| `--skip-cache-rebuild` | Do not rebuild page builder CSS after the database transfer. Also `skip_cache_rebuild` and `WP_SSH_SKIP_CACHE_REBUILD`. |
+| `--db-reset` | Which tables to remove after the import when the dump does not contain them: `database`, `installation`, or `none`. Pull and clone. Also `db_reset` and `WP_SSH_DB_RESET`. |
+| `--force-scp` | Use tar over SSH even when rsync is available. |
+
+### Project and runtime
+
+| Flag | Key or variable | Effect |
+| --- | --- | --- |
+| `--project-root` | — | Operate on another project directory instead of detecting it from the working directory. |
+| `--config-file` | `WP_SSH_CONFIG_FILE` | Alternative YAML file. Relative paths resolve from the project root. |
+| `--integration` | `integration` | Pin the runtime for this run: `ddev`, `wp-env`, or `standalone`. |
+| `--provider` | `provider` | DDEV provider name. |
+| `--binary` | — | Binary path written into generated DDEV provider files. Defaults to the binary that is running. |
+
+### Other commands
+
+| Command | Flags |
+| --- | --- |
+| `domains add` | `--old` and `--new` for the mapping, `--direction pull`, `push`, or `both` (the default), plus `--project-root`, `--config-file`, `--integration`, and, in DDEV, `--binary`. |
+| `domains list` | `--project-root`, `--config-file`, `--integration`. |
+| `plugins remove [wordpress-root]` | `--project-root`, `--config-file`, `--integration`. |
+| `provider install` | `--project-root`, `--config-file`, `--binary`, `--provider`. |
+| `provider generate` | `--kind provider`, `hook`, or `all`, plus `--binary` and `--provider`. Prints a template and reads no project config. |
+| `version` | `--short` prints only the version number. |
 
 ## Commands at a glance
+
+This is the command list `wp-ssh-bridge help` prints:
 
 ```text
 wp-ssh-bridge init [flags]                  Configure this project
@@ -371,7 +437,7 @@ wp-ssh-bridge push [flags]                  Push database and files to the targe
 wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
 wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
 wp-ssh-bridge domains add --old A --new B   Add pull/push domain mappings
-wp-ssh-bridge domains list                  Show configured mappings
+wp-ssh-bridge domains list                  Show the configured domain mappings
 wp-ssh-bridge plugins remove [wordpress-root]
 wp-ssh-bridge version [--short]
 ```

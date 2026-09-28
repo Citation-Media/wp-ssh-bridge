@@ -571,3 +571,27 @@ func TestEnvDestinationReplacesTheSplitAddressFromTheFile(t *testing.T) {
 		t.Fatal("a destination and a split value in the environment should still conflict")
 	}
 }
+
+func TestDBResetConfigLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".wp-ssh.yaml")
+	writeFile(t, path, "db_reset: \"none\"\n")
+	cfg, err := readConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DBReset != dbResetNone {
+		t.Fatalf("config file value = %q, want none", cfg.DBReset)
+	}
+	cfg.applyEnv([]string{"WP_SSH_DB_RESET=database"})
+	if cfg.DBReset != dbResetDatabase {
+		t.Fatalf("environment value = %q, want database", cfg.DBReset)
+	}
+	cfg = configOptions{DBReset: "installation"}.apply(cfg)
+	if cfg.DBReset != dbResetInstallation {
+		t.Fatalf("flag value = %q, want installation", cfg.DBReset)
+	}
+	if err := (Config{DBReset: "everything"}).validateDBReset(); err == nil || !strings.Contains(err.Error(), "db_reset must be database, installation, or none") {
+		t.Fatalf("invalid value error = %v", err)
+	}
+}

@@ -45,6 +45,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	if err := protectDownloadsDir(projectRoot, downloadDir); err != nil {
 		return err
 	}
+	if err := discardPullSourceTablePrefix(projectRoot); err != nil {
+		return err
+	}
 
 	remoteTmp := trimTrailingSlash(defaultString(target.RemoteTmpDir, "/tmp"))
 	remoteWP := trimTrailingSlash(target.RemotePath)
@@ -66,13 +69,16 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		remoteWPCLIPrelude(target),
 		mariaDBSetup,
 		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
-		fmt.Sprintf("%s --allow-root db export %s;", wpExport, shellQuote(remoteDump)),
+		remoteExportCommands(wpExport, remoteDump),
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		mariaDBCleanup + ";",
 		"trap - EXIT",
 	}, " ")
+	exportOutput := ""
 	if err := a.runStep("Exporting pull source database", "Pull source database exported", func() error {
-		return a.runSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
+		var err error
+		exportOutput, err = a.outputSSHWithFilteredWarnings(ctx, projectRoot, target, remoteCommand)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -111,6 +117,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		}
 	}
 	localDumpDownloadComplete = true
+	if err := a.recordPullSourceTablePrefix(projectRoot, exportOutput); err != nil {
+		return err
+	}
 
 	if err := a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
 		return a.removeRemoteDatabaseDump(ctx, projectRoot, target, remoteDump, remoteDumpGZ)
@@ -316,16 +325,21 @@ func (a *App) filesImport() {
 // postPull applies local cleanup after a database or file pull.
 func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
 	projectRoot := adapter.Root()
-	// Clone writes the target DB credentials before import (see runPullPipeline), so
-	// afterwards it only moves the site URL: blocked plugins stay, and the runtime's
-	// dev-mode post-pull hooks do not run.
-	if clone {
-		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
-	}
-	for _, hook := range adapter.PostPullHooks() {
-		if err := hook(ctx, a, projectRoot, cfg); err != nil {
+	// Clone writes the target DB credentials before import (see runPullPipeline), so the
+	// runtime's dev-mode hooks do not run for it and blocked plugins stay.
+	if !clone {
+		if err := a.runPostPullHooks(ctx, adapter, cfg); err != nil {
 			return err
 		}
+	}
+	// The prefix must match the imported tables before any WP-CLI call loads WordPress,
+	// and after the hooks, which point the DDEV config at the local database.
+	if err := a.alignPulledTablePrefix(ctx, projectRoot, cfg, clone); err != nil {
+		return err
+	}
+	// Afterwards a clone only moves the site URL.
+	if clone {
+		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
 	}
 	if err := a.updateWPConfigURLConstants(projectRoot, cfg, adapter.Mode()); err != nil {
 		return err
@@ -334,6 +348,18 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 		return err
 	}
 	return a.removeBlockedPlugins(ctx, projectRoot, cfg, "")
+}
+
+// runPostPullHooks runs the runtime's dev-mode rewrites, such as the DDEV wp-config.php
+// sanitising. They are idempotent, so the direct pipeline runs them before the import and
+// postPull again for the provider flow.
+func (a *App) runPostPullHooks(ctx context.Context, adapter runtimeAdapter, cfg Config) error {
+	for _, hook := range adapter.PostPullHooks() {
+		if err := hook(ctx, a, adapter.Root(), cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // moveClonedSiteURL moves a cloned live site to its target URL. The URL constants the
@@ -664,6 +690,9 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 	}
 
 	updated := sanitizeWPConfigContents(string(contents))
+	if updated == string(contents) {
+		return nil
+	}
 	return a.runStep("Sanitizing local wp-config.php", "Local wp-config.php sanitized", func() error {
 		return os.WriteFile(wpConfig, []byte(updated), 0o644)
 	})
@@ -1007,7 +1036,7 @@ func (a *App) replaceMultisiteDomains(ctx context.Context, projectRoot string, c
 	}
 
 	prefix := a.wpOutput(ctx, projectRoot, cfg, "db", "prefix")
-	if prefix == "" || regexp.MustCompile(`[^A-Za-z0-9_]`).MatchString(prefix) {
+	if !validTablePrefix.MatchString(prefix) {
 		return nil
 	}
 
@@ -1099,12 +1128,13 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 		if err := a.deleteBlockedPluginsWithWPCLI(ctx, projectRoot, cfg, targets, statuses); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluginNoun(len(targets))), nil
+		return fmt.Sprintf("Removed %d local-only blocked %s", len(targets), pluralNoun(len(targets), "plugin")), nil
 	})
 }
 
 // importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime.
-func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error {
+// beforeImport, when set, sees the tables the dump creates before anything is written.
+func (a *App) importLocalDB(ctx context.Context, root string, cfg Config, beforeImport func(dumpTables []string) error) error {
 	dumpPath := filepath.Join(downloadsDir(root), "db.sql.gz")
 	file, err := os.Open(dumpPath)
 	if err != nil {
@@ -1125,12 +1155,19 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) error 
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
 
-	if _, err := io.Copy(tempFile, gzipReader); err != nil {
+	collector := &createTableCollector{}
+	if _, err := io.Copy(tempFile, io.TeeReader(gzipReader, collector)); err != nil {
 		_ = tempFile.Close()
 		return err
 	}
 	if err := tempFile.Close(); err != nil {
 		return err
+	}
+	if beforeImport != nil {
+		collector.flush()
+		if err := beforeImport(collector.tables); err != nil {
+			return err
+		}
 	}
 
 	importPath := tempPath
@@ -1311,11 +1348,18 @@ func pluginsWithStatus(plugins []string, statuses map[string]string, status stri
 	return matching
 }
 
-func pluginNoun(count int) string {
+func pluralNoun(count int, singular string) string {
 	if count == 1 {
-		return "plugin"
+		return singular
 	}
-	return "plugins"
+	return singular + "s"
+}
+
+func pluralVerb(count int) string {
+	if count == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func (a *App) runWPWithFilteredWarnings(ctx context.Context, projectRoot string, cfg Config, args ...string) error {

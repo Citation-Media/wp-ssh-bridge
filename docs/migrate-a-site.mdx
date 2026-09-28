@@ -6,7 +6,7 @@ sidebar:
   icon: truck
 ---
 
-A migration copies a live site's database, files, and uploads to a new host and keeps it running there as a real install. [`clone`](/docs/commands/clone) does that. The CLI always runs on the machine that receives the site, which gives you two routes:
+A migration copies a live site's database, files, and uploads to a new host and keeps it running there as a real installation. [`clone`](/docs/commands/clone) does that. The CLI always runs on the machine that receives the site, which gives you two routes:
 
 | | On the new server | Through your machine |
 | --- | --- | --- |
@@ -99,7 +99,7 @@ When the new host cannot open an SSH connection to the old one, clone the site i
   </Step>
   <Step title="Create wp-config.php on the new host">
 
-    A push never overwrites the target's `wp-config.php`, so the new host needs one with the new database and the same table prefix. With WP-CLI on the new host:
+    A push never overwrites the target's `wp-config.php`, so the new host needs one with the new database and the same table prefix; with another prefix, the push stops before uploading anything. With WP-CLI on the new host, replacing `wp_` with the prefix from the previous step:
 
     ```bash
     ssh -t deploy@new.example.com 'mkdir -p /var/www/new-site && cd /var/www/new-site && wp core download && wp config create --dbname=new_db --dbuser=new_user --dbprefix=wp_ --prompt=dbpass'
@@ -108,8 +108,10 @@ When the new host cannot open an SSH connection to the old one, clone the site i
   </Step>
   <Step title="Push to the new host">
 
+    A standalone push starts without asking for confirmation, so check the destination, the path, and the URL before you run it. If you keep them in a config file instead of flags, read it back and run `wp-ssh-bridge domains list` to see its domain mappings. `--silent` keeps the push from prompting for each value.
+
     ```bash
-    wp-ssh-bridge push \
+    wp-ssh-bridge push --silent \
       --destination deploy@new.example.com \
       --remote-path /var/www/new-site \
       --push-url https://new.example.com

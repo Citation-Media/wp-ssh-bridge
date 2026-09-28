@@ -33,10 +33,11 @@ The download is verified against the release's SHA-256 checksum, and it happens 
 | --- | --- |
 | `WP_SSH_BRIDGE_BINARY` | Use this binary instead of downloading one, for a local build. |
 | `WP_SSH_BRIDGE_SKIP_DOWNLOAD` | Skip the `postinstall` download. |
+| `WP_SSH_BRIDGE_REPO` | Download releases from another GitHub repository, for a fork. |
 
 ## Install script
 
-Use this when a project has no Node toolchain, or for a machine-wide install.
+Use this when a project has no Node toolchain, or to install the CLI machine-wide.
 
 <include>/_snippets/install.mdx</include>
 
@@ -130,6 +131,19 @@ Older releases keep their versioned names under their own tag, for example `rele
   </Tab>
 </Tabs>
 
+## Running the CLI [#running-the-cli]
+
+The examples in these docs write the bare `wp-ssh-bridge`. How you call it depends on how you installed it:
+
+| Installed with | Run it as |
+| --- | --- |
+| npm | `npx wp-ssh-bridge` |
+| The install script, inside a DDEV project | `./.ddev/bin/wp-ssh-bridge` |
+| The install script, anywhere else | `./wp-ssh-bridge` |
+| The install script with `--global` | `wp-ssh-bridge`, as written |
+
+Inside `package.json` scripts, the bare name works for an npm install too, because npm puts `node_modules/.bin` on `PATH` there.
+
 ## Updating
 
 With npm, bump the dependency and the matching binary follows:
@@ -138,7 +152,7 @@ With npm, bump the dependency and the matching binary follows:
 npm install --save-dev @citation-media/wp-ssh-bridge@latest
 ```
 
-Otherwise run the install script again; it always fetches the latest release. In a DDEV project, regenerate the provider files afterwards so they match the new binary:
+Otherwise run the install script again; it always fetches the latest release. In a DDEV project, regenerate the provider files afterwards with the project-local binary, so they match the new version:
 
 ```bash
 ./.ddev/bin/wp-ssh-bridge provider install
@@ -154,12 +168,13 @@ New releases are announced in the [changelog](/changelog), which also publishes 
 
 ## Building from source
 
-The source repository is private. Team members with access can build the current `main` with Go 1.24 or newer:
+The source repository is public on GitHub. With Go 1.24 or newer, build the latest release into your Go `bin` directory:
 
 ```bash
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-GOPRIVATE=github.com/Citation-Media go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@latest
+go install github.com/Citation-Media/wp-ssh-bridge/cmd/wp-ssh-bridge@latest
 ```
+
+The result behaves like a `--global` install, as long as your Go `bin` directory is on `PATH`.
 
 ## AI and agents
 
@@ -212,7 +227,7 @@ The site ships more than prose. It publishes the project's **agent skill**, a pl
     npx skills add https://wp-ssh-bridge.citation.media --agent claude-code
     ```
 
-    The skill lands in your assistant's skills directory and a `skills-lock.json` records what was installed. This is the route to use when you have no access to the private repository.
+    The skill lands in your assistant's skills directory and a `skills-lock.json` records what was installed. This is the route to use when you want the skill without APM or Git.
 
   </Tab>
   <Tab title="Manual">
@@ -246,12 +261,12 @@ Every page additionally has a raw Markdown twin at its `.md` URL, and the whole 
 
 - `ssh` with key-based access to the hosts you pull from or push to.
 - `rsync`, optional. Without it the CLI streams a tar archive over SSH instead, with a warning that stale files are not deleted on that path.
-- WP-CLI for the Generic runtime. If `wp` is missing, a managed `wp-cli.phar` is downloaded into the project's scratch directory. DDEV and wp-env bring their own.
+- WP-CLI for the standalone runtime. If `wp` is missing, a managed `wp-cli.phar` is downloaded into the project's scratch directory. DDEV and wp-env bring their own.
 - DDEV or `@wordpress/env` when you use those runtimes.
 
 **On the remote host**
 
 - SSH access to a shell that can run PHP.
-- WP-CLI, ideally. If it is missing or broken, the CLI uploads a temporary `wp-ssh-bridge-wp-cli.phar` to the remote temp directory, uses it, and removes it.
+- WP-CLI, ideally. If it is missing or broken, the CLI has the host download `wp-cli.phar` into the remote temp directory as `wp-ssh-bridge-wp-cli.phar`, which needs `curl` or `wget` there. The phar is kept and reused on later runs.
 - `mysqldump` or `mariadb-dump` for the database export. Hosts that ship only the legacy `mysql` names are handled automatically; see [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb).
 - `rsync`, optional, as above.
