@@ -185,7 +185,7 @@ func TestEnableLocalMaintenanceModeSkipsSiteThatIsNotInstalled(t *testing.T) {
 	if strings.Contains(string(log), "maintenance-mode") {
 		t.Fatalf("maintenance mode must not be activated without an installed site:\n%s", log)
 	}
-	if !strings.Contains(stdout.String(), "Skipping local maintenance mode: no installed WordPress site at the destination yet") {
+	if !strings.Contains(stdout.String(), "Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet") {
 		t.Fatalf("missing skip notice:\n%s", stdout.String())
 	}
 }
@@ -260,7 +260,7 @@ func TestCloneIntoDestinationWithoutInstalledSiteImportsWithoutMaintenanceMode(t
 	if !strings.Contains(wpLog, "db import") {
 		t.Fatalf("clone should still import the database:\n%s", wpLog)
 	}
-	if !strings.Contains(stdout, "Skipping local maintenance mode: no installed WordPress site at the destination yet") {
+	if !strings.Contains(stdout, "Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet") {
 		t.Fatalf("missing skip notice:\n%s", stdout)
 	}
 }
@@ -273,7 +273,7 @@ func TestCloneWithCleanTargetSkipsMaintenanceModeWithoutChecking(t *testing.T) {
 	if !strings.Contains(wpLog, "db import") {
 		t.Fatalf("clone should still import the database:\n%s", wpLog)
 	}
-	if !strings.Contains(stdout, "Skipping local maintenance mode: --clean-target replaces the destination site") {
+	if !strings.Contains(stdout, "Skipping local maintenance mode: --clean-target replaces the target site") {
 		t.Fatalf("missing skip notice:\n%s", stdout)
 	}
 }

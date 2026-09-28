@@ -49,9 +49,9 @@ The export loads WP-CLI and the site's `wp-config.php` for the database credenti
 
 Only the pull source is checked. `wp db import` does not call `exec()`, so a push target that disables only `exec`, as Hostinger does, imports normally. The import does start the database client through `proc_open()` and `proc_close()`, so on a push target that also disables those, WP-CLI stops the import with a message that names them; ask the provider to allow them for PHP on the command line.
 
-## When it still fails
+## When something fails
 
-| Message | Meaning | Fix |
+| Symptom | Cause | Fix |
 | --- | --- | --- |
 | `exit status 255` from the export and no compatibility line in preflight | The installed binary predates the workaround. | [Update wp-ssh-bridge](/docs/installation#updating). |
 | `PHP disables exec, …, and this host does not allow re-enabling them for a single command with php -d` | The host enforces `disable_functions` beyond `php.ini`. | Ask the provider to allow those functions for PHP on the command line. There is no safe way around it from the CLI. |

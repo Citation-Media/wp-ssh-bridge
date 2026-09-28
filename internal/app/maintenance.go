@@ -33,7 +33,7 @@ func (a *App) disableRemoteMaintenanceMode(ctx context.Context, projectRoot stri
 // skipped instead of failing the import.
 func (a *App) enableLocalMaintenanceMode(ctx context.Context, projectRoot string, cfg Config) (bool, error) {
 	if err := a.runWPSilent(ctx, projectRoot, cfg, "core", "is-installed"); err != nil {
-		a.UI.Info("Skipping local maintenance mode: no installed WordPress site at the destination yet")
+		a.UI.Info("Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet")
 		return false, nil
 	}
 	return true, a.runStep("Enabling local maintenance mode", "Local maintenance mode enabled", func() error {

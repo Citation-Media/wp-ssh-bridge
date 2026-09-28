@@ -22,7 +22,7 @@ wp-ssh-bridge init --silent \
 wp-ssh-bridge pull --silent
 ```
 
-5. Push only after confirming the target host, remote path, and target URL:
+5. Push only after the user confirms the push destination, remote path, and target URL. A standalone push has no confirmation step, so check the push values in the config first:
 
 ```bash
 wp-ssh-bridge push --silent
@@ -44,10 +44,11 @@ Push needs:
 ```text
 push_destination or --push-destination or WP_SSH_PUSH_DESTINATION
 push_remote_path or --push-remote-path or WP_SSH_PUSH_REMOTE_PATH
-push_url or --push-url or WP_SSH_PUSH_URL
 ```
 
-A destination is `user@host[:port]`, an `ssh://user@host:port` URL, or an alias from `~/.ssh/config`. IPv6 literals are refused because macOS' rsync cannot pass them on; put the address in a `Host` block and use the alias. Without a user it takes the one from `~/.ssh/config`, or the local username. The split form still exists — `pull_user`/`pull_host`/`pull_port`, `--user`/`--host`/`--port`, `WP_SSH_PULL_USER`/`_HOST`/`_PORT`, and the `push_` equivalents — but a destination beside any of them in the same place (file, environment, or flags) is rejected, so use one form per target. A destination from the environment or a flag replaces the split keys of the config file, so `WP_SSH_PULL_DESTINATION` overrides any project. On `push`, `--destination` is an alias for `--push-destination`, like the other short flags.
+`push_url` (`--push-url`, `WP_SSH_PUSH_URL`) is optional but strongly recommended, and required for a first push into an empty target, which otherwise stops with `the push target URL is unknown because it could not be read from the target`. A push domain mapping or `--skip-search-replace` also resolves that.
+
+A destination is `user@host[:port]`, an `ssh://user@host:port` URL, or an alias from `~/.ssh/config`. IPv6 literals are refused because macOS' rsync cannot pass them on; put the address in a `Host` block and use the alias. Without a user it takes the one from `~/.ssh/config`, or the local username. The split form still exists — `pull_user`/`pull_host`/`pull_port`, `--user`/`--host`/`--port`, `WP_SSH_PULL_USER`/`_HOST`/`_PORT`, and the `push_` equivalents — but a destination beside any of them in the same place (file, environment, or flags) is rejected, so use one form per target. A destination from the environment or a flag replaces the split keys of the config file, so `WP_SSH_PULL_DESTINATION` overrides any project. The reverse is rejected: split values from the environment or flags over a config that uses a destination fail with `the destination already carries the user, host, and port`. On `push`, `--destination` is an alias for `--push-destination`, like the other short flags.
 
 Remote WordPress paths must be absolute and point to a WordPress root containing `wp-config.php`.
 
@@ -92,7 +93,7 @@ plugin_remove_file: ".wp-ssh-plugins.txt"  # extra plugin slugs to remove on pul
 provider: "wp-ssh"                      # DDEV provider name; DDEV only
 ```
 
-Config is the base layer. Environment variables override config. CLI flags override both. `init` writes only values that differ from the defaults, so a small file is normal.
+Config is the base layer. Environment variables override config. CLI flags override both. `init` writes only values that differ from the defaults, so a small file is normal. An interactive standalone or wp-env pull, push, or clone also saves the values confirmed at its prompts. A `--silent` run never writes flag or environment values to the file, and `clone_db_password` is never written from the environment or a flag.
 
 Use another config file when needed, or set `WP_SSH_CONFIG_FILE`:
 
@@ -131,9 +132,9 @@ wp-ssh-bridge pull --silent --project-root sites/alpha --config-file .wp-ssh.sta
 
 `local_wp_path` is relative to the project root. Leave it out when the folder itself is the WordPress root.
 
-## Domain Replacement Setup
+## Domain Mappings
 
-For multisite or custom domains, use the CLI to update config on an already initialized project:
+For multisite or custom domains, use the CLI to update the domain mappings (`pull_domain_replacements`, `push_domain_replacements`) of an initialized project instead of editing YAML:
 
 ```bash
 wp-ssh-bridge domains add --old example.com --new example.local
@@ -152,7 +153,7 @@ push_domain_replacements:
 
 Use `--direction pull` or `--direction push` only when the user explicitly wants a one-sided mapping.
 
-Prefer protocol-less domains for WordPress multisite replacements because `wp_site`, `wp_blogs`, and `DOMAIN_CURRENT_SITE` store host-only values. Use full URLs only for path-aware or scheme-specific replacements.
+Prefer protocol-less domains for WordPress multisite because `wp_site`, `wp_blogs`, and `DOMAIN_CURRENT_SITE` store host-only values. A protocol-less mapping replaces the hostname once in full URLs and bare domain values, even when the new host contains the old one (`example.com` to `example.com.ddev.site`). Use full URLs only for path-aware or scheme-specific replacements. Domain mappings have no environment variable.
 
 List configured mappings with:
 
@@ -175,9 +176,9 @@ export WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html
 export WP_SSH_PUSH_URL=https://staging.example.com
 ```
 
-Every config key has an environment variable. The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_LOCAL_WP_PATH`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
+Every config key except the domain mappings has an environment variable. The local WordPress root is `WP_SSH_LOCAL_WP_PATH` (`WP_SSH_PULL_LOCAL_WP_PATH` also works). The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
 
-Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. To inject the variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager), `pass-cli run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (Proton Pass).
+Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. Only `clone_db_password` is a real secret; keep non-secret values in the config file. To inject variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager; name the secrets exactly like the `WP_SSH_*` variables and never add `--no-inherit-env`, which drops the SSH agent socket), `pass-cli run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (Proton Pass). Details: https://wp-ssh-bridge.citation.media/docs/secrets-managers.
 
 ## Args Mode
 
@@ -217,11 +218,12 @@ Use these only when the user needs a partial or special operation:
 --skip-search-replace    skip URL replacement
 --skip-maintenance-mode  do not enable WordPress maintenance mode around the import
 --force-scp              use the tar-over-SSH transport even when rsync exists
---yes, -y                confirm direct operation
---silent                 reduce output and skip direct confirmation
+--yes, -y                skip the confirmation prompt of a direct DDEV run
+--silent                 no prompts; take every value from config, environment, and flags
+                         (also skips the DDEV direct confirmation)
 ```
 
-Flags that select where things are, accepted by every command:
+Flags that select where things are, accepted by init, pull, clone, and push:
 
 ```text
 --project-root <dir>        run against another project folder instead of the cwd
@@ -231,12 +233,12 @@ Flags that select where things are, accepted by every command:
                             the whole SSH address; replaces --user/--host/--port
 --port, --push-port         split-form SSH ports when not using a destination
 --remote-tmp-dir <dir>      temp dir on the source host; --push-remote-tmp-dir for the target
---local-wp-path <dir>       local WordPress root, relative to the project root
+--local-wp-path <dir>       local WordPress root, relative to the project root or absolute
 --local-url <url>           local URL for search-replace, overrides the detected one
 --plugin-remove-file <path> project plugin block list
 ```
 
-For clone pulls (host-to-host site migrations), use `references/clone.md` instead of this general workflow.
+For clones (host-to-host site migrations), use `references/clone.md` instead of this general workflow.
 
 ## Verification
 

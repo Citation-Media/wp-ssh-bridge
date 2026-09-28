@@ -59,9 +59,9 @@ The shim applies to pull, clone, and push database operations, on whichever side
 
 If the host has neither `mysqldump` nor `mariadb-dump`, there is nothing to alias and the export cannot run. That is a hosting limitation, not something the CLI can route around. Ask the provider to install the MariaDB or MySQL client tools.
 
-## When it still fails
+## When something fails
 
-| Message | Meaning | Fix |
+| Symptom | Cause | Fix |
 | --- | --- | --- |
 | `mariadb-dump: command not found` and no compatibility line in preflight | The installed binary predates the workaround. | [Update wp-ssh-bridge](/docs/installation#updating). |
 | The compatibility line appears, but the export still fails for a missing `mysqldump` | The host has neither name. | Ask the provider to install the client tools. |

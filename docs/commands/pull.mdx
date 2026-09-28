@@ -10,13 +10,13 @@ sidebar:
 It is the command you run before you start working, and again whenever the local copy has gone stale.
 
 :::note[Reads from the source, writes locally]
-A pull never modifies the remote site. It creates a temporary database dump in the remote temp directory and deletes it again, including on failure. Everything else it changes is on your machine.
+A pull never modifies the source site. It creates a temporary database dump in the remote temp directory and deletes it again, including on failure. When the host has no usable WP-CLI, a `wp-ssh-bridge-wp-cli.phar` is also left in that directory for later runs. Everything else it changes is on your machine.
 :::
 
 ## Run it
 
 <Tabs inline param="integration" syncKey="integration">
-  <Tab title="Generic">
+  <Tab title="Standalone">
 
     In a plain WordPress checkout, `pull` uses the local `wp` binary. If none is available, a managed `wp-cli.phar` is downloaded into the project's scratch directory and used instead.
 
@@ -37,36 +37,33 @@ A pull never modifies the remote site. It creates a temporary database dump in t
   </Tab>
   <Tab title="DDEV">
 
-    In a DDEV project you have two equivalent paths. Both run the same Go pipeline; they differ only in who prints the lifecycle output.
+    A DDEV project can pull in two ways. Both rewrite URLs, align the table prefix, and clean up plugins; they differ in who drives the run.
 
     ```bash title="Native DDEV lifecycle"
     ddev pull wp-ssh -y
     ```
 
     ```bash title="Direct, easier to script"
-    ./.ddev/bin/wp-ssh-bridge pull --silent
+    wp-ssh-bridge pull --silent
     ```
+
+    The native command prints DDEV's lifecycle output and lets DDEV import the dump itself, so the local site is not put into maintenance mode. DDEV calls each provider step (database, files, post-pull) as a separate process, so each step authenticates on its own, and an SSH agent that asks for approval asks once per step. It takes no wp-ssh-bridge flags.
+
+    The direct command runs the whole pipeline over one SSH connection, keeps the local site in maintenance mode from the import to the end of the run, and accepts every flag below. Without `--silent` or `--yes`, it prints the source and asks you to confirm. Use the native command for everyday interactive pulls, and the direct one in scripts or whenever you need a flag. How to call the binary depends on how you installed it; see [Running the CLI](/docs/installation#running-the-cli).
 
     Local WP-CLI runs as `ddev wp` inside the web container. The docroot, project URL, and temp directories come from `ddev describe`, so `init` fills them in for you.
 
-    Native `ddev pull` does not accept CLI flags such as `--destination`. Use DDEV's inline environment for one-off overrides:
+    For a one-off override with the native command, use DDEV's inline environment:
 
     ```bash
     # Another source for this run only
-    ddev pull wp-ssh --environment=WP_SSH_PULL_DESTINATION=deploy@staging.example.com -y
-    ```
-
-    For per-developer SSH users, prefer a `~/.ssh/config` alias as the committed destination; see [SSH access](/docs/ssh-access#aliases-resolve-through-ssh).
-
-    ```bash
-    # A complete one-off source
     ddev pull wp-ssh \
-      --environment=WP_SSH_PULL_USER=deploy,WP_SSH_PULL_HOST=example.com,WP_SSH_PULL_REMOTE_PATH=/home/example/public_html \
+      --environment=WP_SSH_PULL_DESTINATION=deploy@staging.example.com,WP_SSH_PULL_REMOTE_PATH=/home/staging/public_html \
       -y
     ```
 
     :::tip[Teams with individual SSH users]
-    Leave `pull_user` out of the versioned `.ddev/wp-ssh.yaml` and let each developer supply it through `WP_SSH_PULL_USER`. Everything else stays shared.
+    Commit a `~/.ssh/config` alias, such as `example-production`, as the destination in the versioned `.ddev/wp-ssh.yaml`, and let each developer map it to their own user in their `~/.ssh/config`. See [SSH access](/docs/ssh-access#aliases-resolve-through-ssh).
     :::
 
     After a pull, DDEV also learns the local hostnames derived from your domain mappings. They are written into `.ddev/config.yaml` as `additional_hostnames`, using DDEV's resolved TLD, so multisite domains resolve locally.
@@ -74,7 +71,7 @@ A pull never modifies the remote site. It creates a temporary database dump in t
   </Tab>
   <Tab title="wp-env">
 
-    The environment must be running, because the CLI reads the install path and URL from `wp-env status --json` and runs WP-CLI inside the `cli` container.
+    The environment must be running, because the CLI reads the WordPress path and URL from `wp-env status --json` and runs WP-CLI inside the `cli` container.
 
     ```bash
     npx wp-env start
@@ -104,25 +101,27 @@ A pull never modifies the remote site. It creates a temporary database dump in t
 
 <Steps>
   <Step title="Preflight">
-    Local `ssh`, the runtime (DDEV or wp-env) when applicable, local WP-CLI when the database is involved, local path readable and writable, SSH access to the source, remote path readable, remote temp directory writable, and remote WP-CLI. Failures stop the run before anything changes.
+    Local tools, SSH access, the paths on both sides, and WP-CLI are checked first, so a failure stops the run before anything changes. [How it works](/docs/how-it-works#preflight) lists every check.
   </Step>
   <Step title="Database export and download">
     `wp db export` on the source writes a gzipped dump into the remote temp directory. It is downloaded, then removed remotely, and the cleanup is retried if the run fails.
   </Step>
   <Step title="File sync">
-    rsync mirrors the remote WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
+    rsync mirrors the source WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
   </Step>
-  <Step title="Maintenance mode and import">
-    The local site goes into maintenance mode, the dump is imported, and maintenance mode is lifted again, including when the import fails. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
+  <Step title="Import">
+    In DDEV mode, the copied `wp-config.php` is sanitised first, so the import reaches the DDEV database. The local site then goes into maintenance mode and the dump is imported. Maintenance mode stays on until the last step below has finished. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it. A native `ddev pull` hands the dump to DDEV, which imports it without maintenance mode.
   </Step>
   <Step title="Table prefix">
     The imported tables keep the source table prefix. When your local `wp-config.php` uses a different `$table_prefix`, for example `wp_` locally and `abc_` on the source, the local value is changed to the source prefix before anything loads WordPress. The tables are not renamed, so pushing back to the source keeps its prefix. Tables under the old local prefix stay in the database and are reported with a warning.
   </Step>
   <Step title="URL rewrites">
-    A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database.
+    A WP-CLI search-replace runs for the site URL and every configured domain mapping, per blog on multisite, including the `site` and `blogs` tables. Hard-coded constants in `wp-config.php` such as `WP_HOME`, `WP_SITEURL`, and `DOMAIN_CURRENT_SITE` are rewritten too, so production values cannot override the imported database. wp-env is the exception: its generated `wp-config.php` already points at the local URL.
   </Step>
   <Step title="Plugin cleanup">
     Plugins on the block list that are actually installed are deactivated and deleted through WP-CLI. Skipped in wp-env projects with mounts, where those directories are your own working tree.
+
+    Maintenance mode is lifted after this step, or as soon as the import or a later step fails.
   </Step>
 </Steps>
 
@@ -145,13 +144,14 @@ wp-content/uploads/                unless --clone-images
 blocked plugin directories         from the block list
 ```
 
-`wp-config.php` is pulled and sanitised in DDEV mode, and preserved in Generic and wp-env mode, where the local file already carries working database credentials.
+`wp-config.php` is pulled and sanitised in DDEV mode, and preserved in standalone and wp-env mode, where the local file already carries working database credentials.
 
 ## Flags
 
 | Flag | Effect |
 | --- | --- |
 | `--silent` | No prompts and no confirmation. Uses config, environment, and flags. The flag for scripts. |
+| `--yes`, `-y` | Skip the source confirmation of a direct pull in a DDEV project. Standalone and wp-env pulls have no confirmation, and `--yes` does not skip their value prompts. |
 | `--skip-files` | Database only. Useful when you just want fresh content. |
 | `--skip-db` | Files only. |
 | `--skip-import` | Downloads the database without importing it. Search-replace is skipped too. |
@@ -162,7 +162,9 @@ blocked plugin directories         from the block list
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
 | `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |
 | `--local-wp-path`, `--local-url` | Override the local WordPress root and URL. |
+| `--plugin-remove-file` | Use another plugin block list file for the cleanup. |
 | `--config-file` | Read another YAML file, for example `.wp-ssh.production.yaml`. |
+| `--project-root` | Run against a project other than the one the working directory belongs to. |
 | `--integration` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. |
 
 ## Common variations
@@ -187,7 +189,7 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
 ## Verify
 
 <Tabs inline param="integration" syncKey="integration">
-  <Tab title="Generic">
+  <Tab title="Standalone">
 
     ```bash
     wp option get home
@@ -217,13 +219,13 @@ The home URL should be local, and production-only plugins should be gone.
 
 ## When something fails
 
-| Symptom | Likely cause and fix |
-| --- | --- |
-| `Permission denied (publickey)` | Your key is not accepted by the source host. Test with `ssh user@host` first; the CLI uses the same OpenSSH configuration. |
-| Remote path errors | `pull_remote_path` must be absolute and contain `wp-config.php`. |
-| `mariadb-dump` not found | A host that ships only the legacy MySQL client names. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
-| Local files not writable | Fix ownership on the local WordPress directory, then run again. The error names the exact path. |
-| WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. Set the source prefix where your config defines it. |
-| Warning about stale files | The tar fallback is in use because rsync is missing on one side. Install rsync, or accept that removed files stay behind. |
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `Permission denied (publickey)` | The source host does not accept your key. | Test `ssh <destination>` first; the CLI uses the same OpenSSH configuration. See [SSH access](/docs/ssh-access#when-a-connection-fails). |
+| Remote path errors | `pull_remote_path` is not absolute or does not contain `wp-config.php`. | Set it to the absolute WordPress root on the source. |
+| `mariadb-dump: command not found` | The host ships only the legacy MySQL client names, and the installed binary predates the workaround. | [Update the CLI](/docs/installation#updating). If preflight prints the compatibility line and the export still fails, the host lacks `mysqldump` as well. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
+| Local files not writable | Ownership or permissions on the local WordPress directory. | Fix them, then run again. The error names the exact path. |
+| WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. | Set the source prefix where your config defines it. |
+| `scp/tar transport: stale local files not removed (no --delete equivalent)` | rsync is missing on one side, so the tar-over-SSH fallback is in use. | Install rsync on both machines, or accept that files removed on the source stay behind locally. |
 
 More in [Troubleshooting](/docs/troubleshooting).

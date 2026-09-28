@@ -2,7 +2,7 @@
 
 Use this reference for projects managed by `@wordpress/env` (`wp-env`).
 
-The CLI enters wp-env mode when DDEV detection fails and the project root has `.wp-env.json` or `.wp-env.override.json`. A `node_modules/.bin/wp-env` alone is not a marker. It then reads `wp-env status --json` for the local URL and WordPress install path.
+The CLI enters wp-env mode when DDEV detection fails and the project root has `.wp-env.json` or `.wp-env.override.json`. A `node_modules/.bin/wp-env` alone is not a marker. It then reads `wp-env status --json` for the local URL and WordPress root.
 
 ## Standard Workflow
 
@@ -26,7 +26,7 @@ wp-ssh-bridge init --silent --destination deploy@production.example.com --remote
 wp-ssh-bridge pull --silent
 ```
 
-`.wp-ssh.yaml` is written at the project root. It contains no wp-env install paths, so it is safe to commit.
+`.wp-ssh.yaml` is written at the project root. It contains no wp-env paths, so it is safe to commit.
 
 ## Persisting Configuration
 
@@ -72,7 +72,7 @@ Also available as `--integration` and `WP_SSH_INTEGRATION`, in that precedence o
 
 - Local WP-CLI runs as `wp-env run cli wp --path=/var/www/html`. A host `wp` cannot be used: wp-env's `DB_HOST` resolves only inside the Docker network, and the published MySQL port is randomized on every start.
 - The local WordPress root and URL come from `wp-env status --json` at run time, so they are never stored in config.
-- `wp-config.php` is preserved rather than pulled. wp-env generates it with working local credentials. When the source uses another table prefix, the pull writes it into that file; if WordPress shows the installer after wp-env regenerated the file, pull again.
+- `wp-config.php` is preserved rather than pulled. wp-env generates it with working local credentials and the local URL, so the CLI does not rewrite URL constants in it. When the source uses another table prefix, the pull writes it into that file; if WordPress shows the installer after wp-env regenerated the file, pull again.
 
 ## Mounted Plugin And Theme Directories
 
@@ -91,16 +91,16 @@ wp-ssh-bridge pull --silent --skip-files
 | `wp-env environment is "stopped"` | Run `wp-env start`, then retry. |
 | `wp-env is using the "playground" runtime` | The Playground runtime has no `wp-env run`. Restart with `wp-env start --runtime=docker`. |
 | `wp-env status failed` | Run from the wp-env project root, and make sure `wp-env` is installed (project dependency, on `PATH`, or reachable via `npx`). |
-| `this is a wp-env project but wp-env status --json did not succeed` | The project has `.wp-env.json` but wp-env could not be reached. Start it or install it. For pull only, `--integration standalone` treats the directory as a plain WordPress root; never use that override to reach `push` — it bypasses the wp-env push rejection and would push empty mounted directories over the target. |
-| `local WordPress path ... is outside the wp-env tree` | `local_wp_path` points outside the mounted tree, so files and WP-CLI would target different installs. Clear it. |
+| ``this is a wp-env project but `wp-env status --json` did not succeed`` | The project has `.wp-env.json` but wp-env could not be reached. Start it or install it. For pull only, `--integration standalone` treats the directory as a plain WordPress root; never for push (see "Not Supported"). |
+| `local WordPress path ... is outside the wp-env tree` | `local_wp_path` points outside the mounted tree, so files and WP-CLI would target different installations. Clear it. |
 
 ## Not Supported
 
-`wp-ssh-bridge push` exits with an error in wp-env projects. The local WordPress tree is managed by wp-env: uploads are excluded from pulls by default, and every `plugins`/`themes`/`mappings` path is a Docker bind mount that is empty on the host, so pushing it with `rsync --delete` would erase those files on the target. Tell the user to push from a standalone checkout of the site instead.
+`wp-ssh-bridge push` exits with `push does not support wp-env projects; the local WordPress tree is managed by wp-env …`: uploads are excluded from pulls by default, and every `plugins`/`themes`/`mappings` path is a bind mount that is empty on the host, so a push would erase those files on the target. Do not bypass it with `--integration standalone`. Push from a standalone checkout of the site instead.
 
 Blocked-plugin cleanup is skipped automatically when `.wp-env.json` declares mounts, because `wp plugin delete` runs inside the container where those mounts are the user's own source tree.
 
-`wp-ssh-bridge clone` exits with an error in wp-env projects. Clone injects target DB credentials and writes to a plain directory, but wp-env mode routes the import through the container database. Use the normal pull for local onboarding, and run `clone` against a standalone target directory.
+`wp-ssh-bridge clone` exits with `clone does not support wp-env projects; …`. Use the normal pull for local onboarding, and run `clone` against a plain target directory (`references/clone.md`).
 
 ## Verification
 

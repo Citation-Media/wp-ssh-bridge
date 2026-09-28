@@ -4,7 +4,7 @@ Use this reference when the user wants to copy or migrate a WordPress site betwe
 
 ## When To Use Clone Mode
 
-Use `wp-ssh-bridge clone` when the target should remain a real site-like WordPress install, not a local development copy. Typical cases:
+Use `wp-ssh-bridge clone` when the target should remain a live-ready WordPress installation, not a local development copy. Typical cases:
 
 - staging to production-style target
 - production to staging without DDEV/dev rewrites
@@ -15,28 +15,27 @@ Do not use clone mode for ordinary local onboarding into DDEV. Use the normal DD
 
 ## Behavior
 
-Clone pulls:
+A clone:
 
-- export and import the database like a normal pull
-- sync files from the pull source
-- copy `wp-config.php`
-- write target DB constants into `wp-config.php` before database import
-- include uploads/media even when `clone_images` is false
-- keep blocked plugins and do not run blocked-plugin cleanup
-- skip DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
-- still run configured URL search-replace unless `--skip-search-replace` is set
-- be additive for files by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
-- remove the tables of the installation the target's previous `wp-config.php` described, when it used the same database, and stop before the import if it would overwrite any other table
+- exports and imports the database like a normal pull
+- syncs files from the source
+- copies `wp-config.php`
+- writes target DB constants into `wp-config.php` before the database import
+- includes uploads/media even when `clone_images` is false
+- keeps blocked plugins and does not run blocked-plugin cleanup
+- skips DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
+- still runs configured URL search-replace unless `--skip-search-replace` is set
+- is additive for files by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
+- replaces the previous installation's tables (see "Replacing An Existing Installation" below)
 
-Clone mode is a top-level `clone` command. Do not recommend `pull --clone` or `push --clone`.
+Clone mode is a top-level `clone` command. Do not recommend `pull --clone`, `push --clone`, or `ddev pull <provider> --clone`.
 
 ## Required Values
 
 Source SSH values:
 
 ```text
---user or pull_user or WP_SSH_PULL_USER
---host or pull_host or WP_SSH_PULL_HOST
+--destination or pull_destination or WP_SSH_PULL_DESTINATION
 --remote-path or pull_remote_path or WP_SSH_PULL_REMOTE_PATH
 ```
 
@@ -56,45 +55,48 @@ Without a target URL (`local_url`, `WP_SSH_PULL_LOCAL_URL`, or `--local-url`) an
 
 ## Direct Command
 
-Use args mode for one-off clones:
+Run clone from a working directory outside the web root and point `--local-wp-path` at the target WordPress root: the full database dump is staged in the scratch directory `.wp-ssh/` of the directory you run it from. Use args mode for one-off clones and keep the password in the environment:
 
 ```bash
+export WP_SSH_CLONE_DB_PASSWORD='…'
 wp-ssh-bridge clone --silent \
   --destination deploy@source.example.com \
   --remote-path /home/source/public_html \
+  --local-wp-path /var/www/target \
   --db-host db.example.com \
   --db-name target_db \
-  --db-user target_user \
-  --db-password target_password
+  --db-user target_user
 ```
 
 Without `--db-prefix`, the target `$table_prefix` follows the source. Add `--db-prefix wp_` only when the target should use another prefix; the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to it. It stops before the import when the source database already holds tables under that prefix.
 
-After the import, the clone removes the tables of the installation the target's previous `wp-config.php` described, resolved through WP-CLI, when that config used the same database. Tables under other prefixes and other WordPress installs sharing the database stay; the clone never resets the whole database. Errors before the import (`the target database already contains …`, `wp-config.php resolves the database to …`, `cannot rename …`) mean nothing was imported: the target database holds another site's table, the copied config defines the database elsewhere, or the source already uses the `--db-prefix` prefix.
+## Replacing An Existing Installation
+
+After the import, the clone removes the tables of the installation the target's previous `wp-config.php` described, when that config used the same database. This cannot be switched off, so confirm the target database (and a backup) first. Tables under other prefixes and other WordPress installations sharing the database stay; the clone never resets the whole database. It stops before the import if it would overwrite any other table. Errors before the import (`the target database already contains …`, `wp-config.php resolves the database to …`, `cannot rename …`) mean nothing was imported: the target database holds another site's table, the copied config defines the database elsewhere, or the source already uses the `--db-prefix` prefix.
 
 ## Emptying The Target (`--clean-target`)
 
-By default a clone is additive: files are added or updated, but content already on the target (for example a web host's default `index.html` or a starter theme) stays in place. This holds on both transports — the rsync transport does not pass `--delete` for clones, and the scp/tar transport has no `--delete` equivalent. (A normal, non-clone `pull` still mirrors the source with rsync `--delete`.)
+By default a clone is additive: files are added or updated, but content already on the target (for example a web host's default `index.html` or a starter theme) stays in place. This holds on both transports — the rsync transport does not pass `--delete` for clones, and the tar-over-SSH transport has no `--delete` equivalent. (A normal, non-clone `pull` still mirrors the source with rsync `--delete`.)
 
 Pass `--clean-target` (clone only) to remove pre-existing target content before files are synced, so the cloned site starts from a clean tree on either transport:
 
 - rsync transport: the CLI adds `--delete`, so files not present on the source are removed (configured excludes and operational paths are preserved).
-- scp/tar transport: the CLI empties the target WordPress directory before extracting, since rsync `--delete` has no tar equivalent.
+- tar-over-SSH transport: the CLI empties the target WordPress directory before extracting, since rsync `--delete` has no tar equivalent.
 
 Safety:
 
 - It is destructive and cannot be undone. Recommend it only when the user explicitly wants pre-existing target content removed, and confirm the resolved target path first.
-- On the scp/tar transport it preserves only operational entries — `.git`, `.ddev`, `.wp-ssh`, `wp-config-ddev.php`, `.wp-ssh.yaml`, and the `wp-ssh-bridge` binary — and refuses to run against a filesystem root or the home directory. On rsync, the configured `--exclude` paths are preserved.
+- On the tar-over-SSH transport it preserves only operational entries — `.git`, `.ddev`, `.wp-ssh`, `wp-config-ddev.php`, `.wp-ssh.yaml`, and the `wp-ssh-bridge` binary — and refuses to run against a filesystem root or the home directory. On rsync, the configured `--exclude` paths are preserved.
 - It is rejected on `pull` and `push`; it exists only on `clone`.
-- The import runs without maintenance mode, because the destination site is being replaced; the CLI prints `Skipping local maintenance mode: --clean-target replaces the destination site`.
+- The import runs without maintenance mode, because the target site is being replaced; the CLI prints `Skipping local maintenance mode: --clean-target replaces the target site`.
 
-A clone into an empty directory or a new database also runs the import without maintenance mode, since `wp core is-installed` finds no site to protect; the CLI prints `Skipping local maintenance mode: no installed WordPress site at the destination yet`. Neither needs `--skip-maintenance-mode`.
+A clone into an empty directory or a new database also runs the import without maintenance mode, since `wp core is-installed` finds no site to protect; the CLI prints `Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet`. Neither needs `--skip-maintenance-mode`.
 
 ## DDEV And wp-env Projects
 
-`wp-ssh-bridge clone` does not support DDEV or wp-env projects and exits with an error when the project root is either. A clone is a live host-to-host copy into a standalone target, so it must run against a plain (non-DDEV) destination directory. Routing the database import through `ddev wp` or `wp-env run cli` would import into the local container database instead of the injected target credentials.
+In a DDEV or wp-env project root, `wp-ssh-bridge clone` exits with `clone does not support DDEV projects; …` or `clone does not support wp-env projects; …`, because the import would land in the container database instead of the injected target credentials. Run it against a plain target directory.
 
-If the user wants a DDEV development copy, use the normal DDEV pull workflow in `references/ddev.md`. Reserve `clone` for standalone target directories. Do not recommend native `ddev pull <provider> --clone`; clone is intentionally exposed only as the standalone `wp-ssh-bridge clone` command.
+If the user wants a DDEV development copy, use the normal DDEV pull workflow in `references/ddev.md`.
 
 ## Config Mode
 
@@ -107,7 +109,6 @@ pull_remote_path: "/home/source/public_html"
 clone_db_host: "db.example.com"
 clone_db_name: "target_db"
 clone_db_user: "target_user"
-clone_db_password: "target_password"
 clone_db_prefix: "wp_"
 
 pull_domain_replacements:
@@ -115,13 +116,12 @@ pull_domain_replacements:
     new: "target.example.com"
 ```
 
-Run it with:
+Keep the password out of the file and run it with:
 
 ```bash
-wp-ssh-bridge clone --silent
+export WP_SSH_CLONE_DB_PASSWORD='…'
+wp-ssh-bridge clone --silent --local-wp-path /var/www/target
 ```
-
-Prefer environment variables for password values when the config file is versioned.
 
 ## Server-To-Server Transfer
 
@@ -131,7 +131,7 @@ The CLI always runs on the machine that receives the site. Running `clone` on th
 
 The command was previously called `migrate`, with `migrate_db_*` config keys and `WP_SSH_MIGRATE_DB_*` environment variables.
 
-- `unknown command "clone"`: the installed binary predates the rename. Update it with the skill install script.
+- `unknown command "clone"`: the installed binary predates the rename. Update it (see "Install Or Update wp-ssh-bridge" in `SKILL.md`).
 - An error saying `migrate` was renamed to `clone`: the caller uses the old name. Run `wp-ssh-bridge clone` with the same flags.
 - `unknown config key "migrate_db_host"` (or another `migrate_db_*` key): the config file still uses the old keys. Rename them to `clone_db_*`. Old `WP_SSH_MIGRATE_DB_*` variables are silently ignored instead, so `clone` reports the target DB credentials as missing until they are renamed to `WP_SSH_CLONE_DB_*`.
 
@@ -146,6 +146,6 @@ wp option get home --path=/path/to/wordpress
 wp plugin list --path=/path/to/wordpress
 ```
 
-The target is a standalone WordPress install, so verify with a direct `wp` against the target path (not `ddev wp`).
+The target is a plain WordPress installation, so verify with a direct `wp` against the target path (not `ddev wp`).
 
 If URL replacement was skipped or misconfigured, check the configured `pull_domain_replacements` and rerun only after confirming the intended source and target domains.

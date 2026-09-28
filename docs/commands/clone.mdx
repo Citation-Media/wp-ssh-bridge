@@ -5,7 +5,7 @@ sidebar:
   icon: copy
 ---
 
-`clone` copies a site as a site, not as a development copy. Use it when the result should keep running as a real WordPress install: a migration to a new host, a production-shaped staging box, or a one-off duplicate.
+`clone` copies a site as a site, not as a development copy. Use it when the result should keep running as a real WordPress installation: a migration to a new host, a production-shaped staging box, or a one-off duplicate.
 
 The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clone skips the development rewrites and keeps everything a live site needs.
 
@@ -26,12 +26,13 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 ## Run it
 
 <Tabs inline param="integration" syncKey="integration">
-  <Tab title="Generic">
+  <Tab title="Standalone">
 
-    This is the only supported runtime for `clone`. Run it from the directory that should become the new WordPress root, or point at one with `--project-root`.
+    This is the only supported runtime for `clone`. Run it from a working directory outside the web root and point `--local-wp-path` at the directory that should become the new WordPress root, because the database dump is staged in `.wp-ssh/` under the directory you run it from.
 
     ```bash
     wp-ssh-bridge clone --silent \
+      --local-wp-path /var/www/target \
       --destination deploy@source.example.com \
       --remote-path /home/source/public_html \
       --db-host db.example.com \
@@ -50,7 +51,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
     **Clone is rejected in DDEV projects.**
 
     ```text
-    Error: clone is not supported in DDEV projects
+    Error: clone does not support DDEV projects; …
     ```
 
     Local WP-CLI runs as `ddev wp` in DDEV mode, so the database import would go into the DDEV container, not into the target database whose credentials you passed. The copied `wp-config.php` and the imported data would describe two different databases.
@@ -58,7 +59,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
     **What to do instead:**
 
     - For a local development copy, use [`pull`](/docs/commands/pull), which is what DDEV mode is built for.
-    - For a real migration, run `clone` from a plain directory outside the DDEV project. It can be anywhere on your machine; the result is a standalone WordPress tree you then move to the new host.
+    - For a real migration, run `clone` from a plain directory outside the DDEV project. It can be anywhere on your machine; the result is a plain WordPress tree you then move to the new host.
 
   </Tab>
   <Tab title="wp-env">
@@ -66,12 +67,12 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
     **Clone is rejected in wp-env projects**, for the same reason as DDEV.
 
     ```text
-    Error: clone is not supported in wp-env projects
+    Error: clone does not support wp-env projects; …
     ```
 
     wp-env routes WP-CLI through `wp-env run cli`, so the import would target the container database rather than the credentials you passed with `--db-*`.
 
-    **What to do instead:** use [`pull`](/docs/commands/pull) for local work, and run `clone` against a standalone target directory outside the wp-env project when you actually need a host-to-host copy.
+    **What to do instead:** use [`pull`](/docs/commands/pull) for local work, and run `clone` against a plain target directory outside the wp-env project when you actually need a host-to-host copy.
 
   </Tab>
 </Tabs>
@@ -106,13 +107,16 @@ wp-ssh-bridge clone --silent
 ```
 :::
 
-## Config mode
+## From a config file
 
 For a migration you run more than once, keep it in a file:
 
 ```yaml title=".wp-ssh.yaml"
 pull_destination: "deploy@source.example.com"
 pull_remote_path: "/home/source/public_html"
+
+# The new WordPress root, outside the working directory that holds this file.
+local_wp_path: "/var/www/target"
 
 clone_db_host: "db.example.com"
 clone_db_name: "target_db"
@@ -132,7 +136,7 @@ wp-ssh-bridge clone --silent
 
 ## Emptying the target first
 
-A clone is **additive** by default. Files are added and updated, but whatever was already in the target directory stays: a hosting provider's placeholder `index.html`, a starter theme, an old install's files. `--clean-target` only concerns files; the tables of a previous installation are removed on every clone, see [Replacing an existing installation](#replacing-an-existing-installation). On the rsync transport that means no `--delete`; the tar transport has no equivalent at all.
+A clone is **additive** by default. Files are added and updated, but whatever was already in the target directory stays: a hosting provider's placeholder `index.html`, a starter theme, an old installation's files. On the rsync transport that means the sync runs without `--delete`; the tar transport never deletes anything on its own. `--clean-target` only concerns files; the tables of a previous installation are removed on every clone, see [Replacing an existing installation](#replacing-an-existing-installation).
 
 Pass `--clean-target` to start from an empty tree:
 
@@ -171,7 +175,7 @@ Before the import, the clone checks every table the import and a `--db-prefix` r
 ✓ Previous installation tables removed
 ```
 
-:::warning[Back up the target database first]
+:::danger[Back up the target database first]
 Removing the previous installation's tables cannot be undone and has no flag to switch it off. It runs on every clone that imports the database, with or without `--clean-target`.
 :::
 
@@ -180,13 +184,13 @@ Removing the previous installation's tables cannot be undone and has no flag to 
 When a WordPress site is already installed at the target, the clone puts it into maintenance mode while the database is imported and lifts it again afterwards, including on failure. A migration usually targets an empty directory and a new database instead. There is no site to protect then, and WP-CLI could not activate maintenance mode anyway, so the import runs without it:
 
 ```text
-• Skipping local maintenance mode: no installed WordPress site at the destination yet
+• Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet
 ```
 
 With `--clean-target`, the previous site is replaced, so maintenance mode is skipped without checking:
 
 ```text
-• Skipping local maintenance mode: --clean-target replaces the destination site
+• Skipping local maintenance mode: --clean-target replaces the target site
 ```
 
 ## Migrating a site
@@ -195,19 +199,17 @@ With `--clean-target`, the previous site is replaced, so maintenance mode is ski
 
 ## When something fails
 
-| Symptom | Likely cause and fix |
-| --- | --- |
-| `clone is not supported in DDEV projects` | You are inside a DDEV or wp-env project. Run it from a plain directory. |
-| `unknown command "clone"` | The binary predates the rename from `migrate`. [Update it](/docs/installation#updating). |
-| `unknown config key "migrate_db_host"` | Old config keys. Rename `migrate_db_*` to `clone_db_*`. |
-| Target DB credentials reported as missing | Old `WP_SSH_MIGRATE_DB_*` variables are ignored. Rename them to `WP_SSH_CLONE_DB_*`. |
-| The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design; set `local_url` or add the mapping and rerun. |
-| The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
-| Old files from the previous install remain | Clones are additive for files. Use `--clean-target` if that is what you want. |
-| Old tables from the previous install remain | The target had no readable `wp-config.php`, or it pointed at another database, so the clone could not tell they belong to it. Drop them manually. |
-| `the target database already contains …` | The import or the rename would overwrite a table of another site or of an installation no config at the target describes. Nothing was imported. Remove the table, or clone into another database. |
-| `wp-config.php resolves the database to …` | Another file or the environment defines the database constants before the ones the clone writes, so the import would go elsewhere. Nothing was imported. Remove that definition from the copied config. |
-| `cannot rename … for clone_db_prefix (--db-prefix)` | The source database already holds tables under that prefix, so renaming would overwrite them. Nothing was imported. Choose another prefix or omit `--db-prefix`. |
-| `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `clone does not support DDEV projects; …` or `clone does not support wp-env projects; …` | You are inside a DDEV or wp-env project. | Run it from a plain directory. |
+| `unknown command "clone"`, `unknown config key "migrate_db_host"`, or target DB credentials reported as missing | The binary, the config keys, or the `WP_SSH_MIGRATE_DB_*` variables predate the rename from `migrate`. | See [Command names after the rename](/docs/troubleshooting#command-names-after-the-rename). |
+| The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design. | Set `local_url` or add the mapping, and rerun. |
+| The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. | [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
+| Old files from the previous installation remain | Clones are additive for files. | Use `--clean-target` if that is what you want. |
+| Old tables from the previous installation remain | The target had no readable `wp-config.php`, or it pointed at another database, so the clone could not tell they belong to it. | Drop them manually. |
+| `the target database already contains …` | The import or the rename would overwrite a table of another site or of an installation no config at the target describes. Nothing was imported. | Remove the table, or clone into another database. |
+| `wp-config.php resolves the database to …` | Another file or the environment defines the database constants before the ones the clone writes, so the import would go elsewhere. Nothing was imported. | Remove that definition from the copied config. |
+| `cannot rename … for clone_db_prefix (--db-prefix)` | The source database already holds tables under that prefix, so renaming would overwrite them. Nothing was imported. | Choose another prefix or omit `--db-prefix`. |
+| `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. | [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 
 More in [Troubleshooting](/docs/troubleshooting).

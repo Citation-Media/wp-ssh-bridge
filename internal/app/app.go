@@ -77,6 +77,7 @@ Usage:
   wp-ssh-bridge provider install [flags]      Regenerate DDEV provider files
   wp-ssh-bridge provider generate [flags]     Print generated DDEV YAML
   wp-ssh-bridge domains add --old A --new B   Add pull/push domain mappings
+  wp-ssh-bridge domains list                  Show the configured domain mappings
   wp-ssh-bridge plugins remove [wordpress-root]
   wp-ssh-bridge version [--short]
 
@@ -90,7 +91,12 @@ Common flags:
   --push-destination string  Push target SSH destination
   --push-host string         Push target SSH host
   --push-remote-path string  Push target WordPress root
-  --local-wp-path string     Local WordPress root relative to the DDEV project
+  --local-wp-path string     Local WordPress root, relative to the project root or absolute
+  --local-url string         Local site URL
+  --push-url string          Push target site URL
+  --skip-search-replace      Leave URLs untouched after the import
+  --project-root string      Project root (default: detected from the working directory)
+  --yes, -y                  Skip the confirmation prompt of a direct DDEV run
   --clone-images             Include wp-content/uploads
   --skip-db                  Pull/push files only
   --skip-files               Pull/push database only
@@ -108,7 +114,7 @@ Clone flags:
   --db-prefix string         Rename cloned tables to this prefix (default: keep the source prefix)
   --clean-target             Remove pre-existing target files before syncing
 
-Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
+Run "wp-ssh-bridge init" to configure this project (DDEV, wp-env, or standalone).
 `)
 }
 
@@ -284,9 +290,9 @@ func ensurePushAdapterSupported(adapter runtimeAdapter) error {
 func ensureCloneAdapterSupported(adapter runtimeAdapter) error {
 	switch adapter.Mode() {
 	case modeDDEV:
-		return errors.New("clone does not support DDEV projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a DDEV project root")
+		return errors.New("clone does not support DDEV projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain target directory, not a DDEV project root")
 	case modeWPEnv:
-		return errors.New("clone does not support wp-env projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain destination directory, not a wp-env project root")
+		return errors.New("clone does not support wp-env projects; it copies a live WordPress site host-to-host into a standalone target. Run clone against a plain target directory, not a wp-env project root")
 	}
 	return nil
 }
@@ -520,7 +526,7 @@ func (a *App) commandDomains(args []string) error {
 func (a *App) commandDomainsAdd(args []string) error {
 	fs := flag.NewFlagSet("domains add", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
-	projectRoot := fs.String("project-root", "", "DDEV project root")
+	projectRoot := fs.String("project-root", "", "project root (default: detected from the working directory)")
 	configFile := fs.String("config-file", "", "YAML config file path")
 	oldValue := fs.String("old", "", "source domain or URL")
 	newValue := fs.String("new", "", "target domain or URL")
@@ -574,7 +580,7 @@ func (a *App) commandDomainsAdd(args []string) error {
 func (a *App) commandDomainsList(args []string) error {
 	fs := flag.NewFlagSet("domains list", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
-	projectRoot := fs.String("project-root", "", "DDEV project root")
+	projectRoot := fs.String("project-root", "", "project root (default: detected from the working directory)")
 	configFile := fs.String("config-file", "", "YAML config file path")
 	integration := fs.String("integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {
@@ -639,10 +645,12 @@ func (a *App) resolveProjectRoot(explicit string, integration string, configFile
 	if err != nil {
 		return "", err
 	}
-	if runtime.Mode != modeStandalone {
+	// A standalone project is recognised by its config file, so plugin cleanup does not
+	// run against an arbitrary working directory.
+	if runtime.Mode != modeStandalone || fileExists(configPathForRuntime(runtime, configFile)) {
 		return runtime.Root, nil
 	}
-	return "", errors.New("no DDEV or wp-env project found; run from inside a project or pass --project-root")
+	return "", errors.New("no DDEV, wp-env, or configured standalone project found; run from the project root or pass --project-root")
 }
 
 // resolveRuntime chooses the runtime mode, honoring an explicitly pinned integration and
@@ -805,7 +813,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		if opts.Clone && opts.CleanTarget {
 			// The destination's previous site has just been replaced, so there is
 			// nothing left for maintenance mode to protect during the import.
-			a.UI.Info("Skipping local maintenance mode: --clean-target replaces the destination site")
+			a.UI.Info("Skipping local maintenance mode: --clean-target replaces the target site")
 		} else {
 			enabled, err := a.enableLocalMaintenanceMode(ctx, root, cfg)
 			if err != nil {
@@ -930,7 +938,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	opts := configOptions{Binary: defaultBinaryPath()}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.BoolVar(&opts.Silent, "silent", false, "do not prompt; use saved config, environment, and flags")
@@ -955,7 +963,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.PushRemotePath, "push-remote-path", "", "push target WordPress root")
 	fs.StringVar(&opts.PushRemoteTmpDir, "push-remote-tmp-dir", "", "push target temporary directory")
 	fs.StringVar(&opts.PushURL, "push-url", "", "push target public WordPress URL")
-	fs.StringVar(&opts.LocalWPPath, "local-wp-path", "", "local WordPress root relative to project")
+	fs.StringVar(&opts.LocalWPPath, "local-wp-path", "", "local WordPress root, relative to the project root or absolute")
 	fs.BoolVar(&opts.CloneImages, "clone-images", false, "include wp-content/uploads")
 	fs.StringVar(&opts.PluginRemoveFile, "plugin-remove-file", "", "plugin block list path")
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
@@ -1040,7 +1048,7 @@ func parseProviderInstallCommand(args []string, stderr io.Writer) (providerInsta
 	opts := providerInstallOptions{Binary: defaultBinaryPath()}
 	fs := flag.NewFlagSet("provider install", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Binary, "binary", opts.Binary, "binary path used by generated provider files")
 	fs.StringVar(&opts.Provider, "provider", "", "DDEV provider name")
@@ -1172,7 +1180,7 @@ func parseRuntimeCommand(name string, args []string, stderr io.Writer) (runtimeO
 	opts := runtimeOptions{}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.ProjectRoot, "project-root", "", "DDEV project root")
+	fs.StringVar(&opts.ProjectRoot, "project-root", "", "project root (default: detected from the working directory)")
 	fs.StringVar(&opts.ConfigFile, "config-file", "", "YAML config file path")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	if err := fs.Parse(args); err != nil {

@@ -8,7 +8,7 @@ sidebar:
 
 wp-ssh-bridge never opens a connection itself. Every remote step runs your local `ssh` as a child process, and file transfers run `rsync` with that same `ssh` underneath. Whatever your terminal can reach with `ssh`, the CLI can reach too, with the same keys, agents, and `~/.ssh/config`. That is the whole design: there is nothing to configure here that you would not configure for plain SSH.
 
-This page covers the three things that are specific to the CLI: the address format and how aliases resolve. Any SSH agent works, including the ones in 1Password, Bitwarden, and Proton Pass; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
+This page covers the three things that are specific to the CLI: the address format, how aliases resolve, and the one shared connection per run. Any SSH agent works, including the ones in 1Password, Bitwarden, and Proton Pass; set it up as its own documentation describes, and the CLI uses it the moment `ssh` does.
 
 ## One address instead of three values
 
@@ -17,7 +17,7 @@ The source and the target each take a single **destination**, in any form `ssh` 
 | Form | Example | Notes |
 | --- | --- | --- |
 | Alias from `~/.ssh/config` | `prod` | User, hostname, port, and identity all come from the `Host prod` block. |
-| `user@host` | `deploy@production.example.com` | Port 22. |
+| `user@host` | `deploy@production.example.com` | The `Port` from `~/.ssh/config`, otherwise 22. |
 | `user@host:port` | `deploy@production.example.com:2222` | The shorthand most people expect. |
 | `ssh://` URL | `ssh://deploy@production.example.com:2222` | The form from `man ssh`. |
 | IPv6 | not accepted directly | macOS' built-in rsync cannot pass an IPv6 literal on. Give the address a `Host` block with `HostName 2001:db8::1` and use the alias. |
@@ -33,7 +33,7 @@ push_url: "https://staging.example.com"
 
 The same value works as `WP_SSH_PULL_DESTINATION` / `WP_SSH_PUSH_DESTINATION` and as `--destination` / `--push-destination`. On `push`, `--destination` refers to the push target, like the other short flags.
 
-A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both in the same place, the config file, the environment, or the flags, is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. A destination from the environment or a flag does replace the split keys of the config file, so `WP_SSH_PULL_DESTINATION` works as a one-off override on any project. The split keys keep working for existing configs; `init` writes whichever form you gave it.
+A destination **replaces** `pull_user`, `pull_host`, and `pull_port`. Setting both in the same place, the config file, the environment, or the flags, is an error rather than a silent merge, so a stale `pull_user` can never override the user your alias defines. The same goes across layers in one direction: split values from an environment variable or a flag over a config file that uses a destination are rejected too, with `the destination already carries the user, host, and port`. The other direction is fine. A destination from the environment or a flag replaces the split keys of the config file, so `WP_SSH_PULL_DESTINATION` works as a one-off override on any project. The split keys keep working for existing configs; `init` writes whichever form you gave it.
 
 ## Aliases resolve through ssh
 
@@ -68,10 +68,13 @@ The CLI sets `ControlMaster`, `ControlPath`, and `ControlPersist` for its own co
 
 ## When a connection fails
 
-| Symptom | Check |
-| --- | --- |
-| `Permission denied (publickey)` with an agent configured | `ssh -G <destination> \| grep -i identityagent` shows which socket OpenSSH will use; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list. |
-| `agent refused operation` | The approval was declined or timed out in the password manager. Run again and confirm the prompt. |
-| It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts. Anything interactive, such as a passphrase prompt for an unloaded key, fails here on purpose. Load the key into an agent. |
-| `Too many authentication failures` | The agent offered more keys than the server allows attempts. Pin the key in the `Host` block with `IdentityFile` (the public key) and `IdentitiesOnly yes`, as OpenSSH documents. |
-| The wrong user or port is used | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user`/`pull_port` keys together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |
+Test `ssh <destination>` in your terminal first. The CLI runs the same `ssh` with the same configuration, so a connection that fails there fails in the CLI too, and the fix belongs in OpenSSH or your agent.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `Permission denied (publickey)` | The host does not accept any key that OpenSSH offered. | `ssh -G <destination> \| grep -i identityagent` shows which agent socket OpenSSH uses; `ssh-add -L` lists what that agent offers. The key the host expects must be in that list, or named with `IdentityFile` in the `Host` block. |
+| `agent refused operation` | The approval was declined or timed out in the password manager. | Run again and confirm the prompt. |
+| It works in the terminal, not in the CLI | The CLI passes `BatchMode=yes` and disables password prompts, so anything interactive, such as a passphrase prompt for an unloaded key, fails on purpose. | Load the key into an agent. |
+| `Too many authentication failures` | The agent offered more keys than the server allows attempts. | Pin the key in the `Host` block with `IdentityFile` (the public key) and `IdentitiesOnly yes`, as OpenSSH documents. |
+| `Host key verification failed` | The host is not in `known_hosts` yet. | Connect once with `ssh <destination>` and accept the key. |
+| The wrong user or port is used | A value comes from `~/.ssh/config` rather than from the destination. | `ssh -G <destination>` shows the resolved values. A destination and split `pull_user` or `pull_port` values together are rejected, so if the values differ, one of them is coming from `~/.ssh/config`. |

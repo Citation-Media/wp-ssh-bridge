@@ -5,18 +5,18 @@ sidebar:
   icon: upload
 ---
 
-`push` is the reverse of a pull. It exports your local database, uploads it, imports it on the target, syncs your local WordPress tree to the remote root, and rewrites URLs on the target so the site answers under its own domain.
+`push` is the reverse of a pull. It exports your local database, uploads it, imports it on the target, syncs your local WordPress tree to the target's WordPress root, and rewrites URLs on the target so the site answers under its own domain.
 
 :::danger[Push overwrites the target]
 The target database is replaced and its files are mirrored with `rsync --delete`. There is no undo. Confirm the host, the remote path, and the target URL before every push, and keep a backup of the target. Never point a push at production unless that is exactly what you mean to do.
 :::
 
-The CLI asks for confirmation and prints the resolved target before it starts. `--silent` and `--yes` skip that prompt, so reserve them for scripts where the target is pinned in the config file.
+Check where a push will go before you run it: the push values in the config file, and `wp-ssh-bridge domains list` for the domain mappings. In a DDEV project, `ddev push` asks DDEV's usual question, and a direct push prints the resolved target and asks you to confirm; `--yes` or `--silent` skips that question. A standalone push has no confirmation step: without `--silent` it prompts for each push value, pre-filled from the config, and then starts. Reserve `--silent` for runs where the target is pinned in the config file.
 
 ## Run it
 
 <Tabs inline param="integration" syncKey="integration">
-  <Tab title="Generic">
+  <Tab title="Standalone">
 
     The standard way to push. Your local checkout is the source of truth.
 
@@ -24,7 +24,7 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
     wp-ssh-bridge push --silent
     ```
 
-    With an inline target. For `push`, the short flags refer to the push target, so `--destination` means `--push-destination`:
+    With an inline target. On `push`, the short flags refer to the push target, so `--destination` means `--push-destination`:
 
     ```bash
     wp-ssh-bridge push --silent \
@@ -33,38 +33,41 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
       --push-url https://staging.example.com
     ```
 
-    The explicit spellings work too and are clearer in scripts:
+    The explicit spelling works too and is clearer in scripts:
 
     ```bash
     wp-ssh-bridge push --silent \
-      --push-user deploy \
-      --push-host staging.example.com \
+      --push-destination deploy@staging.example.com \
       --push-remote-path /home/staging/public_html \
       --push-url https://staging.example.com
     ```
+
+    `--push-user`, `--push-host`, and `--push-port` remain as the split form of the address for configs that still use it.
 
     Set `push_url` whenever you can. Without it the CLI reads the target's current home URL before the import and uses that, which works but relies on the target being in a sane state. On a target without an installed site, such as the first push into an empty directory, there is nothing to read, so the push stops before uploading anything until `push_url`, a push domain mapping, or `--skip-search-replace` says what to do with the URLs.
 
   </Tab>
   <Tab title="DDEV">
 
-    A DDEV project can push through DDEV's own lifecycle or directly. Both run the same pipeline.
+    A DDEV project can push through DDEV's own lifecycle or directly. Both import the database on the target, sync the files, and rewrite URLs there; they differ in who drives the run.
 
     ```bash title="Native DDEV lifecycle"
     ddev push wp-ssh -y
     ```
 
     ```bash title="Direct"
-    ./.ddev/bin/wp-ssh-bridge push --silent
+    wp-ssh-bridge push --silent
     ```
+
+    The native command prints DDEV's lifecycle output and runs each provider step (database, files, post-push) as a separate process, so each step authenticates on its own. It does not put the target into maintenance mode and takes no wp-ssh-bridge flags. The direct command runs over one SSH connection, keeps the target in maintenance mode for the whole push, accepts every flag below, and asks you to confirm the resolved target unless you pass `--yes` or `--silent`.
 
     The local database is exported through `ddev wp`, so the container database is the source. Files come from your local WordPress root on the host.
 
-    Native `ddev push` takes no wp-ssh-bridge flags. Override the target inline with DDEV's environment flag:
+    With the native command, override the target inline with DDEV's environment flag:
 
     ```bash
     ddev push wp-ssh \
-      --environment=WP_SSH_PUSH_USER=deploy,WP_SSH_PUSH_HOST=staging.example.com,WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html,WP_SSH_PUSH_URL=https://staging.example.com \
+      --environment=WP_SSH_PUSH_DESTINATION=deploy@staging.example.com,WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html,WP_SSH_PUSH_URL=https://staging.example.com \
       -y
     ```
 
@@ -77,10 +80,10 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
 
     **Push is rejected in wp-env projects.** The command exits with an error rather than running.
 
-    The reason is the local file tree. wp-env manages the WordPress install itself, uploads are excluded from pulls by default, and every `plugins`, `themes`, or `mappings` path declared in `.wp-env.json` is a Docker bind mount that is empty on the host. Pushing that tree with `rsync --delete` would erase exactly those directories on the target.
+    The reason is the local file tree. wp-env manages the WordPress installation itself, uploads are excluded from pulls by default, and every `plugins`, `themes`, or `mappings` path declared in `.wp-env.json` is a Docker bind mount that is empty on the host. Pushing that tree with `rsync --delete` would erase exactly those directories on the target.
 
     ```text
-    Error: push is not supported in wp-env projects
+    Error: push does not support wp-env projects; the local WordPress tree is managed by wp-env …
     ```
 
     :::danger[Do not work around it with `--integration`]
@@ -96,16 +99,16 @@ The CLI asks for confirmation and prints the resolved target before it starts. `
 
 <Steps>
   <Step title="Preflight">
-    Local `ssh`, local WP-CLI when the database is involved, SSH access to the target, remote path readable, remote temp directory writable, and remote WP-CLI. Nothing is uploaded until all of it passes.
+    Local tools, SSH access to the target, the paths on both sides, and WP-CLI are checked first, and nothing is uploaded until all of it passes. [How it works](/docs/how-it-works#preflight) lists every check.
   </Step>
   <Step title="Maintenance mode on the target">
-    The remote site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed on the target yet, as on the first push into an empty directory, there is nothing to protect and the push runs without it.
+    The target site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed on the target yet, as on the first push into an empty directory, there is nothing to protect and the push runs without it.
   </Step>
   <Step title="Database export, upload, import">
     Your local database is exported with WP-CLI, uploaded to the remote temp directory, and imported there with remote WP-CLI. Before the import, the target's current URL is captured when `push_url` is not set.
   </Step>
   <Step title="File sync">
-    rsync mirrors your local WordPress root onto the remote root, with the exclusions below. Without rsync, the tar-over-SSH fallback is used, which does not remove stale files.
+    rsync mirrors your local WordPress root onto the target's WordPress root, with the exclusions below. Without rsync, the tar-over-SSH fallback is used, which does not remove stale files.
   </Step>
   <Step title="URL rewrites on the target">
     A remote WP-CLI search-replace rewrites the local URL to the target URL, applies every configured push domain mapping, and updates the multisite `site` and `blogs` tables.
@@ -129,7 +132,7 @@ That list is deliberately short. A push is meant to make the target match your l
 | Flag | Effect |
 | --- | --- |
 | `--silent` | No prompts and no confirmation. Only use it when the target is pinned in config. |
-| `--yes`, `-y` | Confirm the target without prompting. |
+| `--yes`, `-y` | Skip the target confirmation of a direct push in a DDEV project. A standalone push has no confirmation, and `--yes` does not skip its value prompts. |
 | `--skip-files` | Database only. |
 | `--skip-db` | Files only. |
 | `--skip-search-replace` | Do not rewrite URLs on the target. |
@@ -137,28 +140,14 @@ That list is deliberately short. A push is meant to make the target match your l
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--push-destination`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--destination`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
 | `--push-user`, `--push-host`, `--push-port` | The split form of the address, aliased by `--user`, `--host`, and `--port` on `push`. Not combinable with a destination. |
+| `--local-wp-path`, `--local-url` | Override the local WordPress root the push reads from and the local URL it rewrites. |
 | `--config-file` | Read another YAML file, for example `.wp-ssh.staging.yaml`. |
+| `--project-root` | Run against a project other than the one the working directory belongs to. |
+| `--integration` | Pin the runtime to `ddev` or `standalone`. A wp-env project cannot push. |
 
 ## Domain rewrites in both directions
 
-`domains add` writes a pull mapping and its inverse push mapping in one go, which is what you want when you pull from production into a local domain and push back to staging:
-
-```bash
-wp-ssh-bridge domains add --old example.com --new example.ddev.site
-```
-
-```yaml title="What ends up in the config"
-pull_domain_replacements:
-  - old: "example.com"
-    new: "example.ddev.site"
-push_domain_replacements:
-  - old: "example.ddev.site"
-    new: "example.com"
-```
-
-Use protocol-less domains for multisite. The `wp_site` and `wp_blogs` tables and constants such as `DOMAIN_CURRENT_SITE` store hosts without a scheme, and a protocol-less mapping covers both bare hosts and hosts inside complete URLs. Full URLs remain available when a replacement has to be path-aware.
-
-See [Configuration](/docs/configuration#domain-mappings) for the details.
+A push rewrites the local URL to the target URL and then applies every push domain mapping. `wp-ssh-bridge domains add` writes a pull mapping and its inverse push mapping in one go; [Domain mappings](/docs/configuration#domain-mappings) explains the format and why protocol-less domains are the safer choice for multisite.
 
 ## A safe staging workflow
 
@@ -168,26 +157,35 @@ See [Configuration](/docs/configuration#domain-mappings) for the details.
     ```bash
     wp-ssh-bridge init --silent \
       --config-file .wp-ssh.staging.yaml \
-      --push-user deploy \
-      --push-host staging.example.com \
+      --push-destination deploy@staging.example.com \
       --push-remote-path /home/staging/public_html \
       --push-url https://staging.example.com
     ```
 
   </Step>
-  <Step title="Dry-run the file side first">
+  <Step title="Check the target values">
 
-    Push files only, check the site, then push the database. It splits a big change into two smaller ones.
+    Read the push values back before anything is sent. A standalone push does not ask for confirmation.
 
     ```bash
-    wp-ssh-bridge push --config-file .wp-ssh.staging.yaml --skip-db
+    cat .wp-ssh.staging.yaml
+    wp-ssh-bridge domains list --config-file .wp-ssh.staging.yaml
     ```
 
   </Step>
-  <Step title="Push the database and confirm the target">
+  <Step title="Push the files first">
+
+    This is a real push: the files on the target are replaced, only the database is left alone. Check the site afterwards, then push the database. It splits a big change into two smaller ones.
 
     ```bash
-    wp-ssh-bridge push --config-file .wp-ssh.staging.yaml --skip-files
+    wp-ssh-bridge push --silent --config-file .wp-ssh.staging.yaml --skip-db
+    ```
+
+  </Step>
+  <Step title="Push the database">
+
+    ```bash
+    wp-ssh-bridge push --silent --config-file .wp-ssh.staging.yaml --skip-files
     ```
 
   </Step>
@@ -204,13 +202,13 @@ See [Configuration](/docs/configuration#domain-mappings) for the details.
 
 ## When something fails
 
-| Symptom | Likely cause and fix |
-| --- | --- |
-| Push rejected in a wp-env project | Expected. Push from a standalone checkout instead; see the wp-env tab above. |
-| The target still shows the old URL | `push_url` was missing and the target's home URL was unusable. Set `push_url` and run again with `--skip-files`. |
-| `the push target URL is unknown because it could not be read from the target` | A first push into an empty target has no URL to read, or the target's WP-CLI could not report it. Set `push_url`, `WP_SSH_PUSH_URL`, or `--push-url`, add a push domain mapping, or pass `--skip-search-replace` to keep the local URLs. |
-| Internal links point at the local domain | A missing push domain mapping. Add it with `domains add` and rerun the search-replace with `--skip-files`. |
-| The target site stays in maintenance mode | The run was interrupted before cleanup. Remove `.maintenance` in the remote WordPress root. |
-| Warning about stale files | The tar fallback is in use, so removed files remain on the target. Install rsync on both sides. |
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `push does not support wp-env projects; …` | Expected in a wp-env project. | Push from a standalone checkout instead; see the wp-env tab above. |
+| The target still shows the old or the local URL after a push | `push_url` was not set, so the push reused the target's home URL from before the import, and that value was wrong. | Set `push_url` and run again with `--skip-files`. |
+| `the push target URL is unknown because it could not be read from the target` | A first push into an empty target has no URL to read, or the target's WP-CLI could not report it. | Set `push_url`, `WP_SSH_PUSH_URL`, or `--push-url`, add a push domain mapping, or pass `--skip-search-replace` to keep the local URLs. |
+| Internal links point at the local domain | A push domain mapping is missing. | Add it with `domains add` and rerun the search-replace with `--skip-files`. |
+| The target site stays in maintenance mode | The run was interrupted before cleanup. | Remove `.maintenance` in the target's WordPress root. |
+| `scp/tar transport: stale remote files not removed (no --delete equivalent)` | rsync is missing on one side, so the tar-over-SSH fallback is in use and files removed locally remain on the target. | Install rsync on both machines. |
 
 More in [Troubleshooting](/docs/troubleshooting).

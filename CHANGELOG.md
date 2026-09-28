@@ -15,6 +15,9 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Fixed
 
+- Stop writing one-shot values into `.wp-ssh.yaml`. A standalone or wp-env `pull`, `push`, or `clone` saved every flag and environment value into the config file, including `WP_SSH_CLONE_DB_PASSWORD` and secrets resolved by `op run` and similar tools, so they could end up in Git. A `--silent` run no longer writes the file, and an interactive run saves only the values confirmed at the prompts, never the clone database password.
+- Let `plugins remove` run in a standalone project that has its `.wp-ssh.yaml`, instead of requiring `--project-root`.
+- Name the receiving side the target in messages: `Skipping local maintenance mode: no installed WordPress site in the local WordPress root yet` and `… --clean-target replaces the target site`. "Destination" now only means the SSH address.
 - Sanitize `wp-config.php` before the database import in a direct `pull` in DDEV mode. The file copied from the source still carried the production database constants when maintenance mode and the import ran through `ddev wp`, so the import used them: it failed, or reached the production database when that host was reachable from the container.
 - `clone --db-prefix` renames the imported tables, the `user_roles` option of every site, and the user meta keys WordPress derives from the prefix. Before, only `wp-config.php` changed, so a prefix that differed from the source pointed the cloned site at missing tables.
 - Stop a clone before the import when `wp-config.php` resolves to another database than the target credentials, for example because an included file defines the database constants first.
