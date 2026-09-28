@@ -120,6 +120,9 @@ A pull never modifies the source site. It creates a temporary database dump in t
   </Step>
   <Step title="Plugin cleanup">
     Plugins on the block list that are actually installed are deactivated and deleted through WP-CLI. Skipped in wp-env projects with mounts, where those directories are your own working tree.
+  </Step>
+  <Step title="Page builder CSS">
+    Page builders store generated CSS that still points at the old URLs after an import. The CLI runs `wp elementor flush-css`, `wp bricks regenerate_assets`, and `wp beaver clearcache` with plugins loaded, adding `--network` on multisite where the builder supports it. Builders that are not installed are skipped silently. A failure is reported as a warning and does not fail the pull. Skip the step with `--skip-cache-rebuild`.
 
     Maintenance mode is lifted after this step, or as soon as the import or a later step fails.
   </Step>
@@ -158,6 +161,7 @@ blocked plugin directories         from the block list
 | `--clone-images` | Include `wp-content/uploads`. Off by default because media is usually the bulk of a site. |
 | `--skip-search-replace` | Leave URLs untouched after the import. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
+| `--skip-cache-rebuild` | Do not rebuild page builder CSS after the import. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
 | `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |

@@ -217,6 +217,7 @@ Use these only when the user needs a partial or special operation:
 --clone-images           include wp-content/uploads during pull
 --skip-search-replace    skip URL replacement
 --skip-maintenance-mode  do not enable WordPress maintenance mode around the import
+--skip-cache-rebuild     skip page builder CSS rebuild (config skip_cache_rebuild, env WP_SSH_SKIP_CACHE_REBUILD)
 --force-scp              use the tar-over-SSH transport even when rsync exists
 --yes, -y                skip the confirmation prompt of a direct DDEV run
 --silent                 no prompts; take every value from config, environment, and flags
@@ -259,6 +260,8 @@ Common checks:
 wp-ssh-bridge version
 wp-ssh-bridge pull --silent --config-file .wp-ssh.yaml
 ```
+
+After a DB pull, clone, or push the CLI rebuilds Elementor, Bricks, and Beaver Builder CSS when their WP-CLI command exists. A `Could not rebuild ... CSS` warning does not mean the operation failed; the data transfer already finished. Show the warning details and suggest running the builder command manually on the affected site, for example `wp elementor flush-css`, which loads plugins and surfaces the real error.
 
 For missing required values, provide the smallest full command with `--destination` and `--remote-path` for pull, or the push equivalents for push. For `Permission denied` with a password-manager agent, check `ssh -G <destination> | grep -i identityagent` and `ssh-add -L` before anything else.
 

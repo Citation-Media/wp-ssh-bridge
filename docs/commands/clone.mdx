@@ -193,6 +193,10 @@ With `--clean-target`, the previous site is replaced, so maintenance mode is ski
 • Skipping local maintenance mode: --clean-target replaces the target site
 ```
 
+## Page builder CSS
+
+After the import, the clone rebuilds the generated CSS of Elementor, Bricks, and Beaver Builder at the target with their WP-CLI commands, so it matches the target URL. Builders that are not installed are skipped. A failure is reported as a warning and does not fail the clone; rerun the command it names, such as `wp elementor flush-css`, at the target to see the full error. Skip the step with `--skip-cache-rebuild`.
+
 ## Migrating a site
 
 [Migrate a site](/docs/migrate-a-site) walks through a complete move to a new host, either by running `clone` on the new server, which then connects to the old one, or through your own machine followed by a [`push`](/docs/commands/push). The CLI always runs on the machine that receives the site; the old host never sends to the new one directly.

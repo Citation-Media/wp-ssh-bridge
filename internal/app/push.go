@@ -354,18 +354,22 @@ func (a *App) remoteWPOutputSilent(ctx context.Context, projectRoot string, targ
 	return output
 }
 
-// remoteWPCommand constructs the remote shell command needed to run WP-CLI over SSH.
+// remoteWPCommand constructs the remote shell command needed to run WP-CLI over SSH
+// without loading site plugins and themes.
 func remoteWPCommand(target RemoteTarget, args ...string) string {
+	return remoteWPCommandWithFlags(target, wpSkipExtensionFlags, args...)
+}
+
+// remoteWPCommandWithFlags constructs the remote WP-CLI shell command with explicit global flags.
+func remoteWPCommandWithFlags(target RemoteTarget, flags []string, args ...string) string {
 	parts := []string{
 		"set -eu;",
 		"cd " + shellQuote(trimTrailingSlash(target.RemotePath)) + ";",
 		remoteWPCLIPrelude(target),
 		"wp_ssh_wp",
 		shellQuote("--allow-root"),
-		shellQuote("--skip-plugins"),
-		shellQuote("--skip-themes"),
 	}
-	for _, arg := range args {
+	for _, arg := range append(append([]string{}, flags...), args...) {
 		parts = append(parts, shellQuote(arg))
 	}
 	return strings.Join(parts, " ")

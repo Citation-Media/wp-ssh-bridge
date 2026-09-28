@@ -223,7 +223,7 @@ func wpEnvArgs(base []string, args ...string) []string {
 // wpEnvRunCLIArgs builds the `wp-env run cli` invocation used for local WP-CLI commands.
 // wp-env writes its own progress banners to stderr, so WP-CLI stdout stays parseable.
 func wpEnvRunCLIArgs(base []string, containerPath string, args ...string) []string {
-	full := wpEnvArgs(base, "run", "cli", "wp", "--path="+containerPath, "--allow-root", "--skip-plugins", "--skip-themes")
+	full := wpEnvArgs(base, "run", "cli", "wp", "--path="+containerPath)
 	return append(full, args...)
 }
 

@@ -1387,12 +1387,20 @@ func (a *App) wpOutputSilent(ctx context.Context, projectRoot string, cfg Config
 	return a.outputExternalWithStderr(ctx, projectRoot, name, io.Discard, fullArgs...)
 }
 
-// localWPCommand selects DDEV's WP-CLI proxy only when DDEV describe succeeds, and
-// wp-env's cli container when the project is a wp-env project.
+// wpSkipExtensionFlags keep routine WP-CLI calls independent of site plugins and themes.
+var wpSkipExtensionFlags = []string{"--skip-plugins", "--skip-themes"}
+
+// localWPCommand builds a local WP-CLI invocation that skips site plugins and themes.
 func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []string) {
+	return localWPCommandWithFlags(projectRoot, cfg, wpSkipExtensionFlags, args...)
+}
+
+// localWPCommandWithFlags selects DDEV's WP-CLI proxy only when DDEV describe succeeds, and
+// wp-env's cli container when the project is a wp-env project.
+func localWPCommandWithFlags(projectRoot string, cfg Config, flags []string, args ...string) (string, []string) {
+	wpArgs := append(append([]string{"--allow-root"}, flags...), args...)
 	if isDDEVRoot(projectRoot) {
-		fullArgs := append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes"}, args...)
-		return "ddev", fullArgs
+		return "ddev", append([]string{"wp", "--path=" + containerWPPath(projectRoot, cfg)}, wpArgs...)
 	}
 	if isWPEnvRoot(projectRoot) {
 		if status, ok := wpEnvStatus(projectRoot); ok {
@@ -1401,13 +1409,12 @@ func localWPCommand(projectRoot string, cfg Config, args ...string) (string, []s
 			if mapped, ok := wpEnvContainerPath(status, localWPRoot(projectRoot, cfg)); ok {
 				containerPath = mapped
 			}
-			return name, wpEnvRunCLIArgs(base, containerPath, args...)
+			return name, wpEnvRunCLIArgs(base, containerPath, wpArgs...)
 		}
 	}
 	name, baseArgs := localWPCLICommand(projectRoot)
-	fullArgs := append(baseArgs, "--path="+localWPRoot(projectRoot, cfg), "--allow-root", "--skip-plugins", "--skip-themes")
-	fullArgs = append(fullArgs, args...)
-	return name, fullArgs
+	fullArgs := append(baseArgs, "--path="+localWPRoot(projectRoot, cfg))
+	return name, append(fullArgs, wpArgs...)
 }
 
 // runExternal runs a local executable without invoking a local shell.

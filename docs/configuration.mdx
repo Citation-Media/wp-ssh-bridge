@@ -55,6 +55,7 @@ local_wp_path: "."                             # relative to the project root
 local_url: "https://example.ddev.site"         # only to override what is detected
 clone_images: false                            # include wp-content/uploads on pull
 skip_search_replace: false
+skip_cache_rebuild: false                      # page builder CSS after pull, clone, push
 plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
 
 # --- Domain rewrites, both directions ---
@@ -112,6 +113,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `local_url` | `WP_SSH_PULL_LOCAL_URL` | Local URL for the post-pull search-replace. Only needed to override the detected value. For `clone`, the target site URL; without it or a pull domain mapping, the clone keeps the source URL. |
 | `clone_images` | `WP_SSH_PULL_CLONE_IMAGES` | Include `wp-content/uploads` during a pull. Defaults to `false`. |
 | `skip_search_replace` | `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PUSH_SKIP_SEARCH_REPLACE` | Skip URL replacement after a pull or push. |
+| `skip_cache_rebuild` | `WP_SSH_SKIP_CACHE_REBUILD` | Skip rebuilding Elementor, Bricks, and Beaver Builder CSS after a pull, clone, or push. |
 | `plugin_remove_file` | `WP_SSH_PULL_PLUGIN_REMOVE_FILE` | Path to a project-specific plugin block list, added to the built-in defaults. |
 
 ### Clone target database
@@ -396,6 +398,7 @@ wp-ssh-bridge plugins remove
 | `--skip-files` | Database only. |
 | `--skip-import` | Pull and clone only. Download the database without importing it. |
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during write operations. |
+| `--skip-cache-rebuild` | Do not rebuild page builder CSS after the database transfer. Also `skip_cache_rebuild` and `WP_SSH_SKIP_CACHE_REBUILD`. |
 | `--force-scp` | Use tar over SSH even when rsync is available. |
 
 ### Project and runtime

@@ -143,14 +143,14 @@ func TestWPEnvRunCLIArgsDoesNotAliasBase(t *testing.T) {
 	t.Parallel()
 
 	base := []string{"--yes", "@wordpress/env"}
-	first := wpEnvRunCLIArgs(base, wpEnvContainerRoot, "db", "import", "/var/www/html/db.sql")
+	first := wpEnvRunCLIArgs(base, wpEnvContainerRoot, "--allow-root", "db", "import", "/var/www/html/db.sql")
 	second := wpEnvRunCLIArgs(base, wpEnvContainerRoot, "option", "get", "home")
 
 	if len(base) != 2 || base[0] != "--yes" || base[1] != "@wordpress/env" {
 		t.Fatalf("wpEnvRunCLIArgs() mutated its base args: %#v", base)
 	}
 	joined := strings.Join(first, " ")
-	for _, want := range []string{"run cli wp", "--path=" + wpEnvContainerRoot, "--allow-root", "--skip-plugins", "--skip-themes", "db import /var/www/html/db.sql"} {
+	for _, want := range []string{"run cli wp", "--path=" + wpEnvContainerRoot, "--allow-root", "db import /var/www/html/db.sql"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("wpEnvRunCLIArgs() missing %q in %q", want, joined)
 		}
@@ -309,7 +309,7 @@ func TestWPEnvLocalWPCommandRunsInContainer(t *testing.T) {
 		t.Fatalf("localWPCommand() = %q, want a wp-env invocation", name)
 	}
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"run cli wp", "--path=" + wpEnvContainerRoot, "db import /var/www/html/.wp-ssh/.downloads/db.sql"} {
+	for _, want := range []string{"run cli wp", "--path=" + wpEnvContainerRoot, "--allow-root", "--skip-plugins", "--skip-themes", "db import /var/www/html/.wp-ssh/.downloads/db.sql"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("localWPCommand() missing %q in %q", want, joined)
 		}

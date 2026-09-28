@@ -6,6 +6,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 ### Added
 
+- Rebuild page builder CSS after the database transfer of `pull`, `clone`, and `push`, including DDEV's native `ddev pull`/`ddev push`. The CLI runs `wp elementor flush-css`, `wp bricks regenerate_assets`, and `wp beaver clearcache` with plugins and themes loaded, adds `--network` on multisite where supported, and skips builders whose command is not registered. A failing command is reported as a warning and never aborts the operation. Disable it with `--skip-cache-rebuild`, `skip_cache_rebuild: true`, or `WP_SSH_SKIP_CACHE_REBUILD=true`.
 - Block the official Cloudflare plugin (`cloudflare`) during pulls. It holds an API token for the production zone, so a development copy could purge or reconfigure the live site's cache. It is excluded from the file sync and removed from the local site like the other blocked plugins.
 - Document how to migrate a site: running `clone` on the new server, which connects to the old one with a forwarded SSH agent, or cloning through your own machine and pushing to the new host. See [Migrate a site](https://wp-ssh-bridge.citation.media/docs/migrate-a-site).
 

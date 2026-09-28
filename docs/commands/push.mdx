@@ -113,6 +113,9 @@ Check where a push will go before you run it: the push values in the config file
   <Step title="URL rewrites on the target">
     A remote WP-CLI search-replace rewrites the local URL to the target URL, applies every configured push domain mapping, and updates the multisite `site` and `blogs` tables.
   </Step>
+  <Step title="Page builder CSS on the target">
+    The CLI runs `wp elementor flush-css`, `wp bricks regenerate_assets`, and `wp beaver clearcache` on the target with plugins loaded, so generated CSS picks up the target URLs. Builders that are not installed are skipped silently. A failure is reported as a warning and does not fail the push. Skip the step with `--skip-cache-rebuild`.
+  </Step>
 </Steps>
 
 ## What is never pushed
@@ -137,6 +140,7 @@ That list is deliberately short. A push is meant to make the target match your l
 | `--skip-db` | Files only. |
 | `--skip-search-replace` | Do not rewrite URLs on the target. |
 | `--skip-maintenance-mode` | Leave the target site reachable during the push. |
+| `--skip-cache-rebuild` | Do not rebuild page builder CSS on the target. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--push-destination`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--destination`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
 | `--push-user`, `--push-host`, `--push-port` | The split form of the address, aliased by `--user`, `--host`, and `--port` on `push`. Not combinable with a destination. |

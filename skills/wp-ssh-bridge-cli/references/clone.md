@@ -25,6 +25,7 @@ A clone:
 - keeps blocked plugins and does not run blocked-plugin cleanup
 - skips DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
 - still runs configured URL search-replace unless `--skip-search-replace` is set
+- rebuilds page builder CSS (Elementor, Bricks, Beaver Builder) on the target unless `--skip-cache-rebuild` is set; failures are warnings only
 - is additive for files by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
 - replaces the previous installation's tables (see "Replacing An Existing Installation" below)
 

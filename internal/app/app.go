@@ -103,6 +103,7 @@ Common flags:
   --skip-import              Pull only; download the database without importing it
   --force-scp                Use scp/tar instead of rsync even when rsync is available
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
+  --skip-cache-rebuild       Skip rebuilding page builder CSS after the database transfer
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
@@ -461,7 +462,11 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		a.filesImport()
 		return nil
 	case "post-pull":
-		return a.postPull(ctx, adapter, cfg, false)
+		if err := a.postPull(ctx, adapter, cfg, false); err != nil {
+			return err
+		}
+		a.rebuildLocalPageBuilderCaches(ctx, runtime.Root, cfg)
+		return nil
 	case "db-push":
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
@@ -475,7 +480,11 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pushTarget(), false)
 		return a.filesPush(ctx, runtime.Root, cfg, useSCP)
 	case "post-push":
-		return a.postPush(ctx, runtime.Root, cfg)
+		if err := a.postPush(ctx, runtime.Root, cfg); err != nil {
+			return err
+		}
+		a.rebuildRemotePageBuilderCaches(ctx, runtime.Root, cfg)
+		return nil
 	case "sanitize-config":
 		// Deprecated: use post-pull instead; this direct callback is due to be removed in a future release.
 		return a.sanitizeWPConfig(runtime.Root, cfg)
@@ -849,7 +858,13 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 			return err
 		}
 	}
-	return a.postPull(ctx, adapter, cfg, opts.Clone)
+	if err := a.postPull(ctx, adapter, cfg, opts.Clone); err != nil {
+		return err
+	}
+	if shouldImportDB {
+		a.rebuildLocalPageBuilderCaches(ctx, root, cfg)
+	}
+	return nil
 }
 
 // runPushPipeline executes the host-side push pipeline without DDEV lifecycle headings.
@@ -889,7 +904,11 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	if opts.SkipDB {
 		return nil
 	}
-	return a.postPush(ctx, root, cfg)
+	if err := a.postPush(ctx, root, cfg); err != nil {
+		return err
+	}
+	a.rebuildRemotePageBuilderCaches(ctx, root, cfg)
+	return nil
 }
 
 // configOptions tracks flags shared by init, pull, clone, and push.
@@ -925,6 +944,7 @@ type configOptions struct {
 	PluginRemoveFile    string
 	LocalURL            string
 	SkipSearchReplace   bool
+	SkipCacheRebuild    bool
 	CloneDBHost         string
 	CloneDBName         string
 	CloneDBUser         string
@@ -969,6 +989,7 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.LocalURL, "local-url", "", "local URL for search-replace")
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
+	fs.BoolVar(&opts.SkipCacheRebuild, "skip-cache-rebuild", false, "skip rebuilding page builder CSS after the database transfer")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
 		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
@@ -1124,6 +1145,9 @@ func (opts configOptions) apply(cfg Config) Config {
 	}
 	if opts.SkipSearchReplace {
 		cfg.SkipSearchReplace = true
+	}
+	if opts.SkipCacheRebuild {
+		cfg.SkipCacheRebuild = true
 	}
 	if opts.CloneDBHost != "" {
 		cfg.CloneDBHost = opts.CloneDBHost

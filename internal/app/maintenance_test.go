@@ -240,7 +240,8 @@ exit 0
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
 	adapter := standaloneAdapter{runtime: runtimeContext{Mode: modeStandalone, Root: dir}}
-	cfg := Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", LocalWPPath: "."}
+	// The page builder rebuild probes multisite with `core is-installed --network`; keep it out of this log.
+	cfg := Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", LocalWPPath: ".", SkipCacheRebuild: true}
 	opts := configOptions{Clone: true, CleanTarget: cleanTarget, SkipFiles: true, ForceScpTransport: true, Silent: true, Yes: true}
 	if err := app.runPullPipeline(context.Background(), adapter, cfg, opts); err != nil {
 		t.Fatalf("clone into an empty destination failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
