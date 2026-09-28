@@ -90,7 +90,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     4. Sync files additively, including uploads and `wp-config.php`.
     5. Write the target database credentials into the copied `wp-config.php`.
     6. Import the database using those credentials, in maintenance mode when a WordPress site is already installed at the target and `--clean-target` is not set.
-    7. Remove the tables of a previous installation, and with `--db-prefix` rename the imported tables and prefix-derived keys.
+    7. Before the import, stop if it would overwrite a table outside the previous installation. Afterwards, remove the previous installation's tables, and with `--db-prefix` rename the imported tables and prefix-derived keys.
     8. Search-replace URLs from the configured mappings. No development rewrites, no plugin cleanup.
 
   </Tab>
@@ -112,7 +112,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 - `wp-config.php` is never pushed, so a target keeps its own credentials.
 - Push is rejected in wp-env projects, where the local tree would erase the target's plugins and uploads.
 - Clone is rejected in DDEV and wp-env projects, where the import would land in a container database.
-- Clones are additive for files unless you explicitly ask for `--clean-target`. In the database, a clone removes only the tables of the installation it replaces, never tables under other prefixes.
+- Clones are additive for files unless you explicitly ask for `--clean-target`. In the database, a clone removes only the tables of the installation the target's `wp-config.php` described, and stops before overwriting anything else.
 :::
 
 ## URL rewriting

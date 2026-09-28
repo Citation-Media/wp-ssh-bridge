@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,160 +54,234 @@ func (c *createTableCollector) flush() {
 	c.line = c.line[:0]
 }
 
-// cloneTarget is what the target's wp-config.php said before the clone replaced it.
+// cloneTarget is the database and prefix a wp-config.php resolves to.
 type cloneTarget struct {
 	prefix string
 	dbName string
 	dbHost string
 }
 
-func readCloneTarget(projectRoot string, cfg Config) cloneTarget {
-	contents, err := os.ReadFile(filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php"))
+// readCloneTarget evaluates the target's wp-config.php through WP-CLI, so constants from
+// included files or the environment count, not the first literal in the file.
+func (a *App) readCloneTarget(ctx context.Context, projectRoot string, cfg Config) cloneTarget {
+	if _, err := os.Stat(filepath.Join(localWPRoot(projectRoot, cfg), "wp-config.php")); err != nil {
+		return cloneTarget{}
+	}
+	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "config", "list", "table_prefix", "DB_NAME", "DB_HOST", "--strict", "--format=json")
 	if err != nil {
 		return cloneTarget{}
 	}
-	return cloneTarget{
-		prefix: wpConfigTablePrefixLiteral(string(contents)),
-		dbName: wpConfigDefineLiteral(string(contents), "DB_NAME"),
-		dbHost: wpConfigDefineLiteral(string(contents), "DB_HOST"),
+	payload, err := jsonPayload(output)
+	if err != nil {
+		return cloneTarget{}
 	}
+	var entries []struct {
+		Name  string `json:"name"`
+		Value any    `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(payload), &entries); err != nil {
+		return cloneTarget{}
+	}
+	target := cloneTarget{}
+	for _, entry := range entries {
+		value, _ := entry.Value.(string)
+		switch entry.Name {
+		case "table_prefix":
+			target.prefix = parseTablePrefix(value)
+		case "DB_NAME":
+			target.dbName = value
+		case "DB_HOST":
+			target.dbHost = value
+		}
+	}
+	return target
 }
 
-// sameDatabase only matches literal values, so an unreadable config never lets the clone
-// treat another database's tables as the previous installation.
+// sameDatabase never matches unknown values, so an unreadable config cannot make the
+// clone treat another database's tables as the previous installation.
 func (target cloneTarget) sameDatabase(other cloneTarget) bool {
 	return target.dbName != "" && target.dbHost != "" && target.dbName == other.dbName && strings.EqualFold(target.dbHost, other.dbHost)
 }
 
-func wpConfigDefineLiteral(contents string, name string) string {
-	pattern := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*['"]([^'"\\]*)['"]\s*\)\s*;`)
-	match := pattern.FindStringSubmatch(contents)
-	if match == nil {
-		return ""
-	}
-	return match[1]
+type tableRename struct {
+	from string
+	to   string
 }
 
-// replaceCloneTables makes the imported database the target's only WordPress install.
-// It drops the tables a previous installation left behind, and with --db-prefix renames
-// the imported tables and prefix-derived keys to the configured prefix. Tables under
-// other prefixes, including other WordPress installs sharing the database, stay.
-func (a *App) replaceCloneTables(ctx context.Context, projectRoot string, cfg Config, previous cloneTarget, dumpTables []string) error {
+// clonePlan is decided before the import, while the target database still shows which
+// tables belong to the installation the clone replaces.
+type clonePlan struct {
+	sourcePrefix string
+	finalPrefix  string
+	drops        []string
+	renames      []tableRename
+	unowned      int
+}
+
+// planCloneTables makes the imported database the target's only WordPress install
+// without touching anything else in a shared database. Only tables of the previous
+// installation, found through the target's previous wp-config.php, may be overwritten
+// or dropped; the plan refuses before the import when the dump or a --db-prefix rename
+// would overwrite any other table.
+func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Config, previous cloneTarget, dumpTables []string) (clonePlan, error) {
+	current := a.readCloneTarget(ctx, projectRoot, cfg)
+	if cfg.CloneDBName != "" && (current.dbName != cfg.CloneDBName || !strings.EqualFold(current.dbHost, cfg.CloneDBHost)) {
+		return clonePlan{}, fmt.Errorf("wp-config.php resolves the database to %q on %q, not the clone target %q on %q; another file or the environment defines the database constants, so the import would go elsewhere", current.dbName, current.dbHost, cfg.CloneDBName, cfg.CloneDBHost)
+	}
 	sourcePrefix, err := readPullSourceTablePrefix(projectRoot)
 	if err != nil {
-		return err
+		return clonePlan{}, err
 	}
 	if sourcePrefix == "" || len(dumpTables) == 0 {
+		if cfg.CloneDBPrefix != "" {
+			return clonePlan{}, fmt.Errorf("could not detect the source table prefix or the cloned tables, which clone_db_prefix (--db-prefix) needs to rename them")
+		}
 		a.UI.Warning("Could not determine the cloned tables; tables of a previous installation in the target database are left in place.")
-		return nil
+		return clonePlan{}, nil
 	}
-	finalPrefix := defaultString(cfg.CloneDBPrefix, sourcePrefix)
-	scopes := []string{finalPrefix}
-	if previous.prefix != "" && previous.prefix != finalPrefix && previous.sameDatabase(readCloneTarget(projectRoot, cfg)) {
-		scopes = append(scopes, previous.prefix)
-	}
+	plan := clonePlan{sourcePrefix: sourcePrefix, finalPrefix: defaultString(cfg.CloneDBPrefix, sourcePrefix)}
 
-	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "query", "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'", "--skip-column-names")
+	existing, err := a.localTableNames(ctx, projectRoot, cfg)
 	if err != nil {
-		return fmt.Errorf("list target database tables: %w", err)
+		return clonePlan{}, fmt.Errorf("list target database tables: %w", err)
 	}
-	existing := firstColumn(output)
-	imported := map[string]bool{}
-	for _, table := range dumpTables {
-		imported[table] = true
+	owned := map[string]bool{}
+	if previous.prefix != "" && previous.sameDatabase(current) {
+		owned = foldSet(installationTables(existing, previous.prefix))
 	}
+	imported := foldSet(dumpTables)
 
-	renames := [][2]string{}
-	if finalPrefix != sourcePrefix {
+	written := append([]string{}, dumpTables...)
+	if !strings.EqualFold(plan.finalPrefix, sourcePrefix) {
 		for _, table := range installationTables(dumpTables, sourcePrefix) {
-			renamed := finalPrefix + strings.TrimPrefix(table, sourcePrefix)
-			if imported[renamed] {
-				return fmt.Errorf("cannot rename %s to %s for --db-prefix: the cloned database already contains %s", table, renamed, renamed)
+			renamed := plan.finalPrefix + table[len(sourcePrefix):]
+			if imported[strings.ToLower(renamed)] {
+				return clonePlan{}, fmt.Errorf("cannot rename %s to %s for clone_db_prefix (--db-prefix): the source database also contains %s", table, renamed, renamed)
 			}
-			renames = append(renames, [2]string{table, renamed})
+			plan.renames = append(plan.renames, tableRename{from: table, to: renamed})
+			written = append(written, renamed)
+		}
+	}
+	existingSet := foldSet(existing)
+	for _, table := range written {
+		key := strings.ToLower(table)
+		if existingSet[key] && !owned[key] {
+			return clonePlan{}, fmt.Errorf("the target database already contains %s, which does not belong to the WordPress installation at the target; the clone would overwrite it. Remove it or clone into another database", table)
 		}
 	}
 
-	leftoverSet := map[string]bool{}
-	for _, scope := range scopes {
-		for _, table := range installationTables(existing, scope) {
-			if !imported[table] {
-				leftoverSet[table] = true
-			}
+	for _, table := range existing {
+		if owned[strings.ToLower(table)] && !imported[strings.ToLower(table)] {
+			plan.drops = append(plan.drops, table)
 		}
 	}
-	leftovers := make([]string, 0, len(leftoverSet))
-	for table := range leftoverSet {
-		leftovers = append(leftovers, table)
+	sort.Strings(plan.drops)
+	for _, table := range installationTables(existing, plan.finalPrefix) {
+		if !owned[strings.ToLower(table)] && !imported[strings.ToLower(table)] {
+			plan.unowned++
+		}
 	}
-	sort.Strings(leftovers)
+	return plan, nil
+}
 
-	// Leftovers go first, because a previous installation may hold the names the
-	// renamed tables need.
-	if len(leftovers) > 0 {
-		title := fmt.Sprintf("Removing %d %s of the previous installation (%s)", len(leftovers), pluralNoun(len(leftovers), "table"), strings.Join(scopes, ", "))
+// applyClonePlan runs after the import. Leftovers go first, because the previous
+// installation may hold the names the renamed tables need.
+func (a *App) applyClonePlan(ctx context.Context, projectRoot string, cfg Config, plan clonePlan) error {
+	if len(plan.drops) > 0 {
+		title := fmt.Sprintf("Removing %d %s of the previous installation", len(plan.drops), pluralNoun(len(plan.drops), "table"))
 		if err := a.runStep(title, "Previous installation tables removed", func() error {
 			// Plugin tables may reference each other through foreign keys.
-			return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "db", "query", "SET FOREIGN_KEY_CHECKS = 0; DROP TABLE "+quoteIdentifiers(leftovers))
+			return a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "db", "query", "SET FOREIGN_KEY_CHECKS = 0; DROP TABLE "+quoteIdentifiers(plan.drops))
 		}); err != nil {
 			return err
 		}
 	}
-	if len(renames) == 0 {
-		return nil
-	}
-	title := fmt.Sprintf("Renaming cloned tables: %s -> %s", sourcePrefix, finalPrefix)
-	return a.runStep(title, "Cloned tables renamed to "+finalPrefix, func() error {
-		for _, query := range renameQueries(renames, sourcePrefix, finalPrefix) {
-			if err := a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "db", "query", query); err != nil {
-				return err
+	if len(plan.renames) > 0 {
+		title := fmt.Sprintf("Renaming cloned tables: %s -> %s", plan.sourcePrefix, plan.finalPrefix)
+		if err := a.runStep(title, "Cloned tables renamed to "+plan.finalPrefix, func() error {
+			for _, query := range renameQueries(plan.renames, plan.sourcePrefix, plan.finalPrefix) {
+				if err := a.runWPWithFilteredWarnings(ctx, projectRoot, cfg, "db", "query", query); err != nil {
+					return err
+				}
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	if plan.unowned > 0 {
+		a.UI.Warning("%d %s under the prefix %s in the target database %s not part of the clone and no WordPress config at the target used them; they were left in place.", plan.unowned, pluralNoun(plan.unowned, "table"), plan.finalPrefix, pluralVerb(plan.unowned))
+	}
+	return nil
 }
 
 // renameQueries moves the tables and the keys WordPress derives from the prefix: the
 // user_roles option of every site and all user meta keys, which include user options
 // written through update_user_option().
-func renameQueries(renames [][2]string, sourcePrefix string, finalPrefix string) []string {
+func renameQueries(renames []tableRename, sourcePrefix string, finalPrefix string) []string {
 	pairs := make([]string, 0, len(renames))
 	queries := []string{}
 	for _, rename := range renames {
-		pairs = append(pairs, quoteIdentifier(rename[0])+" TO "+quoteIdentifier(rename[1]))
-		suffix := strings.TrimPrefix(rename[1], finalPrefix)
+		pairs = append(pairs, quoteIdentifier(rename.from)+" TO "+quoteIdentifier(rename.to))
+		suffix := rename.to[len(finalPrefix):]
 		if blog, ok := strings.CutSuffix(suffix, "options"); ok && (blog == "" || multisiteBlogPrefix.MatchString(blog)) {
 			queries = append(queries, fmt.Sprintf("UPDATE %s SET option_name = %s WHERE option_name = %s",
-				quoteIdentifier(rename[1]), sqlQuote(finalPrefix+blog+"user_roles"), sqlQuote(sourcePrefix+blog+"user_roles")))
+				quoteIdentifier(rename.to), sqlQuote(finalPrefix+blog+"user_roles"), sqlQuote(sourcePrefix+blog+"user_roles")))
 		}
 		if suffix == "usermeta" {
 			queries = append(queries, fmt.Sprintf("UPDATE %s SET meta_key = CONCAT(%s, SUBSTRING(meta_key, %d)) WHERE BINARY LEFT(meta_key, %d) = %s",
-				quoteIdentifier(rename[1]), sqlQuote(finalPrefix), len(sourcePrefix)+1, len(sourcePrefix), sqlQuote(sourcePrefix)))
+				quoteIdentifier(rename.to), sqlQuote(finalPrefix), len(sourcePrefix)+1, len(sourcePrefix), sqlQuote(sourcePrefix)))
 		}
 	}
 	return append([]string{"RENAME TABLE " + strings.Join(pairs, ", ")}, queries...)
 }
 
 // installationTables returns the tables of the WordPress install using prefix. A longer
-// prefix with its own options table is another install sharing the database, unless it
-// is a multisite blog prefix such as wp_2_.
+// prefix with its own options and users tables is another install sharing the database;
+// multisite blogs such as wp_2_ have no users table of their own. Names compare
+// case-insensitively, as MySQL does with lower_case_table_names.
 func installationTables(tables []string, prefix string) []string {
+	lowerPrefix := strings.ToLower(prefix)
+	names := foldSet(tables)
 	others := []string{}
-	for _, table := range tables {
-		other, ok := strings.CutSuffix(table, "options")
-		if !ok || other == prefix || !strings.HasPrefix(other, prefix) || multisiteBlogPrefix.MatchString(strings.TrimPrefix(other, prefix)) {
-			continue
+	for name := range names {
+		other, ok := strings.CutSuffix(name, "options")
+		if ok && other != lowerPrefix && strings.HasPrefix(other, lowerPrefix) && names[other+"users"] {
+			others = append(others, other)
 		}
-		others = append(others, other)
 	}
 	owned := []string{}
 	for _, table := range tables {
-		if !strings.HasPrefix(table, prefix) || hasAnyPrefix(table, others) {
-			continue
+		name := strings.ToLower(table)
+		if strings.HasPrefix(name, lowerPrefix) && !hasAnyPrefix(name, others) {
+			owned = append(owned, table)
 		}
-		owned = append(owned, table)
 	}
 	return owned
+}
+
+// localTableNames lists base tables without loading WordPress, which fails while the
+// configured prefix does not match the tables.
+func (a *App) localTableNames(ctx context.Context, projectRoot string, cfg Config) ([]string, error) {
+	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "query", "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'", "--skip-column-names")
+	if err != nil {
+		return nil, err
+	}
+	tables := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		if table, _, _ := strings.Cut(strings.TrimSpace(line), "\t"); table != "" {
+			tables = append(tables, table)
+		}
+	}
+	return tables, nil
+}
+
+func foldSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[strings.ToLower(value)] = true
+	}
+	return set
 }
 
 func hasAnyPrefix(value string, prefixes []string) bool {
@@ -218,15 +293,11 @@ func hasAnyPrefix(value string, prefixes []string) bool {
 	return false
 }
 
-func firstColumn(output string) []string {
-	values := []string{}
-	for _, line := range strings.Split(output, "\n") {
-		value, _, _ := strings.Cut(strings.TrimSpace(line), "\t")
-		if value != "" {
-			values = append(values, value)
-		}
+func pluralVerb(count int) string {
+	if count == 1 {
+		return "is"
 	}
-	return values
+	return "are"
 }
 
 func quoteIdentifier(name string) string {

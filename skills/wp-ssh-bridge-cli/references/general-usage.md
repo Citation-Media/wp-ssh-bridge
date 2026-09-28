@@ -260,7 +260,7 @@ wp-ssh-bridge pull --silent --config-file .wp-ssh.yaml
 
 For missing required values, provide the smallest full command with `--destination` and `--remote-path` for pull, or the push equivalents for push. For `Permission denied` with a password-manager agent, check `ssh -G <destination> | grep -i identityagent` and `ssh-add -L` before anything else.
 
-Table prefix: post-pull rewrites the local `$table_prefix` in `wp-config.php` to the pull source prefix when they differ and the imported `<prefix>options` table exists. Tables are not renamed. If the site shows the WordPress installer after a pull, or the CLI warns that `wp-config.php` has no `$table_prefix` assignment or that another file overrides it, compare both sides and set the prefix where the local config defines it:
+Table prefix: a pull rewrites the local `$table_prefix` in `wp-config.php` to the pull source prefix when they differ and the imported `<prefix>options` table exists. Tables are not renamed. If the site shows the WordPress installer after a pull, or the CLI warns that `wp-config.php` has no `$table_prefix` assignment or that another file overrides it, compare both sides and set the prefix where the local config defines it:
 
 ```bash
 wp config get table_prefix --path=/path/to/wordpress

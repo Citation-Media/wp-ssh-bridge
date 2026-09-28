@@ -45,6 +45,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 	if err := protectDownloadsDir(projectRoot, downloadDir); err != nil {
 		return err
 	}
+	if err := discardPullSourceTablePrefix(projectRoot); err != nil {
+		return err
+	}
 
 	remoteTmp := trimTrailingSlash(defaultString(target.RemoteTmpDir, "/tmp"))
 	remoteWP := trimTrailingSlash(target.RemotePath)
@@ -89,9 +92,6 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 			a.UI.Warning("Could not remove remote database export: %s", err)
 		}
 	}()
-	if err := a.recordPullSourceTablePrefix(projectRoot, exportOutput); err != nil {
-		return err
-	}
 
 	localDump := filepath.Join(downloadDir, "db.sql.gz")
 	if err := os.Remove(localDump); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -118,6 +118,9 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		}
 	}
 	localDumpDownloadComplete = true
+	if err := a.recordPullSourceTablePrefix(projectRoot, exportOutput); err != nil {
+		return err
+	}
 
 	if err := a.runStep("Cleaning up remote database export", "Remote database export removed", func() error {
 		return a.removeRemoteDatabaseDump(ctx, projectRoot, target, remoteDump, remoteDumpGZ)
@@ -323,9 +326,8 @@ func (a *App) filesImport() {
 // postPull applies local cleanup after a database or file pull.
 func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, clone bool) error {
 	projectRoot := adapter.Root()
-	// Clone writes the target DB credentials before import (see runPullPipeline), so
-	// afterwards it only moves the site URL: blocked plugins stay, and the runtime's
-	// dev-mode post-pull hooks do not run.
+	// Clone writes the target DB credentials before import (see runPullPipeline), so the
+	// runtime's dev-mode hooks do not run for it and blocked plugins stay.
 	if !clone {
 		for _, hook := range adapter.PostPullHooks() {
 			if err := hook(ctx, a, projectRoot, cfg); err != nil {
@@ -338,6 +340,7 @@ func (a *App) postPull(ctx context.Context, adapter runtimeAdapter, cfg Config, 
 	if err := a.alignPulledTablePrefix(ctx, projectRoot, cfg, clone); err != nil {
 		return err
 	}
+	// Afterwards a clone only moves the site URL.
 	if clone {
 		return a.moveClonedSiteURL(ctx, projectRoot, cfg)
 	}
@@ -678,6 +681,9 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 	}
 
 	updated := sanitizeWPConfigContents(string(contents))
+	if updated == string(contents) {
+		return nil
+	}
 	return a.runStep("Sanitizing local wp-config.php", "Local wp-config.php sanitized", func() error {
 		return os.WriteFile(wpConfig, []byte(updated), 0o644)
 	})
@@ -1117,25 +1123,25 @@ func (a *App) removeBlockedPlugins(ctx context.Context, projectRoot string, cfg 
 	})
 }
 
-// importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime and
-// returns the tables the dump created.
-func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) ([]string, error) {
+// importLocalDB imports the downloaded gzip dump through the local WP-CLI runtime.
+// beforeImport, when set, sees the tables the dump creates before anything is written.
+func (a *App) importLocalDB(ctx context.Context, root string, cfg Config, beforeImport func(dumpTables []string) error) error {
 	dumpPath := filepath.Join(downloadsDir(root), "db.sql.gz")
 	file, err := os.Open(dumpPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer file.Close()
 
 	gzipReader, err := gzip.NewReader(file)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer gzipReader.Close()
 
 	tempFile, err := os.CreateTemp(downloadsDir(root), "db-*.sql")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
@@ -1143,10 +1149,16 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) ([]str
 	collector := &createTableCollector{}
 	if _, err := io.Copy(tempFile, io.TeeReader(gzipReader, collector)); err != nil {
 		_ = tempFile.Close()
-		return nil, err
+		return err
 	}
 	if err := tempFile.Close(); err != nil {
-		return nil, err
+		return err
+	}
+	if beforeImport != nil {
+		collector.flush()
+		if err := beforeImport(collector.tables); err != nil {
+			return err
+		}
 	}
 
 	importPath := tempPath
@@ -1157,28 +1169,27 @@ func (a *App) importLocalDB(ctx context.Context, root string, cfg Config) ([]str
 	} else if isWPEnvRoot(root) {
 		status, ok := wpEnvStatus(root)
 		if !ok {
-			return nil, errors.New("wp-env status is unavailable, so the database dump cannot be mapped into the container; start the environment with wp-env start")
+			return errors.New("wp-env status is unavailable, so the database dump cannot be mapped into the container; start the environment with wp-env start")
 		}
 		// Handing a host path to a command that runs inside the container yields a bare
 		// file-not-found after the whole database has already been downloaded.
 		containerPath, ok := wpEnvContainerPath(status, tempPath)
 		if !ok {
-			return nil, fmt.Errorf("database dump at %s is outside the wp-env WordPress tree at %s, so the container cannot read it", tempPath, status.wordPressRoot())
+			return fmt.Errorf("database dump at %s is outside the wp-env WordPress tree at %s, so the container cannot read it", tempPath, status.wordPressRoot())
 		}
 		importPath = containerPath
 	}
 	if err := a.runStep("Importing database into local WordPress", "Local database imported", func() error {
 		return a.runWPWithFilteredWarnings(ctx, root, cfg, "db", "import", importPath)
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	// The dump is a full production database. Do not leave it behind after a successful
 	// import; in wp-env mode the scratch directory is inside the served document root.
 	if err := os.Remove(dumpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		a.UI.Warning("Could not remove local database export: %s", err)
 	}
-	collector.flush()
-	return collector.tables, nil
+	return nil
 }
 
 // readPluginList returns embedded default plugins plus an optional custom block list.

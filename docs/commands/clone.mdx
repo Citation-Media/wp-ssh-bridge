@@ -17,7 +17,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 | Development rewrites | Yes, including `WP_ENVIRONMENT_TYPE=development` | No |
 | URL search-replace | Yes | Yes, from your configured mappings |
 | Pre-existing target files | Mirrored with `--delete` | Kept, unless `--clean-target` |
-| Tables of a previous installation | Kept and reported | Removed after the import |
+| Tables of a previous installation | Kept; reported after a prefix change | Removed after the import |
 
 :::warning[Standalone only]
 `clone` refuses to run in a DDEV or wp-env project root. Both route WP-CLI through a container, so the import would land in the container database instead of the target you specified. Run it against a plain directory. For local onboarding, use [`pull`](/docs/commands/pull) instead.
@@ -132,7 +132,7 @@ wp-ssh-bridge clone --silent
 
 ## Emptying the target first
 
-A clone is **additive** by default. Files are added and updated, but whatever was already in the target directory stays: a hosting provider's placeholder `index.html`, a starter theme, an old install. On the rsync transport that means no `--delete`; the tar transport has no equivalent at all.
+A clone is **additive** by default. Files are added and updated, but whatever was already in the target directory stays: a hosting provider's placeholder `index.html`, a starter theme, an old install's files. `--clean-target` only concerns files; the tables of a previous installation are removed on every clone, see [Replacing an existing installation](#replacing-an-existing-installation). On the rsync transport that means no `--delete`; the tar transport has no equivalent at all.
 
 Pass `--clean-target` to start from an empty tree:
 
@@ -158,16 +158,22 @@ To move the site, name the target with `local_url`, `WP_SSH_PULL_LOCAL_URL`, or 
 
 ## Replacing an existing installation
 
-A clone makes the imported database the target's only WordPress installation. The import itself only replaces the tables the dump contains, so after it the clone removes the tables a previous installation left behind:
+A clone makes the imported database the target's only WordPress installation. The import itself only replaces the tables the dump contains, so the clone also removes the rest of the installation it replaces: its plugin tables, and every table when it used another prefix.
 
-- tables under the prefix the cloned site uses that the dump did not create, such as plugin tables of the old site, and
-- tables under the prefix the target's previous `wp-config.php` used, when that config pointed at the same database.
+The previous installation is the one the target's own `wp-config.php` described before the clone, read through WP-CLI so included files and environment variables count. Its tables are only removed when that config used the same database as the clone. Everything else is left alone:
 
-Tables under other prefixes stay, and so does another WordPress installation whose prefix merely starts with the same characters, such as `wp_shop_` next to `wp_`. Shared hosting often gives one database to several sites, so the clone never resets the whole database.
+- Tables under other prefixes, and other WordPress installations sharing the database, even when their prefix starts with the same characters, such as `wp_shop_` next to `wp_`. An installation is recognised by its own `options` and `users` tables.
+- Tables under the cloned site's prefix that no config at the target accounted for. The clone warns about them instead.
+
+Before the import, the clone checks every table the import and a `--db-prefix` rename would write. If one of them already exists and does not belong to the previous installation, it stops with `the target database already contains …` and changes nothing. Shared hosting often gives one database to several sites, so the clone never resets the whole database.
 
 ```text
 ✓ Previous installation tables removed
 ```
+
+:::warning[Back up the target database first]
+Removing the previous installation's tables cannot be undone and has no flag to switch it off. It runs on every clone that imports the database, with or without `--clean-target`.
+:::
 
 ## Maintenance mode during the import
 
@@ -198,8 +204,10 @@ With `--clean-target`, the previous site is replaced, so maintenance mode is ski
 | The cloned site shows the source domain | No target URL or domain mapping was configured, or `--skip-search-replace` was set. The clone keeps the source URL by design; set `local_url` or add the mapping and rerun. |
 | The cloned site redirects to `localhost` | The binary predates keeping the source URL, and `wp-config.php` got `WP_HOME` and `WP_SITEURL` set to `https://localhost`. [Update it](/docs/installation#updating), then remove those defines or set them to the real URL. |
 | Old files from the previous install remain | Clones are additive for files. Use `--clean-target` if that is what you want. |
-| Old tables from the previous install remain | The previous `wp-config.php` pointed at another database, or its prefix or database name is not a plain string, so the clone could not tell they belong to it. Drop them manually. |
-| `cannot rename … for --db-prefix` | The source database already holds tables under the `--db-prefix` prefix, so renaming would overwrite them. Choose another prefix or omit `--db-prefix`. |
+| Old tables from the previous install remain | The target had no readable `wp-config.php`, or it pointed at another database, so the clone could not tell they belong to it. Drop them manually. |
+| `the target database already contains …` | The import or the rename would overwrite a table of another site or of an installation no config at the target describes. Nothing was imported. Remove the table, or clone into another database. |
+| `wp-config.php resolves the database to …` | Another file or the environment defines the database constants before the ones the clone writes, so the import would go elsewhere. Nothing was imported. Remove that definition from the copied config. |
+| `cannot rename … for clone_db_prefix (--db-prefix)` | The source database already holds tables under that prefix, so renaming would overwrite them. Nothing was imported. Choose another prefix or omit `--db-prefix`. |
 | `Enabling local maintenance mode failed` with `The site you have requested is not installed` | The binary predates skipping maintenance mode on an empty target. [Update it](/docs/installation#updating), or pass `--skip-maintenance-mode` for this run. |
 
 More in [Troubleshooting](/docs/troubleshooting).

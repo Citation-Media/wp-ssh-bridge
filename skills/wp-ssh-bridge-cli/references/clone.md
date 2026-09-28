@@ -25,7 +25,8 @@ Clone pulls:
 - keep blocked plugins and do not run blocked-plugin cleanup
 - skip DDEV/dev `wp-config.php` rewrites, including `WP_ENVIRONMENT_TYPE=development` and `wp-config-ddev.php`
 - still run configured URL search-replace unless `--skip-search-replace` is set
-- be additive by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
+- be additive for files by default: pre-existing files on the target are kept unless `--clean-target` is set (see "Emptying The Target" below)
+- remove the tables of the installation the target's previous `wp-config.php` described, when it used the same database, and stop before the import if it would overwrite any other table
 
 Clone mode is a top-level `clone` command. Do not recommend `pull --clone` or `push --clone`.
 
@@ -67,9 +68,9 @@ wp-ssh-bridge clone --silent \
   --db-password target_password
 ```
 
-Without `--db-prefix`, the target `$table_prefix` follows the source. Add `--db-prefix wp_` only when the target should use another prefix; the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to it. It fails before changing anything when the source database already holds tables under that prefix.
+Without `--db-prefix`, the target `$table_prefix` follows the source. Add `--db-prefix wp_` only when the target should use another prefix; the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to it. It stops before the import when the source database already holds tables under that prefix.
 
-After the import, the clone removes tables of the installation it replaces: tables under the cloned site's prefix that the dump did not create, and tables under the previous target `wp-config.php` prefix when that config used the same database (plain string `DB_NAME` and `DB_HOST`). Tables under other prefixes and other WordPress installs sharing the database stay; the clone never resets the whole database.
+After the import, the clone removes the tables of the installation the target's previous `wp-config.php` described, resolved through WP-CLI, when that config used the same database. Tables under other prefixes and other WordPress installs sharing the database stay; the clone never resets the whole database. Errors before the import (`the target database already contains …`, `wp-config.php resolves the database to …`, `cannot rename …`) mean nothing was imported: the target database holds another site's table, the copied config defines the database elsewhere, or the source already uses the `--db-prefix` prefix.
 
 ## Emptying The Target (`--clean-target`)
 

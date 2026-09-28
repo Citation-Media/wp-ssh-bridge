@@ -20,8 +20,9 @@ var (
 const tablePrefixMarker = "wp-ssh-table-prefix="
 
 // remoteTablePrefixCommand prints the source prefix during the export, so the dump and
-// the recorded prefix come from one SSH session. A failed lookup must not abort it.
-var remoteTablePrefixCommand = "printf '" + tablePrefixMarker + "%s\\n' \"$(wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true)\";"
+// the recorded prefix come from one SSH session. Only the last line is the value, since
+// PHP may print notices to stdout first, and a failed lookup must not abort the export.
+const remoteTablePrefixCommand = "printf '" + tablePrefixMarker + "%s\\n' \"$({ wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true; } | tail -n 1)\";"
 
 // pullSourcePrefixPath stores the pull source table prefix between db-pull and
 // post-pull, which DDEV runs as separate provider commands around its own import.
@@ -30,12 +31,9 @@ func pullSourcePrefixPath(projectRoot string) string {
 }
 
 // recordPullSourceTablePrefix remembers the source $table_prefix from the export output
-// so post-pull can point the local wp-config.php at the imported tables.
+// so post-pull can point the local wp-config.php at the imported tables. It runs once
+// the dump is downloaded, so a failed download leaves no record behind.
 func (a *App) recordPullSourceTablePrefix(projectRoot string, exportOutput string) error {
-	path := pullSourcePrefixPath(projectRoot)
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	prefix := ""
 	for _, line := range strings.Split(exportOutput, "\n") {
 		if value, ok := strings.CutPrefix(strings.TrimSpace(line), tablePrefixMarker); ok {
@@ -46,7 +44,15 @@ func (a *App) recordPullSourceTablePrefix(projectRoot string, exportOutput strin
 		a.UI.Warning("Could not detect the pull source table prefix; the local $table_prefix is left unchanged.")
 		return nil
 	}
-	return os.WriteFile(path, []byte(prefix+"\n"), 0o600)
+	return os.WriteFile(pullSourcePrefixPath(projectRoot), []byte(prefix+"\n"), 0o600)
+}
+
+// discardPullSourceTablePrefix removes a recorded prefix that must not be applied.
+func discardPullSourceTablePrefix(projectRoot string) error {
+	if err := os.Remove(pullSourcePrefixPath(projectRoot)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // alignPulledTablePrefix applies the prefix recorded by db-pull and clears it, so a
@@ -57,7 +63,7 @@ func (a *App) alignPulledTablePrefix(ctx context.Context, projectRoot string, cf
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(pullSourcePrefixPath(projectRoot)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := discardPullSourceTablePrefix(projectRoot); err != nil {
 		return err
 	}
 	if sourcePrefix == "" || (clone && cfg.CloneDBPrefix != "") {
@@ -88,8 +94,8 @@ func (a *App) alignLocalTablePrefix(ctx context.Context, projectRoot string, cfg
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// A matching literal settles the common case without starting WP-CLI, which is a
-	// container exec in DDEV and wp-env.
+	// A single matching literal settles the common case without starting WP-CLI, which
+	// is a container exec in DDEV and wp-env.
 	literal := wpConfigTablePrefixLiteral(string(contents))
 	if literal == sourcePrefix {
 		return nil
@@ -99,14 +105,15 @@ func (a *App) alignLocalTablePrefix(ctx context.Context, projectRoot string, cfg
 		return nil
 	}
 
-	output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "query", "SHOW TABLES", "--skip-column-names")
+	tables, err := a.localTableNames(ctx, projectRoot, cfg)
 	if err != nil {
 		a.warnSetTablePrefix("Could not list local database tables to check the table prefix", sourcePrefix)
 		return nil
 	}
-	// Without the imported options table the dump was not imported (for example with
-	// --skip-import), and switching the prefix would point WordPress at missing tables.
-	if !lineSetContains(output, sourcePrefix+"options") {
+	// Without the imported options table, switching the prefix would point WordPress at
+	// missing tables. Names compare case-insensitively for lower_case_table_names.
+	if !foldSet(tables)[strings.ToLower(sourcePrefix+"options")] {
+		a.warnSetTablePrefix(fmt.Sprintf("The imported table %soptions was not found", sourcePrefix), sourcePrefix)
 		return nil
 	}
 	if literal != "" && localPrefix != "" && literal != localPrefix {
@@ -125,8 +132,12 @@ func (a *App) alignLocalTablePrefix(ctx context.Context, projectRoot string, cfg
 		return err
 	}
 
-	if stale := countTablesWithPrefix(output, localPrefix, sourcePrefix); stale > 0 {
-		a.UI.Warning("%d local %s with the previous prefix %s remain in the database; WordPress no longer uses them.", stale, pluralNoun(stale, "table"), localPrefix)
+	// installationTables leaves out the imported install when its prefix extends the
+	// previous one, and another install sharing the database.
+	if localPrefix != "" {
+		if stale := len(installationTables(tables, localPrefix)); stale > 0 {
+			a.UI.Warning("The previous prefix %s still has %d %s in the database; WordPress no longer uses them.", localPrefix, stale, pluralNoun(stale, "table"))
+		}
 	}
 	return nil
 }
@@ -145,14 +156,15 @@ func (a *App) localTablePrefix(ctx context.Context, projectRoot string, cfg Conf
 	return parseTablePrefix(output)
 }
 
-// wpConfigTablePrefixLiteral returns a plain quoted $table_prefix value; expressions
-// such as wp-env's getenv_docker() call need WP-CLI to resolve.
+// wpConfigTablePrefixLiteral returns the plain quoted $table_prefix value of a config
+// with exactly one assignment. Expressions such as wp-env's getenv_docker() call and
+// conditional assignments need WP-CLI to resolve.
 func wpConfigTablePrefixLiteral(contents string) string {
-	match := wpConfigPrefixLiteral.FindStringSubmatch(contents)
-	if match == nil {
+	matches := wpConfigPrefixLiteral.FindAllStringSubmatch(contents, 2)
+	if len(matches) != 1 {
 		return ""
 	}
-	return match[1]
+	return matches[0][1]
 }
 
 // parseTablePrefix takes the last output line, skipping notices such as the WP-CLI
@@ -164,20 +176,4 @@ func parseTablePrefix(output string) string {
 		return ""
 	}
 	return prefix
-}
-
-// countTablesWithPrefix counts tables left under the previous prefix. Tables that also
-// match the new prefix are skipped, because one prefix can start with the other.
-func countTablesWithPrefix(output string, previousPrefix string, currentPrefix string) int {
-	if previousPrefix == "" {
-		return 0
-	}
-	count := 0
-	for _, line := range strings.Split(output, "\n") {
-		table := strings.TrimSpace(line)
-		if strings.HasPrefix(table, previousPrefix) && !strings.HasPrefix(table, currentPrefix) {
-			count++
-		}
-	}
-	return count
 }

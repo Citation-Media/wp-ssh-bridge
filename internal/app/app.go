@@ -105,8 +105,8 @@ Clone flags:
   --db-name string           Clone target DB name
   --db-user string           Clone target DB user
   --db-password string       Clone target DB password
-  --db-prefix string         Clone target table prefix
-  --clean-target             Remove pre-existing target content before syncing
+  --db-prefix string         Rename cloned tables to this prefix (default: keep the source prefix)
+  --clean-target             Remove pre-existing target files before syncing
 
 Run "wp-ssh-bridge init" to configure DDEV provider mode or standalone mode.
 `)
@@ -759,7 +759,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	// installation's tables can be told apart after the import.
 	var previousTarget cloneTarget
 	if opts.Clone && shouldImportDB {
-		previousTarget = readCloneTarget(root, cfg)
+		previousTarget = a.readCloneTarget(ctx, root, cfg)
 	}
 
 	if !opts.SkipDB {
@@ -791,6 +791,16 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 			return err
 		}
 	}
+	// A DDEV pull copies the source wp-config.php with production database constants.
+	// Sanitize it before maintenance mode and the import run WP-CLI against it, so both
+	// reach the DDEV database. postPull runs the hooks again for the provider flow.
+	if !opts.Clone {
+		for _, hook := range adapter.PostPullHooks() {
+			if err := hook(ctx, a, root, cfg); err != nil {
+				return err
+			}
+		}
+	}
 	if shouldImportDB && !opts.SkipMaintenanceMode {
 		if opts.Clone && opts.CleanTarget {
 			// The destination's previous site has just been replaced, so there is
@@ -807,18 +817,29 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if shouldImportDB {
-		dumpTables, err := a.importLocalDB(ctx, root, cfg)
-		if err != nil {
-			return err
-		}
+		var plan clonePlan
+		var beforeImport func([]string) error
 		if opts.Clone {
-			if err := a.replaceCloneTables(ctx, root, cfg, previousTarget, dumpTables); err != nil {
+			beforeImport = func(dumpTables []string) (err error) {
+				plan, err = a.planCloneTables(ctx, root, cfg, previousTarget, dumpTables)
 				return err
 			}
 		}
-	}
-	if !shouldImportDB {
+		if err := a.importLocalDB(ctx, root, cfg, beforeImport); err != nil {
+			return err
+		}
+		if opts.Clone {
+			if err := a.applyClonePlan(ctx, root, cfg, plan); err != nil {
+				return err
+			}
+		}
+	} else {
 		cfg.SkipSearchReplace = true
+		// Nothing was imported, so a prefix recorded by this run must not repoint the
+		// local config at older tables.
+		if err := discardPullSourceTablePrefix(root); err != nil {
+			return err
+		}
 	}
 	return a.postPull(ctx, adapter, cfg, opts.Clone)
 }
@@ -945,8 +966,8 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 		fs.StringVar(&opts.CloneDBName, "db-name", "", "clone target DB name")
 		fs.StringVar(&opts.CloneDBUser, "db-user", "", "clone target DB user")
 		fs.StringVar(&opts.CloneDBPassword, "db-password", "", "clone target DB password")
-		fs.StringVar(&opts.CloneDBPrefix, "db-prefix", "", "clone target table prefix")
-		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target content before syncing (rsync --delete or scp/tar target cleanup)")
+		fs.StringVar(&opts.CloneDBPrefix, "db-prefix", "", "rename cloned tables to this prefix (default: keep the source prefix)")
+		fs.BoolVar(&opts.CleanTarget, "clean-target", false, "remove pre-existing target files before syncing (rsync --delete or scp/tar target cleanup)")
 	}
 	if err := fs.Parse(args); err != nil {
 		return opts, err

@@ -72,7 +72,7 @@ Also available as `--integration` and `WP_SSH_INTEGRATION`, in that precedence o
 
 - Local WP-CLI runs as `wp-env run cli wp --path=/var/www/html`. A host `wp` cannot be used: wp-env's `DB_HOST` resolves only inside the Docker network, and the published MySQL port is randomized on every start.
 - The local WordPress root and URL come from `wp-env status --json` at run time, so they are never stored in config.
-- `wp-config.php` is preserved rather than pulled. wp-env generates it with working local credentials and rewrites it on every start.
+- `wp-config.php` is preserved rather than pulled. wp-env generates it with working local credentials. When the source uses another table prefix, the pull writes it into that file; if WordPress shows the installer after wp-env regenerated the file, pull again.
 
 ## Mounted Plugin And Theme Directories
 

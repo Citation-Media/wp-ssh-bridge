@@ -175,7 +175,7 @@ wp-ssh-bridge clone --silent \
   --db-password target_password
 ```
 
-Clone pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. Without `--db-prefix`, the target `$table_prefix` follows the source like a normal pull; with it, the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to the configured prefix. After the import, the clone removes the tables of the installation it replaces (tables under its own prefix that the dump did not create, and tables under the previous target prefix when the old `wp-config.php` used the same database). Tables under other prefixes stay, so a database shared with other sites is safe. There is no `push --clone`; cloning to a remote target needs a separate target `wp-config.php` rewrite design.
+Clone pulls copy `wp-config.php`, write the supplied target DB constants into it before database import, keep blocked plugins, and include uploads/media even when `clone_images` is false. `--db-prefix` is optional. Without `--db-prefix`, the target `$table_prefix` follows the source like a normal pull; with it, the imported tables, the `user_roles` option of every site, and prefix-derived user meta keys are renamed to the configured prefix. After the import, the clone removes the tables of the installation it replaces, which the target's previous `wp-config.php` describes when it used the same database. Before the import it stops if it would overwrite any other table, and tables under other prefixes stay, so a database shared with other sites is safe. There is no `push --clone`; cloning to a remote target needs a separate target `wp-config.php` rewrite design.
 
 ## Push
 
@@ -373,7 +373,7 @@ Generated config files only persist values that differ from the CLI/runtime defa
 | `clone_db_name` | `WP_SSH_CLONE_DB_NAME` | Target DB name written to `wp-config.php` during `clone`. |
 | `clone_db_user` | `WP_SSH_CLONE_DB_USER` | Target DB user written to `wp-config.php` during `clone`. |
 | `clone_db_password` | `WP_SSH_CLONE_DB_PASSWORD` | Target DB password written to `wp-config.php` during `clone`. |
-| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Optional target table prefix written to `wp-config.php` during `clone`. |
+| `clone_db_prefix` | `WP_SSH_CLONE_DB_PREFIX` | Optional target table prefix for `clone`. The imported tables are renamed to it. |
 
 Add mappings to an already configured project with the CLI:
 

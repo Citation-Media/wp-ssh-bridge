@@ -3,8 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -28,11 +26,18 @@ func TestCreateTableCollectorReadsNamesAcrossChunks(t *testing.T) {
 	}
 }
 
-func TestInstallationTablesSkipsOtherInstallsButKeepsMultisiteBlogs(t *testing.T) {
+func TestInstallationTablesSeparatesInstallsByTheirUsersTable(t *testing.T) {
 	t.Parallel()
-	tables := []string{"wp_options", "wp_posts", "wp_2_options", "wp_2_posts", "wp_shop_options", "wp_shop_posts", "wp_wc_orders", "other_options"}
+	tables := []string{
+		"wp_options", "wp_users", "wp_posts",
+		"wp_2_options", "wp_2_posts", // multisite blog: no users table of its own
+		"wp_2019_options", "wp_2019_users", // a second standalone install
+		"wp_myplugin_options", "wp_myplugin_log", // a plugin, not an install
+		"WP_Shop_options", "wp_shop_users", // another install, as lower_case_table_names lists it
+		"other_options",
+	}
 	got := installationTables(tables, "wp_")
-	want := []string{"wp_options", "wp_posts", "wp_2_options", "wp_2_posts", "wp_wc_orders"}
+	want := []string{"wp_options", "wp_users", "wp_posts", "wp_2_options", "wp_2_posts", "wp_myplugin_options", "wp_myplugin_log"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("installationTables() = %q, want %q", got, want)
 	}
@@ -40,11 +45,11 @@ func TestInstallationTablesSkipsOtherInstallsButKeepsMultisiteBlogs(t *testing.T
 
 func TestRenameQueriesMovePrefixDerivedKeys(t *testing.T) {
 	t.Parallel()
-	queries := renameQueries([][2]string{
-		{"abc_options", "wp_options"},
-		{"abc_2_options", "wp_2_options"},
-		{"abc_usermeta", "wp_usermeta"},
-		{"abc_posts", "wp_posts"},
+	queries := renameQueries([]tableRename{
+		{from: "abc_options", to: "wp_options"},
+		{from: "abc_2_options", to: "wp_2_options"},
+		{from: "abc_usermeta", to: "wp_usermeta"},
+		{from: "abc_posts", to: "wp_posts"},
 	}, "abc_", "wp_")
 	want := []string{
 		"RENAME TABLE `abc_options` TO `wp_options`, `abc_2_options` TO `wp_2_options`, `abc_usermeta` TO `wp_usermeta`, `abc_posts` TO `wp_posts`",
@@ -57,141 +62,173 @@ func TestRenameQueriesMovePrefixDerivedKeys(t *testing.T) {
 	}
 }
 
-func TestReadCloneTargetParsesLiteralConfig(t *testing.T) {
-	t.Parallel()
+func TestReadCloneTargetUsesResolvedConfig(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\ndefine( 'DB_NAME', 'target_db' );\ndefine('DB_HOST', \"db.example.com\");\n$table_prefix = 'old_';\n")
-	got := readCloneTarget(dir, Config{})
-	want := cloneTarget{prefix: "old_", dbName: "target_db", dbHost: "db.example.com"}
+	writeTestWPConfig(t, dir, "old_", "target_db")
+	installFakeTablesWP(t, dir)
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	got := app.readCloneTarget(context.Background(), dir, Config{})
+	want := cloneTarget{prefix: "old_", dbName: "target_db", dbHost: "localhost"}
 	if got != want {
 		t.Fatalf("readCloneTarget() = %+v, want %+v", got, want)
 	}
-	if got.sameDatabase(cloneTarget{dbName: "target_db", dbHost: "DB.example.com"}) != true {
+	if !got.sameDatabase(cloneTarget{dbName: "target_db", dbHost: "LOCALHOST"}) {
 		t.Fatal("same database name and host should match")
 	}
 	if (cloneTarget{}).sameDatabase(cloneTarget{}) {
 		t.Fatal("unknown databases must never match")
 	}
-}
-
-// installFakeCloneWP fakes a target WP-CLI that lists tables and logs every query.
-func installFakeCloneWP(t *testing.T, dir string, tables []string) string {
-	t.Helper()
-	logPath := filepath.Join(dir, "wp.log")
-	listing := ""
-	for _, table := range tables {
-		listing += table + `\tBASE TABLE\n`
+	if empty := app.readCloneTarget(context.Background(), t.TempDir(), Config{}); empty != (cloneTarget{}) {
+		t.Fatalf("a target without wp-config.php = %+v, want empty", empty)
 	}
-	installFakeCommand(t, dir, "wp", `#!/bin/sh
-printf '%s\n' "$*" >> `+shellQuote(logPath)+`
-case "$*" in
-  *"SHOW FULL TABLES"*) printf '`+listing+`'; exit 0 ;;
-  *"db query"*) exit 0 ;;
-esac
-exit 1
-`)
-	return logPath
 }
 
-func writeCloneTargetConfig(t *testing.T, dir string, dbName string, prefix string) {
+// cloneTables plans against the fake target database and applies the plan like the
+// pipeline does around the import.
+func cloneTables(t *testing.T, dir string, cfg Config, previous cloneTarget, dump []string) (string, string, error) {
 	t.Helper()
-	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\ndefine('DB_NAME', '"+dbName+"');\ndefine('DB_HOST', 'localhost');\n$table_prefix = '"+prefix+"';\n")
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
+	plan, err := app.planCloneTables(context.Background(), dir, cfg, previous, dump)
+	if err == nil {
+		err = app.applyClonePlan(context.Background(), dir, cfg, plan)
+	}
+	return readTestLog(t, dir+"/wp.log"), stderr.String(), err
 }
 
-func TestReplaceCloneTablesDropsPreviousInstallationOnly(t *testing.T) {
+func TestCloneDropsOnlyThePreviousInstallation(t *testing.T) {
 	dir := t.TempDir()
-	writeCloneTargetConfig(t, dir, "target_db", "abc_")
+	writeTestWPConfig(t, dir, "abc_", "target_db")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
-	logPath := installFakeCloneWP(t, dir, []string{
-		"abc_options", "abc_posts", "abc_old_plugin",
-		"old_options", "old_posts", "old_2_options",
-		"blog_options", "blog_posts",
-	})
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	installFakeTablesWP(t, dir,
+		"old_options", "old_posts", "old_users", "old_2_options",
+		"blog_options", "blog_users",
+		"abc_orphan",
+	)
 
 	previous := cloneTarget{prefix: "old_", dbName: "target_db", dbHost: "localhost"}
-	if err := app.replaceCloneTables(context.Background(), dir, Config{}, previous, []string{"abc_options", "abc_posts"}); err != nil {
-		t.Fatalf("replaceCloneTables() error = %v", err)
-	}
-	log, err := os.ReadFile(logPath)
+	log, stderr, err := cloneTables(t, dir, Config{}, previous, []string{"abc_options", "abc_posts"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("clone tables error = %v", err)
 	}
-	want := "db query SET FOREIGN_KEY_CHECKS = 0; DROP TABLE `abc_old_plugin`, `old_2_options`, `old_options`, `old_posts`"
-	if !strings.Contains(string(log), want) {
+	want := "db query SET FOREIGN_KEY_CHECKS = 0; DROP TABLE `old_2_options`, `old_options`, `old_posts`, `old_users`"
+	if !strings.Contains(log, want) {
 		t.Fatalf("wp log missing %q:\n%s", want, log)
 	}
-	if strings.Contains(string(log), "blog_") || strings.Contains(string(log), "RENAME") {
-		t.Fatalf("unrelated tables or renames touched:\n%s", log)
+	if strings.Contains(log, "blog_") || strings.Contains(log, "abc_orphan") || strings.Contains(log, "RENAME") {
+		t.Fatalf("tables outside the previous installation were touched:\n%s", log)
 	}
-	if _, err := os.Stat(pullSourcePrefixPath(dir)); err != nil {
-		t.Fatalf("the prefix record must stay for post-pull: %v", err)
+	if !strings.Contains(stderr, "1 table under the prefix abc_ in the target database is not part of the clone") {
+		t.Fatalf("missing warning about the unowned table:\n%s", stderr)
 	}
 }
 
-func TestReplaceCloneTablesKeepsPreviousPrefixInAnotherDatabase(t *testing.T) {
+func TestCloneKeepsPreviousPrefixInAnotherDatabase(t *testing.T) {
 	dir := t.TempDir()
-	writeCloneTargetConfig(t, dir, "new_db", "abc_")
+	writeTestWPConfig(t, dir, "abc_", "new_db")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
-	logPath := installFakeCloneWP(t, dir, []string{"abc_options", "old_options", "old_posts"})
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	installFakeTablesWP(t, dir, "old_options", "old_posts", "old_users")
 
 	previous := cloneTarget{prefix: "old_", dbName: "old_db", dbHost: "localhost"}
-	if err := app.replaceCloneTables(context.Background(), dir, Config{}, previous, []string{"abc_options"}); err != nil {
-		t.Fatalf("replaceCloneTables() error = %v", err)
-	}
-	log, err := os.ReadFile(logPath)
+	log, _, err := cloneTables(t, dir, Config{}, previous, []string{"abc_options"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("clone tables error = %v", err)
 	}
-	if strings.Contains(string(log), "DROP") {
+	if strings.Contains(log, "DROP") {
 		t.Fatalf("tables in a database the previous config did not use must stay:\n%s", log)
 	}
 }
 
-func TestReplaceCloneTablesRenamesToConfiguredPrefix(t *testing.T) {
+func TestCloneMatchesImportedTablesCaseInsensitively(t *testing.T) {
 	dir := t.TempDir()
-	writeCloneTargetConfig(t, dir, "target_db", "wp_")
-	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
-	logPath := installFakeCloneWP(t, dir, []string{"abc_options", "abc_usermeta", "wp_options", "wp_posts"})
-	stdout := bytes.Buffer{}
-	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+	writeTestWPConfig(t, dir, "wp_", "target_db")
+	writeFile(t, pullSourcePrefixPath(dir), "wp_\n")
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_wfconfig")
 
 	previous := cloneTarget{prefix: "wp_", dbName: "target_db", dbHost: "localhost"}
-	cfg := Config{CloneDBPrefix: "wp_"}
-	if err := app.replaceCloneTables(context.Background(), dir, cfg, previous, []string{"abc_options", "abc_usermeta"}); err != nil {
-		t.Fatalf("replaceCloneTables() error = %v", err)
-	}
-	log, err := os.ReadFile(logPath)
+	log, _, err := cloneTables(t, dir, Config{}, previous, []string{"wp_options", "wp_users", "wp_wfConfig"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("clone tables error = %v", err)
 	}
-	drop := strings.Index(string(log), "DROP TABLE `wp_options`, `wp_posts`")
-	rename := strings.Index(string(log), "RENAME TABLE `abc_options` TO `wp_options`, `abc_usermeta` TO `wp_usermeta`")
+	if strings.Contains(log, "DROP") {
+		t.Fatalf("an imported table listed in lower case must not be dropped:\n%s", log)
+	}
+}
+
+func TestCloneRenamesToConfiguredPrefixAfterDroppingThePreviousInstallation(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "target_db")
+	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
+	installFakeTablesWP(t, dir, "wp_options", "wp_posts", "wp_users")
+
+	previous := cloneTarget{prefix: "wp_", dbName: "target_db", dbHost: "localhost"}
+	cfg := Config{CloneDBPrefix: "wp_", CloneDBName: "target_db", CloneDBHost: "localhost"}
+	log, _, err := cloneTables(t, dir, cfg, previous, []string{"abc_options", "abc_usermeta"})
+	if err != nil {
+		t.Fatalf("clone tables error = %v", err)
+	}
+	drop := strings.Index(log, "DROP TABLE `wp_options`, `wp_posts`, `wp_users`")
+	rename := strings.Index(log, "RENAME TABLE `abc_options` TO `wp_options`, `abc_usermeta` TO `wp_usermeta`")
 	if drop < 0 || rename < 0 || drop > rename {
 		t.Fatalf("previous wp_ tables must be dropped before the rename:\n%s", log)
 	}
 	for _, want := range []string{"option_name = 'wp_user_roles' WHERE option_name = 'abc_user_roles'", "BINARY LEFT(meta_key, 4) = 'abc_'"} {
-		if !strings.Contains(string(log), want) {
+		if !strings.Contains(log, want) {
 			t.Fatalf("wp log missing %q:\n%s", want, log)
 		}
 	}
-	if !strings.Contains(stdout.String(), "Cloned tables renamed to wp_") {
-		t.Fatalf("missing rename step:\n%s", stdout.String())
+}
+
+func TestCloneRefusesBeforeImportWhenAnotherSiteWouldBeOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	// The target database runs site X under wp_; no config at the target points at it.
+	writeTestWPConfig(t, dir, "wp_", "shared_db")
+	writeFile(t, pullSourcePrefixPath(dir), "wp_\n")
+	installFakeTablesWP(t, dir, "wp_options", "wp_posts", "wp_users")
+
+	cfg := Config{CloneDBPrefix: "site2_"}
+	log, _, err := cloneTables(t, dir, cfg, cloneTarget{}, []string{"wp_options", "wp_posts"})
+	if err == nil || !strings.Contains(err.Error(), "already contains wp_options") {
+		t.Fatalf("error = %v, want a refusal to overwrite wp_options", err)
+	}
+	if strings.Contains(log, "DROP") || strings.Contains(log, "RENAME") {
+		t.Fatalf("nothing may change when the clone refuses:\n%s", log)
 	}
 }
 
-func TestReplaceCloneTablesRejectsRenameCollisionInDump(t *testing.T) {
+func TestCloneRefusesRenameCollisionInDump(t *testing.T) {
 	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "target_db")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
-	logPath := installFakeCloneWP(t, dir, []string{"abc_options", "wp_options"})
-	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	installFakeTablesWP(t, dir)
 
-	err := app.replaceCloneTables(context.Background(), dir, Config{CloneDBPrefix: "wp_"}, cloneTarget{}, []string{"abc_options", "wp_options"})
-	if err == nil || !strings.Contains(err.Error(), "already contains wp_options") {
-		t.Fatalf("replaceCloneTables() error = %v, want rename collision", err)
+	_, _, err := cloneTables(t, dir, Config{CloneDBPrefix: "wp_"}, cloneTarget{}, []string{"abc_options", "wp_options"})
+	if err == nil || !strings.Contains(err.Error(), "also contains wp_options") {
+		t.Fatalf("error = %v, want rename collision", err)
 	}
-	if log, _ := os.ReadFile(logPath); strings.Contains(string(log), "DROP") || strings.Contains(string(log), "RENAME") {
-		t.Fatalf("nothing may change before the collision is reported:\n%s", log)
+}
+
+func TestCloneRefusesWhenConfigResolvesAnotherDatabase(t *testing.T) {
+	dir := t.TempDir()
+	// An included file defined the source database first, so the written constants lost.
+	writeTestWPConfig(t, dir, "wp_", "source_db")
+	writeFile(t, pullSourcePrefixPath(dir), "wp_\n")
+	installFakeTablesWP(t, dir)
+
+	_, _, err := cloneTables(t, dir, Config{CloneDBName: "target_db", CloneDBHost: "localhost"}, cloneTarget{}, []string{"wp_options"})
+	if err == nil || !strings.Contains(err.Error(), `resolves the database to "source_db"`) {
+		t.Fatalf("error = %v, want a database mismatch", err)
+	}
+}
+
+func TestCloneRefusesDBPrefixWithoutSourcePrefix(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "target_db")
+	installFakeTablesWP(t, dir)
+
+	_, _, err := cloneTables(t, dir, Config{CloneDBPrefix: "wp_"}, cloneTarget{}, []string{"abc_options"})
+	if err == nil || !strings.Contains(err.Error(), "clone_db_prefix (--db-prefix) needs") {
+		t.Fatalf("error = %v, want a missing source prefix error", err)
 	}
 }

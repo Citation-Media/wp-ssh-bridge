@@ -4,22 +4,34 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// installFakePrefixWP fakes a local WP-CLI whose config get reads the current
-// $table_prefix literal from wp-config.php, so rewrites are observed like real WP-CLI.
-func installFakePrefixWP(t *testing.T, dir string, tables string) string {
+// installFakeTablesWP fakes a local WP-CLI that resolves wp-config.php like the real one
+// (config get and config list read the current file, so rewrites are observed), lists
+// the given base tables, accepts every other query, and logs each call.
+func installFakeTablesWP(t *testing.T, dir string, tables ...string) string {
 	t.Helper()
 	logPath := filepath.Join(dir, "wp.log")
-	wpConfig := filepath.Join(dir, "wp-config.php")
+	wpConfig := shellQuote(filepath.Join(dir, "wp-config.php"))
+	listing := ""
+	for _, table := range tables {
+		listing += table + `\tBASE TABLE\n`
+	}
 	installFakeCommand(t, dir, "wp", `#!/bin/sh
 printf '%s\n' "$*" >> `+shellQuote(logPath)+`
+config_value() { sed -n "s/^$1\$/\1/p" `+wpConfig+`; }
 case "$*" in
-  *"config get table_prefix"*) sed -n "s/^\$table_prefix = '\(.*\)';\$/\1/p" `+shellQuote(wpConfig)+`; exit 0 ;;
-  *"db query SHOW TABLES --skip-column-names"*) printf '`+tables+`'; exit 0 ;;
+  *"config get table_prefix"*) config_value "\$table_prefix = '\(.*\)';"; exit 0 ;;
+  *"config list"*)
+    printf '[{"name":"table_prefix","value":"%s"},{"name":"DB_NAME","value":"%s"},{"name":"DB_HOST","value":"%s"}]\n' \
+      "$(config_value "\$table_prefix = '\(.*\)';")" "$(config_value "define('DB_NAME', '\(.*\)');")" "$(config_value "define('DB_HOST', '\(.*\)');")"
+    exit 0 ;;
+  *"SHOW FULL TABLES"*) printf '`+listing+`'; exit 0 ;;
+  *"db query"*) exit 0 ;;
   *"plugin list"*) printf '[]\n'; exit 0 ;;
 esac
 exit 1
@@ -27,11 +39,47 @@ exit 1
 	return logPath
 }
 
-func writePrefixWPConfig(t *testing.T, dir string, prefix string) string {
+// writeTestWPConfig writes a wp-config.php with a literal prefix and, when dbName is set,
+// literal DB_NAME and DB_HOST constants.
+func writeTestWPConfig(t *testing.T, dir string, prefix string, dbName string) string {
 	t.Helper()
 	wpConfig := filepath.Join(dir, "wp-config.php")
-	writeFile(t, wpConfig, "<?php\n$table_prefix = '"+prefix+"';\nrequire_once ABSPATH . 'wp-settings.php';\n")
+	contents := "<?php\n"
+	if dbName != "" {
+		contents += "define('DB_NAME', '" + dbName + "');\ndefine('DB_HOST', 'localhost');\n"
+	}
+	contents += "$table_prefix = '" + prefix + "';\nrequire_once ABSPATH . 'wp-settings.php';\n"
+	writeFile(t, wpConfig, contents)
 	return wpConfig
+}
+
+func readTestLog(t *testing.T, path string) string {
+	t.Helper()
+	log, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(log)
+}
+
+func TestRemoteTablePrefixCommandKeepsOnlyTheLastLine(t *testing.T) {
+	t.Parallel()
+	for name, wp := range map[string]string{
+		"notice before value": `printf 'Deprecated: something\n\nabc_\n'`,
+		"failing lookup":      `echo boom >&2; return 1`,
+	} {
+		output, err := exec.Command("sh", "-c", "set -eu; wp_ssh_wp() { "+wp+"; }; "+remoteTablePrefixCommand+" echo after").Output()
+		if err != nil {
+			t.Fatalf("%s: command failed: %v", name, err)
+		}
+		want := tablePrefixMarker + "abc_\nafter\n"
+		if name == "failing lookup" {
+			want = tablePrefixMarker + "\nafter\n"
+		}
+		if string(output) != want {
+			t.Fatalf("%s: output = %q, want %q", name, output, want)
+		}
+	}
 }
 
 func TestDBPullRecordsSourceTablePrefixFromExport(t *testing.T) {
@@ -52,18 +100,29 @@ func TestDBPullRecordsSourceTablePrefixFromExport(t *testing.T) {
 	if string(got) != "abc_\n" {
 		t.Fatalf("recorded prefix = %q, want abc_", got)
 	}
-	log, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(log), "config get table_prefix") || strings.Count(string(log), "wp_ssh_wp()") != 1 {
+	log := readTestLog(t, logPath)
+	if !strings.Contains(log, "config get table_prefix") || strings.Count(log, "wp_ssh_wp()") != 1 {
 		t.Fatalf("prefix lookup should share the export SSH session:\n%s", log)
 	}
 }
 
-func TestRecordPullSourceTablePrefixDropsStaleRecordWithoutMarker(t *testing.T) {
+func TestDBPullRecordsNoPrefixWhenDownloadFails(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, pullSourcePrefixPath(dir), "old_\n")
+	// The export prints a prefix; the download, which streams "cat <dump>", fails.
+	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *' cat '*) exit 1 ;;\nesac\nprintf '"+tablePrefixMarker+"abc_\\n'\n")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	if err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html"}, true); err == nil {
+		t.Fatal("dbPull() succeeded despite a failed download")
+	}
+	if _, err := os.Stat(pullSourcePrefixPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("neither the stale nor the new prefix may stay after a failed download, got err: %v", err)
+	}
+}
+
+func TestRecordPullSourceTablePrefixWarnsOnInvalidPrefix(t *testing.T) {
+	dir := t.TempDir()
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
 
@@ -71,7 +130,7 @@ func TestRecordPullSourceTablePrefixDropsStaleRecordWithoutMarker(t *testing.T) 
 		t.Fatalf("recordPullSourceTablePrefix() error = %v", err)
 	}
 	if _, err := os.Stat(pullSourcePrefixPath(dir)); !os.IsNotExist(err) {
-		t.Fatalf("stale prefix record should be removed, got err: %v", err)
+		t.Fatalf("an invalid prefix must not be recorded, got err: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "Could not detect the pull source table prefix") {
 		t.Fatalf("missing detection warning:\n%s", stderr.String())
@@ -80,8 +139,8 @@ func TestRecordPullSourceTablePrefixDropsStaleRecordWithoutMarker(t *testing.T) 
 
 func TestAlignLocalTablePrefixFollowsImportedTables(t *testing.T) {
 	dir := t.TempDir()
-	wpConfig := writePrefixWPConfig(t, dir, "wp_")
-	installFakePrefixWP(t, dir, `wp_options\nwp_posts\nwp_abc_options\nwp_abc_posts\n`)
+	wpConfig := writeTestWPConfig(t, dir, "wp_", "")
+	installFakeTablesWP(t, dir, "wp_options", "wp_posts", "wp_abc_options", "wp_abc_posts", "wp_abc_users")
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &stdout, &stderr)
@@ -99,30 +158,59 @@ func TestAlignLocalTablePrefixFollowsImportedTables(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Local table prefix set to wp_abc_") {
 		t.Fatalf("missing prefix update step:\n%s", stdout.String())
 	}
-	// Tables under the new prefix also start with the old one and must not count as stale.
-	if !strings.Contains(stderr.String(), "2 local tables with the previous prefix wp_ remain") {
-		t.Fatalf("missing stale table warning:\n%s", stderr.String())
+	// The imported wp_abc_ install also starts with wp_ and must not count as leftovers.
+	if !strings.Contains(stderr.String(), "The previous prefix wp_ still has 2 tables") {
+		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
+	}
+}
+
+func TestAlignLocalTablePrefixCountsLeftoversWhenNewPrefixIsShorter(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_abc_", "")
+	installFakeTablesWP(t, dir, "wp_abc_options", "wp_abc_posts", "wp_abc_users", "wp_options", "wp_users")
+	stderr := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
+
+	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "wp_"); err != nil {
+		t.Fatalf("alignLocalTablePrefix() error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "The previous prefix wp_abc_ still has 3 tables") {
+		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
 	}
 }
 
 func TestAlignLocalTablePrefixSkipsWPCLIWhenLiteralMatches(t *testing.T) {
 	dir := t.TempDir()
-	writePrefixWPConfig(t, dir, "abc_")
-	logPath := installFakePrefixWP(t, dir, `abc_options\n`)
+	writeTestWPConfig(t, dir, "abc_", "")
+	logPath := installFakeTablesWP(t, dir, "abc_options")
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 
 	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "abc_"); err != nil {
 		t.Fatalf("alignLocalTablePrefix() error = %v", err)
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("matching wp-config.php literal should not start WP-CLI, got err: %v", err)
+	if log := readTestLog(t, logPath); log != "" {
+		t.Fatalf("matching wp-config.php literal should not start WP-CLI:\n%s", log)
+	}
+}
+
+func TestAlignLocalTablePrefixResolvesSeveralAssignmentsWithWPCLI(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\nif (getenv('LOCAL')) {\n  $table_prefix = 'abc_';\n} else {\n  $table_prefix = 'dev_';\n}\n")
+	logPath := installFakeTablesWP(t, dir, "abc_options")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "abc_"); err != nil {
+		t.Fatalf("alignLocalTablePrefix() error = %v", err)
+	}
+	if !strings.Contains(readTestLog(t, logPath), "config get table_prefix") {
+		t.Fatal("a config with several $table_prefix assignments must be resolved through WP-CLI")
 	}
 }
 
 func TestAlignLocalTablePrefixKeepsConfigWithoutImportedTables(t *testing.T) {
 	dir := t.TempDir()
-	wpConfig := writePrefixWPConfig(t, dir, "wp_")
-	installFakePrefixWP(t, dir, `wp_options\nwp_posts\n`)
+	wpConfig := writeTestWPConfig(t, dir, "wp_", "")
+	installFakeTablesWP(t, dir, "wp_options", "wp_posts")
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
 
@@ -136,8 +224,22 @@ func TestAlignLocalTablePrefixKeepsConfigWithoutImportedTables(t *testing.T) {
 	if !strings.Contains(string(got), "$table_prefix = 'wp_';") {
 		t.Fatalf("prefix should stay unchanged without imported tables:\n%s", got)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("unexpected warning:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "The imported table abc_options was not found") {
+		t.Fatalf("missing warning:\n%s", stderr.String())
+	}
+}
+
+func TestAlignLocalTablePrefixMatchesTableNamesCaseInsensitively(t *testing.T) {
+	dir := t.TempDir()
+	wpConfig := writeTestWPConfig(t, dir, "wp_", "")
+	installFakeTablesWP(t, dir, "wpabc_options")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	if err := app.alignLocalTablePrefix(context.Background(), dir, Config{}, "WPabc_"); err != nil {
+		t.Fatalf("alignLocalTablePrefix() error = %v", err)
+	}
+	if got, _ := os.ReadFile(wpConfig); !strings.Contains(string(got), "$table_prefix = 'WPabc_';") {
+		t.Fatalf("lower_case_table_names should not hide the imported tables:\n%s", got)
 	}
 }
 
@@ -146,7 +248,7 @@ func TestAlignLocalTablePrefixWarnsWithoutPrefixAssignment(t *testing.T) {
 	wpConfig := filepath.Join(dir, "wp-config.php")
 	original := "<?php\nrequire_once dirname(__DIR__) . '/config/application.php';\n"
 	writeFile(t, wpConfig, original)
-	installFakePrefixWP(t, dir, `abc_options\n`)
+	installFakeTablesWP(t, dir, "abc_options")
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
 
@@ -167,8 +269,8 @@ func TestAlignLocalTablePrefixWarnsWithoutPrefixAssignment(t *testing.T) {
 
 func TestPostPullCloneKeepsExplicitTargetPrefix(t *testing.T) {
 	dir := t.TempDir()
-	wpConfig := writePrefixWPConfig(t, dir, "target_")
-	logPath := installFakePrefixWP(t, dir, `abc_options\n`)
+	wpConfig := writeTestWPConfig(t, dir, "target_", "")
+	logPath := installFakeTablesWP(t, dir, "abc_options")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	adapter := adapterForRuntime(runtimeContext{Mode: modeStandalone, Root: dir})
@@ -187,15 +289,15 @@ func TestPostPullCloneKeepsExplicitTargetPrefix(t *testing.T) {
 	if _, err := os.Stat(pullSourcePrefixPath(dir)); !os.IsNotExist(err) {
 		t.Fatalf("prefix record should be consumed, got err: %v", err)
 	}
-	if log, err := os.ReadFile(logPath); err == nil && strings.Contains(string(log), "table_prefix") {
+	if log := readTestLog(t, logPath); strings.Contains(log, "table_prefix") {
 		t.Fatalf("clone with --db-prefix should not probe the local prefix:\n%s", log)
 	}
 }
 
 func TestPostPullSwitchesDefaultLocalPrefixToSourcePrefix(t *testing.T) {
 	dir := t.TempDir()
-	wpConfig := writePrefixWPConfig(t, dir, "wp_")
-	logPath := installFakePrefixWP(t, dir, `wp_options\nwp_posts\nabc_options\nabc_posts\nabc_users\n`)
+	wpConfig := writeTestWPConfig(t, dir, "wp_", "")
+	logPath := installFakeTablesWP(t, dir, "wp_options", "wp_posts", "abc_options", "abc_posts", "abc_users")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
@@ -211,24 +313,22 @@ func TestPostPullSwitchesDefaultLocalPrefixToSourcePrefix(t *testing.T) {
 	if !strings.Contains(string(got), "$table_prefix = 'abc_';") || strings.Contains(string(got), "$table_prefix = 'wp_';") {
 		t.Fatalf("local prefix should follow the source prefix:\n%s", got)
 	}
-	if !strings.Contains(stderr.String(), "2 local tables with the previous prefix wp_ remain") {
-		t.Fatalf("missing stale table warning:\n%s", stderr.String())
-	}
-	log, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(stderr.String(), "The previous prefix wp_ still has 2 tables") {
+		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
 	}
 	// WordPress-loading commands must only run after the prefix points at the imported tables.
-	if strings.Index(string(log), "plugin list") < strings.Index(string(log), "db query SHOW TABLES") {
-		t.Fatalf("plugin cleanup ran before the prefix was aligned:\n%s", log)
+	log := readTestLog(t, logPath)
+	tables, plugins := strings.Index(log, "SHOW FULL TABLES"), strings.Index(log, "plugin list")
+	if tables < 0 || plugins < 0 || plugins < tables {
+		t.Fatalf("plugin cleanup must run after the prefix was aligned:\n%s", log)
 	}
 }
 
 func TestPostPullCloneSwitchesExistingTargetToSourcePrefix(t *testing.T) {
 	dir := t.TempDir()
 	// A target that already runs WordPress under another prefix, cloned with --skip-files.
-	wpConfig := writePrefixWPConfig(t, dir, "old_")
-	installFakePrefixWP(t, dir, `old_options\nold_posts\nabc_options\nabc_posts\n`)
+	wpConfig := writeTestWPConfig(t, dir, "old_", "")
+	installFakeTablesWP(t, dir, "abc_options", "abc_posts", "abc_users")
 	writeFile(t, pullSourcePrefixPath(dir), "abc_\n")
 	stderr := bytes.Buffer{}
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
@@ -244,7 +344,20 @@ func TestPostPullCloneSwitchesExistingTargetToSourcePrefix(t *testing.T) {
 	if !strings.Contains(string(got), "$table_prefix = 'abc_';") {
 		t.Fatalf("clone target should use the source prefix:\n%s", got)
 	}
-	if !strings.Contains(stderr.String(), "2 local tables with the previous prefix old_ remain") {
-		t.Fatalf("missing leftover table warning:\n%s", stderr.String())
+}
+
+func TestSanitizeWPConfigIsSilentWhenAlreadySanitized(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "wp-config.php"), "<?php\ndefine('DB_NAME', 'prod');\nrequire_once ABSPATH . 'wp-settings.php';\n")
+	stdout := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+
+	for range 2 {
+		if err := app.sanitizeWPConfig(dir, Config{}); err != nil {
+			t.Fatalf("sanitizeWPConfig() error = %v", err)
+		}
+	}
+	if count := strings.Count(stdout.String(), "Local wp-config.php sanitized"); count != 1 {
+		t.Fatalf("sanitize reported %d times, want once for the pre-import and post-pull runs:\n%s", count, stdout.String())
 	}
 }
