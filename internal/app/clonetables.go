@@ -184,12 +184,20 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 	return plan, nil
 }
 
-// planPullTables decides which local tables the pulled database replaces. DDEV and wp-env
-// give each project a database of its own, so everything the dump does not recreate goes,
-// as `ddev import-db` does. A standalone project may share its database with other local
-// sites, so only the tables of the installation its wp-config.php describes go.
+// planPullTables decides which local tables the pulled database replaces, following
+// pull_db_reset. By default DDEV and wp-env remove everything the dump does not recreate,
+// as `ddev import-db` does, because each project has a database of its own. A standalone
+// project may share its database with other local sites, so by default only the tables
+// of the installation its wp-config.php describes go.
 func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config, mode runtimeMode, dumpTables []string) tablePlan {
-	if len(dumpTables) == 0 {
+	reset := cfg.PullDBReset
+	if reset == "" {
+		reset = pullDBResetDatabase
+		if mode == modeStandalone {
+			reset = pullDBResetInstallation
+		}
+	}
+	if reset == pullDBResetNone || len(dumpTables) == 0 {
 		return tablePlan{}
 	}
 	existing, err := a.localTableNames(ctx, projectRoot, cfg)
@@ -198,7 +206,7 @@ func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config
 		return tablePlan{}
 	}
 	owned := existing
-	if mode == modeStandalone {
+	if reset == pullDBResetInstallation {
 		prefix := a.localTablePrefix(ctx, projectRoot, cfg)
 		if prefix == "" {
 			a.UI.Warning("Could not read the local $table_prefix; tables the pulled database does not contain are left in place.")

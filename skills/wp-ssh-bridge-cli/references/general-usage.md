@@ -176,7 +176,7 @@ export WP_SSH_PUSH_REMOTE_PATH=/home/staging/public_html
 export WP_SSH_PUSH_URL=https://staging.example.com
 ```
 
-Every config key except the domain mappings has an environment variable. The local WordPress root is `WP_SSH_LOCAL_WP_PATH` (`WP_SSH_PULL_LOCAL_WP_PATH` also works). The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, and `WP_SSH_PULL_PLUGIN_REMOVE_FILE`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
+Every config key except the domain mappings has an environment variable. The local WordPress root is `WP_SSH_LOCAL_WP_PATH` (`WP_SSH_PULL_LOCAL_WP_PATH` also works). The pull-side ones are `WP_SSH_PULL_DESTINATION`, `WP_SSH_PULL_USER`, `WP_SSH_PULL_HOST`, `WP_SSH_PULL_PORT`, `WP_SSH_PULL_REMOTE_PATH`, `WP_SSH_PULL_REMOTE_TMP_DIR`, `WP_SSH_PULL_LOCAL_URL`, `WP_SSH_PULL_CLONE_IMAGES`, `WP_SSH_PULL_SKIP_SEARCH_REPLACE`, `WP_SSH_PULL_PLUGIN_REMOVE_FILE`, and `WP_SSH_PULL_DB_RESET`; the push side is `WP_SSH_PUSH_DESTINATION`, `WP_SSH_PUSH_USER`, `WP_SSH_PUSH_HOST`, `WP_SSH_PUSH_PORT`, `WP_SSH_PUSH_REMOTE_PATH`, `WP_SSH_PUSH_REMOTE_TMP_DIR`, `WP_SSH_PUSH_URL`, and `WP_SSH_PUSH_SKIP_SEARCH_REPLACE`. `WP_SSH_CONFIG_FILE`, `WP_SSH_INTEGRATION`, and `WP_SSH_PROVIDER` select the config file, runtime, and DDEV provider. Clone targets use `WP_SSH_CLONE_DB_*`.
 
 Do not put private key contents in environment variables. SSH should use normal OpenSSH files, SSH config, or an agent. Only `clone_db_password` is a real secret; keep non-secret values in the config file. To inject variables from a secrets manager for one run, wrap the command: `op run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (1Password), `bws run --project-id <id> -- wp-ssh-bridge pull --silent` (Bitwarden Secrets Manager; name the secrets exactly like the `WP_SSH_*` variables and never add `--no-inherit-env`, which drops the SSH agent socket), `pass-cli run --env-file=wp-ssh.env -- wp-ssh-bridge pull --silent` (Proton Pass). Details: https://wp-ssh-bridge.citation.media/docs/secrets-managers.
 
@@ -218,6 +218,7 @@ Use these only when the user needs a partial or special operation:
 --skip-search-replace    skip URL replacement
 --skip-maintenance-mode  do not enable WordPress maintenance mode around the import
 --skip-cache-rebuild     skip page builder CSS rebuild (config skip_cache_rebuild, env WP_SSH_SKIP_CACHE_REBUILD)
+--db-reset <mode>        pull only: local tables to remove after the import: database, installation, or none (config pull_db_reset, env WP_SSH_PULL_DB_RESET)
 --force-scp              use the tar-over-SSH transport even when rsync exists
 --yes, -y                skip the confirmation prompt of a direct DDEV run
 --silent                 no prompts; take every value from config, environment, and flags
@@ -271,4 +272,4 @@ Table prefix: a pull rewrites the local `$table_prefix` in `wp-config.php` to th
 wp config get table_prefix --path=/path/to/wordpress
 ```
 
-Before that, a pull removes the local tables the pulled database does not contain: the whole project database in DDEV and wp-env, only the local installation's tables in standalone mode. Exports on both sides cover the installation's tables only. A push stops with `the push target uses the table prefix …` when the target's `$table_prefix` differs from the local one; set it in the target's `wp-config.php` first.
+Before that, a pull removes the local tables the pulled database does not contain: by default the whole project database in DDEV and wp-env, only the local installation's tables in standalone mode. `pull_db_reset` (`--db-reset`, `WP_SSH_PULL_DB_RESET`) sets `database`, `installation`, or `none`; a native `ddev pull` always empties the database. Exports on both sides cover the installation's tables only. A push stops with `the push target uses the table prefix …` when the target's `$table_prefix` differs from the local one; set it in the target's `wp-config.php` first.

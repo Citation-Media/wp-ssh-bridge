@@ -64,7 +64,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
     4. Sync files with rsync `--delete`, minus the exclusions.
     5. In DDEV, sanitise the copied `wp-config.php` so WP-CLI reaches the DDEV database instead of the production one.
     6. Enable local maintenance mode, when a WordPress site is already installed locally.
-    7. Import the dump locally, then delete the local copy of it. Remove the local tables the dump did not contain: all of them in DDEV and wp-env, only the local installation's in standalone mode.
+    7. Import the dump locally, then delete the local copy of it. Remove the local tables the dump did not contain: by default all of them in DDEV and wp-env and only the local installation's in standalone mode, adjustable with `pull_db_reset`.
     8. Point the local `$table_prefix` at the imported tables when the source uses a different prefix. Tables are not renamed.
     9. Rewrite `wp-config.php` URL constants for the local environment, except in wp-env.
     10. Search-replace URLs and multisite domains, per blog and in the `site` and `blogs` tables.
@@ -116,7 +116,7 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 - Remote temporary files and the MariaDB compatibility shim are removed on success and by a cleanup trap on failure.
 - PHP functions a host disables are re-enabled only for the export step's WP-CLI processes that need them, never in the host's PHP configuration.
 - Exports cover the WordPress installation's tables only, so other sites sharing a database never travel along.
-- A pull empties only what belongs to the local site: the whole project database in DDEV and wp-env, the local installation's tables in standalone mode. A push stops when the target's table prefix differs from the local one.
+- A pull empties only what belongs to the local site: by default the whole project database in DDEV and wp-env and the local installation's tables in standalone mode; `pull_db_reset` changes that. A push stops when the target's table prefix differs from the local one.
 - `wp-config.php` is never pushed, so a target keeps its own credentials.
 - Push is rejected in wp-env projects, where the local tree would erase the target's plugins and uploads.
 - Clone is rejected in DDEV and wp-env projects, where the import would land in a container database.

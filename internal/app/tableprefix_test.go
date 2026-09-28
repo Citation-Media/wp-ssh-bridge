@@ -457,3 +457,54 @@ func TestCheckPushTablePrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanPullTablesFollowsPullDBReset(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "")
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_old_plugin", "blog_options", "blog_users")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	dump := []string{"wp_options", "wp_users"}
+
+	for name, test := range map[string]struct {
+		mode  runtimeMode
+		reset string
+		want  string
+	}{
+		"none keeps everything in DDEV":             {mode: modeDDEV, reset: pullDBResetNone, want: ""},
+		"installation narrows DDEV":                 {mode: modeDDEV, reset: pullDBResetInstallation, want: "wp_old_plugin"},
+		"database widens standalone":                {mode: modeStandalone, reset: pullDBResetDatabase, want: "blog_options,blog_users,wp_old_plugin"},
+		"default in standalone is the installation": {mode: modeStandalone, want: "wp_old_plugin"},
+	} {
+		plan := app.planPullTables(context.Background(), dir, Config{PullDBReset: test.reset}, test.mode, dump)
+		if got := strings.Join(plan.drops, ","); got != test.want {
+			t.Fatalf("%s: drops = %q, want %q", name, got, test.want)
+		}
+	}
+}
+
+func TestPullDBResetConfigLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".wp-ssh.yaml")
+	writeFile(t, path, "pull_db_reset: \"none\"\n")
+	cfg, err := readConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PullDBReset != pullDBResetNone {
+		t.Fatalf("config file value = %q, want none", cfg.PullDBReset)
+	}
+	cfg.applyEnv([]string{"WP_SSH_PULL_DB_RESET=database"})
+	if cfg.PullDBReset != pullDBResetDatabase {
+		t.Fatalf("environment value = %q, want database", cfg.PullDBReset)
+	}
+	cfg = configOptions{PullDBReset: "installation"}.apply(cfg)
+	if cfg.PullDBReset != pullDBResetInstallation {
+		t.Fatalf("flag value = %q, want installation", cfg.PullDBReset)
+	}
+	if err := (Config{PullDBReset: "everything"}).validatePullDBReset(); err == nil || !strings.Contains(err.Error(), "pull_db_reset must be database, installation, or none") {
+		t.Fatalf("invalid value error = %v", err)
+	}
+	if err := (configOptions{PullDBReset: "none"}).validateCloneCommand(Config{}); err == nil || !strings.Contains(err.Error(), "--db-reset applies to pull only") {
+		t.Fatalf("clone should reject --db-reset, got %v", err)
+	}
+}
