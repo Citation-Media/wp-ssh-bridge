@@ -92,7 +92,7 @@ func cloneTables(t *testing.T, dir string, cfg Config, previous cloneTarget, dum
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &stderr)
 	plan, err := app.planCloneTables(context.Background(), dir, cfg, previous, dump)
 	if err == nil {
-		err = app.applyClonePlan(context.Background(), dir, cfg, plan)
+		err = app.applyTablePlan(context.Background(), dir, cfg, plan)
 	}
 	return readTestLog(t, dir+"/wp.log"), stderr.String(), err
 }

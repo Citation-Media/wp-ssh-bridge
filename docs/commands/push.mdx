@@ -100,12 +100,14 @@ Check where a push will go before you run it: the push values in the config file
 <Steps>
   <Step title="Preflight">
     Local tools, SSH access to the target, the paths on both sides, and WP-CLI are checked first, and nothing is uploaded until all of it passes. [How it works](/docs/how-it-works#preflight) lists every check.
+
+    The push also compares table prefixes. It keeps the target's `wp-config.php`, so when the target uses another `$table_prefix` than your local database, its WordPress would not see the pushed tables. The push stops before anything changes; set the prefix in the target's `wp-config.php` first. A target without WordPress yet skips the check.
   </Step>
   <Step title="Maintenance mode on the target">
     The target site is put into maintenance mode for the whole operation, so visitors do not meet a half-imported database. It is lifted again afterwards, including on failure. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed on the target yet, as on the first push into an empty directory, there is nothing to protect and the push runs without it.
   </Step>
   <Step title="Database export, upload, import">
-    Your local database is exported with WP-CLI, uploaded to the remote temp directory, and imported there with remote WP-CLI. Before the import, the target's current URL is captured when `push_url` is not set.
+    Your local installation's tables are exported with WP-CLI, freshly on every push, uploaded to the remote temp directory, and imported there with remote WP-CLI. Other sites sharing your local database stay behind. Before the import, the target's current URL is captured when `push_url` is not set.
   </Step>
   <Step title="File sync">
     rsync mirrors your local WordPress root onto the target's WordPress root, with the exclusions below. Without rsync, the tar-over-SSH fallback is used, which does not remove stale files.
@@ -209,6 +211,7 @@ A push rewrites the local URL to the target URL and then applies every push doma
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `push does not support wp-env projects; …` | Expected in a wp-env project. | Push from a standalone checkout instead; see the wp-env tab above. |
+| `the push target uses the table prefix …, but the local database uses …` | The target's `wp-config.php` names another `$table_prefix` than your local copy, so its WordPress would not see the pushed tables. Nothing was changed. | Set `$table_prefix` in the target's `wp-config.php` to the local prefix, or pull from that target first so the local copy takes its prefix. |
 | The target still shows the old or the local URL after a push | `push_url` was not set, so the push reused the target's home URL from before the import, and that value was wrong. | Set `push_url` and run again with `--skip-files`. |
 | `the push target URL is unknown because it could not be read from the target` | A first push into an empty target has no URL to read, or the target's WP-CLI could not report it. | Set `push_url`, `WP_SSH_PUSH_URL`, or `--push-url`, add a push domain mapping, or pass `--skip-search-replace` to keep the local URLs. |
 | Internal links point at the local domain | A push domain mapping is missing. | Add it with `domains add` and rerun the search-replace with `--skip-files`. |

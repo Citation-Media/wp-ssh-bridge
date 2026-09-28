@@ -37,7 +37,7 @@ Error: exit status 255
     If any are disabled, the CLI starts PHP once with `-d disable_functions=` set to the host's list minus those functions, and checks that they are now callable. If the host blocks the override too, the pull stops here, before anything is exported.
   </Step>
   <Step title="Run the export with the override">
-    Only the `wp db export` command starts PHP with that `-d` setting. Every other WP-CLI command in the run keeps the host's configuration.
+    Only the export step's WP-CLI commands, `wp db export` and the table listing that picks the installation's tables for it, start PHP with that `-d` setting. Every other WP-CLI command in the run keeps the host's configuration.
   </Step>
 </Steps>
 

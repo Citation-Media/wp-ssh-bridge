@@ -108,9 +108,9 @@ type tableRename struct {
 	to   string
 }
 
-// clonePlan is decided before the import, while the target database still shows which
-// tables belong to the installation the clone replaces.
-type clonePlan struct {
+// tablePlan is decided before the import, while the database still shows which tables
+// belong to the installation the import replaces.
+type tablePlan struct {
 	sourcePrefix string
 	finalPrefix  string
 	drops        []string
@@ -123,27 +123,27 @@ type clonePlan struct {
 // installation, found through the target's previous wp-config.php, may be overwritten
 // or dropped; the plan refuses before the import when the dump or a --db-prefix rename
 // would overwrite any other table.
-func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Config, previous cloneTarget, dumpTables []string) (clonePlan, error) {
+func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Config, previous cloneTarget, dumpTables []string) (tablePlan, error) {
 	current := a.readCloneTarget(ctx, projectRoot, cfg)
 	if cfg.CloneDBName != "" && (current.dbName != cfg.CloneDBName || !strings.EqualFold(current.dbHost, cfg.CloneDBHost)) {
-		return clonePlan{}, fmt.Errorf("wp-config.php resolves the database to %q on %q, not the clone target %q on %q; another file or the environment defines the database constants, so the import would go elsewhere", current.dbName, current.dbHost, cfg.CloneDBName, cfg.CloneDBHost)
+		return tablePlan{}, fmt.Errorf("wp-config.php resolves the database to %q on %q, not the clone target %q on %q; another file or the environment defines the database constants, so the import would go elsewhere", current.dbName, current.dbHost, cfg.CloneDBName, cfg.CloneDBHost)
 	}
 	sourcePrefix, err := readPullSourceTablePrefix(projectRoot)
 	if err != nil {
-		return clonePlan{}, err
+		return tablePlan{}, err
 	}
 	if sourcePrefix == "" || len(dumpTables) == 0 {
 		if cfg.CloneDBPrefix != "" {
-			return clonePlan{}, fmt.Errorf("could not detect the source table prefix or the cloned tables, which clone_db_prefix (--db-prefix) needs to rename them")
+			return tablePlan{}, fmt.Errorf("could not detect the source table prefix or the cloned tables, which clone_db_prefix (--db-prefix) needs to rename them")
 		}
 		a.UI.Warning("Could not determine the cloned tables; tables of a previous installation in the target database are left in place.")
-		return clonePlan{}, nil
+		return tablePlan{}, nil
 	}
-	plan := clonePlan{sourcePrefix: sourcePrefix, finalPrefix: defaultString(cfg.CloneDBPrefix, sourcePrefix)}
+	plan := tablePlan{sourcePrefix: sourcePrefix, finalPrefix: defaultString(cfg.CloneDBPrefix, sourcePrefix)}
 
 	existing, err := a.localTableNames(ctx, projectRoot, cfg)
 	if err != nil {
-		return clonePlan{}, fmt.Errorf("list target database tables: %w", err)
+		return tablePlan{}, fmt.Errorf("list target database tables: %w", err)
 	}
 	owned := map[string]bool{}
 	if previous.prefix != "" && previous.sameDatabase(current) {
@@ -156,7 +156,7 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 		for _, table := range installationTables(dumpTables, sourcePrefix) {
 			renamed := plan.finalPrefix + table[len(sourcePrefix):]
 			if imported[strings.ToLower(renamed)] {
-				return clonePlan{}, fmt.Errorf("cannot rename %s to %s for clone_db_prefix (--db-prefix): the source database also contains %s", table, renamed, renamed)
+				return tablePlan{}, fmt.Errorf("cannot rename %s to %s for clone_db_prefix (--db-prefix): the source database also contains %s", table, renamed, renamed)
 			}
 			plan.renames = append(plan.renames, tableRename{from: table, to: renamed})
 			written = append(written, renamed)
@@ -166,7 +166,7 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 	for _, table := range written {
 		key := strings.ToLower(table)
 		if existingSet[key] && !owned[key] {
-			return clonePlan{}, fmt.Errorf("the target database already contains %s, which does not belong to the WordPress installation at the target; the clone would overwrite it. Remove it or clone into another database", table)
+			return tablePlan{}, fmt.Errorf("the target database already contains %s, which does not belong to the WordPress installation at the target; the clone would overwrite it. Remove it or clone into another database", table)
 		}
 	}
 
@@ -184,9 +184,57 @@ func (a *App) planCloneTables(ctx context.Context, projectRoot string, cfg Confi
 	return plan, nil
 }
 
-// applyClonePlan runs after the import. Leftovers go first, because the previous
+// planPullTables decides which local tables the pulled database replaces. DDEV and wp-env
+// give each project a database of its own, so everything the dump does not recreate goes,
+// as `ddev import-db` does. A standalone project may share its database with other local
+// sites, so only the tables of the installation its wp-config.php describes go.
+func (a *App) planPullTables(ctx context.Context, projectRoot string, cfg Config, mode runtimeMode, dumpTables []string) tablePlan {
+	if len(dumpTables) == 0 {
+		return tablePlan{}
+	}
+	existing, err := a.localTableNames(ctx, projectRoot, cfg)
+	if err != nil {
+		a.UI.Warning("Could not list the local tables before the import; tables the pulled database does not contain are left in place.")
+		return tablePlan{}
+	}
+	owned := existing
+	if mode == modeStandalone {
+		prefix := a.localTablePrefix(ctx, projectRoot, cfg)
+		if prefix == "" {
+			a.UI.Warning("Could not read the local $table_prefix; tables the pulled database does not contain are left in place.")
+			return tablePlan{}
+		}
+		owned = installationTables(existing, prefix)
+	}
+	imported := foldSet(dumpTables)
+	plan := tablePlan{}
+	for _, table := range owned {
+		if !imported[strings.ToLower(table)] {
+			plan.drops = append(plan.drops, table)
+		}
+	}
+	sort.Strings(plan.drops)
+	return plan
+}
+
+// localInstallationTables lists the tables of the local installation, so a push leaves
+// other sites sharing the local database behind. Without a readable prefix or table list
+// it returns nothing, and the whole database is exported.
+func (a *App) localInstallationTables(ctx context.Context, projectRoot string, cfg Config) []string {
+	prefix := a.localTablePrefix(ctx, projectRoot, cfg)
+	if prefix == "" {
+		return nil
+	}
+	tables, err := a.localTableNames(ctx, projectRoot, cfg)
+	if err != nil {
+		return nil
+	}
+	return installationTables(tables, prefix)
+}
+
+// applyTablePlan runs after the import. Leftovers go first, because the previous
 // installation may hold the names the renamed tables need.
-func (a *App) applyClonePlan(ctx context.Context, projectRoot string, cfg Config, plan clonePlan) error {
+func (a *App) applyTablePlan(ctx context.Context, projectRoot string, cfg Config, plan tablePlan) error {
 	if len(plan.drops) > 0 {
 		title := fmt.Sprintf("Removing %d %s of the previous installation", len(plan.drops), pluralNoun(len(plan.drops), "table"))
 		if err := a.runStep(title, "Previous installation tables removed", func() error {

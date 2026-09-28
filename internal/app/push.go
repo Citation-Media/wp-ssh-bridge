@@ -226,7 +226,11 @@ func (a *App) ensureLocalDBDump(ctx context.Context, projectRoot string, cfg Con
 
 	gzipWriter := gzip.NewWriter(file)
 
-	name, args := localWPCommand(projectRoot, cfg, "db", "export", "-", "--add-drop-table")
+	exportArgs := []string{"db", "export", "-", "--add-drop-table"}
+	if tables := a.localInstallationTables(ctx, projectRoot, cfg); len(tables) > 0 {
+		exportArgs = append(exportArgs, "--tables="+strings.Join(tables, ","))
+	}
+	name, args := localWPCommand(projectRoot, cfg, exportArgs...)
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = gzipWriter
@@ -405,4 +409,28 @@ func readPushURLCache(projectRoot string, target RemoteTarget) string {
 		return ""
 	}
 	return trimTrailingSlash(values["url"])
+}
+
+// removeLocalDBDump deletes a dump an earlier run left in the scratch directory.
+func removeLocalDBDump(projectRoot string) error {
+	if err := os.Remove(filepath.Join(downloadsDir(projectRoot), "db.sql.gz")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// checkPushTablePrefix stops a push before anything changes on the target when the
+// target's wp-config.php uses another table prefix than the local database. The push
+// keeps the target's wp-config.php, so its WordPress would go on reading its old tables.
+// An unknown prefix on either side, such as a target without WordPress yet, skips it.
+func (a *App) checkPushTablePrefix(ctx context.Context, projectRoot string, cfg Config) error {
+	remote := parseTablePrefix(a.remoteWPOutputSilent(ctx, projectRoot, cfg.pushTarget(), "config", "get", "table_prefix"))
+	if remote == "" {
+		return nil
+	}
+	local := a.localTablePrefix(ctx, projectRoot, cfg)
+	if local == "" || local == remote {
+		return nil
+	}
+	return fmt.Errorf("fatal: the push target uses the table prefix %s, but the local database uses %s; the push keeps the target's wp-config.php, so its WordPress would not see the pushed tables. Set $table_prefix = '%s'; in the target's wp-config.php first, or push to a target that uses %s", remote, local, local, local)
 }

@@ -271,4 +271,4 @@ Table prefix: a pull rewrites the local `$table_prefix` in `wp-config.php` to th
 wp config get table_prefix --path=/path/to/wordpress
 ```
 
-Tables under the previous local prefix stay in the database and are only reported.
+Before that, a pull removes the local tables the pulled database does not contain: the whole project database in DDEV and wp-env, only the local installation's tables in standalone mode. Exports on both sides cover the installation's tables only. A push stops with `the push target uses the table prefix …` when the target's `$table_prefix` differs from the local one; set it in the target's `wp-config.php` first.

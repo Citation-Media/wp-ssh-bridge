@@ -471,6 +471,9 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 		if err := a.preflightPush(ctx, runtime.Root, adapter.Mode(), cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
+		if err := a.checkPushTablePrefix(ctx, runtime.Root, cfg); err != nil {
+			return err
+		}
 		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pushTarget(), false)
 		return a.dbPush(ctx, runtime.Root, cfg, useSCP)
 	case "files-push":
@@ -834,21 +837,22 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 		}
 	}
 	if shouldImportDB {
-		var plan clonePlan
-		var beforeImport func([]string) error
-		if opts.Clone {
-			beforeImport = func(dumpTables []string) (err error) {
+		// Plan before the import, while the database still shows what it held, and drop
+		// only after a successful import, so a failed one leaves the previous site intact.
+		var plan tablePlan
+		beforeImport := func(dumpTables []string) (err error) {
+			if opts.Clone {
 				plan, err = a.planCloneTables(ctx, root, cfg, previousTarget, dumpTables)
 				return err
 			}
+			plan = a.planPullTables(ctx, root, cfg, adapter.Mode(), dumpTables)
+			return nil
 		}
 		if err := a.importLocalDB(ctx, root, cfg, beforeImport); err != nil {
 			return err
 		}
-		if opts.Clone {
-			if err := a.applyClonePlan(ctx, root, cfg, plan); err != nil {
-				return err
-			}
+		if err := a.applyTablePlan(ctx, root, cfg, plan); err != nil {
+			return err
 		}
 	} else {
 		cfg.SkipSearchReplace = true
@@ -880,6 +884,11 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 
 	useSCP := a.needsScpTransport(ctx, root, cfg.pushTarget(), opts.ForceScpTransport)
 
+	if !opts.SkipDB {
+		if err := a.checkPushTablePrefix(ctx, root, cfg); err != nil {
+			return err
+		}
+	}
 	if !opts.SkipMaintenanceMode {
 		target := cfg.pushTarget()
 		enabled, err := a.enableRemoteMaintenanceMode(ctx, root, target)
@@ -892,6 +901,12 @@ func (a *App) runPushPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	if !opts.SkipDB {
+		// dbPush reuses a dump that DDEV exported for its native push. A direct push must
+		// export the current local database instead of a file an earlier run left there,
+		// such as the source dump of a pull --skip-import.
+		if err := removeLocalDBDump(root); err != nil {
+			return err
+		}
 		if err := a.dbPush(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}

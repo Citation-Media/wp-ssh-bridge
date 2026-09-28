@@ -32,6 +32,7 @@ case "$*" in
     exit 0 ;;
   *"SHOW FULL TABLES"*) printf '`+listing+`'; exit 0 ;;
   *"db query"*) exit 0 ;;
+  *"db export"*) exit 0 ;;
   *"plugin list"*) printf '[]\n'; exit 0 ;;
 esac
 exit 1
@@ -62,22 +63,37 @@ func readTestLog(t *testing.T, path string) string {
 	return string(log)
 }
 
-func TestRemoteTablePrefixCommandKeepsOnlyTheLastLine(t *testing.T) {
+func TestRemoteExportCommandsExportOnlyTheInstallation(t *testing.T) {
 	t.Parallel()
-	for name, wp := range map[string]string{
-		"notice before value": `printf 'Deprecated: something\n\nabc_\n'`,
-		"failing lookup":      `echo boom >&2; return 1`,
+	tables := `wp_options\tBASE TABLE\nwp_users\tBASE TABLE\nWP_2_Options\tBASE TABLE\nwp_shop_options\tBASE TABLE\nwp_shop_users\tBASE TABLE\nwp_myplugin_options\tBASE TABLE\nother_options\tBASE TABLE\n`
+	for name, test := range map[string]struct {
+		configGet string
+		query     string
+		want      string
+	}{
+		"notice before prefix": {
+			configGet: `printf 'Deprecated: something\n\nwp_\n'`,
+			query:     `printf '` + tables + `'`,
+			want:      tablePrefixMarker + "wp_\nexport /tmp/dump.sql --tables=wp_options,wp_users,WP_2_Options,wp_myplugin_options\n",
+		},
+		"failing prefix lookup": {
+			configGet: `echo boom >&2; return 1`,
+			query:     `printf '` + tables + `'`,
+			want:      tablePrefixMarker + "\nexport /tmp/dump.sql\n",
+		},
+		"failing table query": {
+			configGet: `echo wp_`,
+			query:     `return 1`,
+			want:      tablePrefixMarker + "wp_\nexport /tmp/dump.sql\n",
+		},
 	} {
-		output, err := exec.Command("sh", "-c", "set -eu; wp_ssh_wp() { "+wp+"; }; "+remoteTablePrefixCommand+" echo after").Output()
+		wp := `wp_ssh_wp() { case "$*" in *"config get"*) ` + test.configGet + ` ;; *"db query"*) ` + test.query + ` ;; *"db export"*) shift 3; echo "export $*" ;; esac; }`
+		output, err := exec.Command("sh", "-c", "set -eu; "+wp+"; "+remoteExportCommands("wp_ssh_wp", "/tmp/dump.sql")).Output()
 		if err != nil {
 			t.Fatalf("%s: command failed: %v", name, err)
 		}
-		want := tablePrefixMarker + "abc_\nafter\n"
-		if name == "failing lookup" {
-			want = tablePrefixMarker + "\nafter\n"
-		}
-		if string(output) != want {
-			t.Fatalf("%s: output = %q, want %q", name, output, want)
+		if string(output) != test.want {
+			t.Fatalf("%s: output = %q, want %q", name, output, test.want)
 		}
 	}
 }
@@ -359,5 +375,85 @@ func TestSanitizeWPConfigIsSilentWhenAlreadySanitized(t *testing.T) {
 	}
 	if count := strings.Count(stdout.String(), "Local wp-config.php sanitized"); count != 1 {
 		t.Fatalf("sanitize reported %d times, want once for the pre-import and post-pull runs:\n%s", count, stdout.String())
+	}
+}
+
+func TestPlanPullTablesDropsEverythingTheDumpDoesNotRecreateInDDEV(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "abc_", "")
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "abc_options", "abc_old_plugin", "other_app_data")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	plan := app.planPullTables(context.Background(), dir, Config{}, modeDDEV, []string{"abc_options", "abc_users"})
+	want := []string{"abc_old_plugin", "other_app_data", "wp_options", "wp_users"}
+	if strings.Join(plan.drops, ",") != strings.Join(want, ",") {
+		t.Fatalf("drops = %q, want %q", plan.drops, want)
+	}
+}
+
+func TestPlanPullTablesDropsOnlyTheLocalInstallationInStandalone(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "")
+	installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_old_plugin", "wp_shop_options", "wp_shop_users", "blog_options", "abc_options")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	plan := app.planPullTables(context.Background(), dir, Config{}, modeStandalone, []string{"abc_options", "abc_users"})
+	want := []string{"wp_old_plugin", "wp_options", "wp_users"}
+	if strings.Join(plan.drops, ",") != strings.Join(want, ",") {
+		t.Fatalf("drops = %q, want %q (other sites sharing the database must stay)", plan.drops, want)
+	}
+}
+
+func TestLocalDBDumpExportsOnlyTheLocalInstallation(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWPConfig(t, dir, "wp_", "")
+	logPath := installFakeTablesWP(t, dir, "wp_options", "wp_users", "wp_shop_options", "wp_shop_users", "blog_options")
+	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	if err := app.ensureLocalDBDump(context.Background(), dir, Config{}, filepath.Join(downloadsDir(dir), "db.sql.gz")); err != nil {
+		t.Fatalf("ensureLocalDBDump() error = %v", err)
+	}
+	if !strings.Contains(readTestLog(t, logPath), "db export - --add-drop-table --tables=wp_options,wp_users") {
+		t.Fatalf("push export should list only the local installation:\n%s", readTestLog(t, logPath))
+	}
+}
+
+func TestRemoveLocalDBDumpDropsALeftoverSourceDump(t *testing.T) {
+	dir := t.TempDir()
+	dump := filepath.Join(downloadsDir(dir), "db.sql.gz")
+	writeFile(t, dump, "source dump from pull --skip-import")
+	if err := removeLocalDBDump(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dump); !os.IsNotExist(err) {
+		t.Fatalf("a direct push must not reuse an earlier dump, got err: %v", err)
+	}
+	if err := removeLocalDBDump(dir); err != nil {
+		t.Fatalf("a missing dump is not an error: %v", err)
+	}
+}
+
+func TestCheckPushTablePrefix(t *testing.T) {
+	for name, test := range map[string]struct {
+		remote  string
+		wantErr bool
+	}{
+		"different prefix stops": {remote: "stg_", wantErr: true},
+		"same prefix continues":  {remote: "abc_"},
+		"no WordPress continues": {remote: ""},
+	} {
+		dir := t.TempDir()
+		writeTestWPConfig(t, dir, "abc_", "")
+		installFakeTablesWP(t, dir)
+		installFakeSSH(t, dir, "#!/bin/sh\nprintf '"+test.remote+"\\n'\n")
+		app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+		err := app.checkPushTablePrefix(context.Background(), dir, Config{PushUser: "deploy", PushHost: "staging.example.com", PushRemotePath: "/var/www/html"})
+		if test.wantErr != (err != nil) {
+			t.Fatalf("%s: checkPushTablePrefix() error = %v", name, err)
+		}
+		if test.wantErr && !strings.Contains(err.Error(), "uses the table prefix stg_, but the local database uses abc_") {
+			t.Fatalf("%s: unexpected message: %v", name, err)
+		}
 	}
 }

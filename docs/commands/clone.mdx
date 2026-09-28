@@ -17,7 +17,7 @@ The difference to [`pull`](/docs/commands/pull) is what it does *not* do. A clon
 | Development rewrites | Yes, including `WP_ENVIRONMENT_TYPE=development` | No |
 | URL search-replace | Yes | Yes, from your configured mappings |
 | Pre-existing target files | Mirrored with `--delete` | Kept, unless `--clean-target` |
-| Tables of a previous installation | Kept; reported after a prefix change | Removed after the import |
+| Tables of a previous installation | Removed after the import | Removed after the import |
 
 :::warning[Standalone only]
 `clone` refuses to run in a DDEV or wp-env project root. Both route WP-CLI through a container, so the import would land in the container database instead of the target you specified. Run it against a plain directory. For local onboarding, use [`pull`](/docs/commands/pull) instead.

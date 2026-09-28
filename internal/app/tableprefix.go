@@ -19,10 +19,29 @@ var (
 // WP-CLI success and download notices.
 const tablePrefixMarker = "wp-ssh-table-prefix="
 
-// remoteTablePrefixCommand prints the source prefix during the export, so the dump and
-// the recorded prefix come from one SSH session. Only the last line is the value, since
-// PHP may print notices to stdout first, and a failed lookup must not abort the export.
-const remoteTablePrefixCommand = "printf '" + tablePrefixMarker + "%s\\n' \"$({ wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true; } | tail -n 1)\";"
+// installationTablesAwk lists the base tables of the installation using the prefix p,
+// comma-separated for db export --tables. It applies the rule of installationTables on
+// the host: a longer prefix with its own options and users tables is another
+// installation sharing the database.
+const installationTablesAwk = `{ t = $1; if (t == "") next; n[++c] = t; s[tolower(t)] = 1 } END { lp = tolower(p); for (i = 1; i <= c; i++) { l = tolower(n[i]); if (length(l) > 7 && substr(l, length(l) - 6) == "options") { st = substr(l, 1, length(l) - 7); if (st != lp && index(st, lp) == 1 && ((st "users") in s)) o[st] = 1 } } sep = ""; for (i = 1; i <= c; i++) { l = tolower(n[i]); if (index(l, lp) != 1) continue; skip = 0; for (x in o) if (index(l, x) == 1) skip = 1; if (!skip) { printf "%s%s", sep, n[i]; sep = "," } } }`
+
+// remoteExportCommands exports only the source installation's tables and prints its
+// prefix in the same SSH session, so a database shared with other sites does not travel
+// along. Only the last line of the prefix lookup is the value, since PHP may print
+// notices to stdout first. Without a prefix or a table list the whole database is
+// exported, and a failed lookup never aborts the export.
+func remoteExportCommands(wpExport string, remoteDump string) string {
+	query := wpExport + ` --allow-root --skip-plugins --skip-themes db query "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" --skip-column-names`
+	export := wpExport + " --allow-root db export " + shellQuote(remoteDump)
+	return strings.Join([]string{
+		`wp_ssh_prefix=$({ wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true; } | tail -n 1);`,
+		`case "$wp_ssh_prefix" in ''|*[!A-Za-z0-9_]*) wp_ssh_prefix='';; esac;`,
+		`printf '` + tablePrefixMarker + `%s\n' "$wp_ssh_prefix";`,
+		`wp_ssh_tables='';`,
+		`if [ -n "$wp_ssh_prefix" ]; then wp_ssh_tables=$({ ` + query + ` 2>/dev/null || true; } | awk -F '\t' -v p="$wp_ssh_prefix" ` + shellQuote(installationTablesAwk) + `); fi;`,
+		`if [ -n "$wp_ssh_tables" ]; then ` + export + ` --tables="$wp_ssh_tables"; else ` + export + `; fi;`,
+	}, " ")
+}
 
 // pullSourcePrefixPath stores the pull source table prefix between db-pull and
 // post-pull, which DDEV runs as separate provider commands around its own import.
