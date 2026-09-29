@@ -7,6 +7,7 @@
 #   wpsb-seed target-config [prefix]  a new host: core and wp-config.php, empty database
 #   wpsb-seed target-site [prefix] a target that already runs WordPress
 #   wpsb-seed workstation          a standalone project with an older local site
+#   wpsb-seed plugin-stub <root> <slug>  a do-nothing plugin under that slug
 #
 # Test credentials only. The admin password exists so the sites are complete;
 # nothing serves them over HTTP.
@@ -19,6 +20,13 @@ wp() { command wp --quiet "$@"; }
 
 reset_database() {
     mysql -h db -u "$1" -p"$1" -e "DROP DATABASE IF EXISTS \`$1\`; CREATE DATABASE \`$1\`;"
+}
+
+# A do-nothing plugin that occupies a slug, such as one the CLI blocks.
+plugin_stub() { # wordpress-root slug
+    mkdir -p "$1/wp-content/plugins/$2"
+    printf '<?php\n/**\n * Plugin Name: %s (wp-ssh-bridge E2E stand-in)\n * Version: 0.0.0\n */\n' "$2" \
+        > "$1/wp-content/plugins/$2/$2.php"
 }
 
 empty_dir() {
@@ -43,9 +51,14 @@ seed_source() {
     wp post create --post_status=publish --post_title="Hello from the source" \
         --post_content='<a href="https://source.wpsb.test/about/">About the source</a>'
 
-    # A blocked plugin (removed on pull) and the page builder stand-ins.
-    cp -a "$FIXTURES/plugins/cloudflare" wp-content/plugins/
-    wp plugin activate cloudflare
+    # Blocked plugins, all active, next to an ordinary one; and the page
+    # builder stand-ins.
+    grep -v -e '^#' -e '^$' "$FIXTURES/blocked-plugins.txt" | while read -r slug; do
+        plugin_stub "$SITE" "$slug"
+        wp plugin activate "$slug"
+    done
+    cp -a "$FIXTURES/plugins/wpsb-e2e-keep" wp-content/plugins/
+    wp plugin activate wpsb-e2e-keep
     mkdir -p wp-content/mu-plugins
     cp "$FIXTURES"/mu-plugins/*.php wp-content/mu-plugins/
 
@@ -111,5 +124,6 @@ case "${1:-}" in
     target-config) seed_target_config "${2:-}" ;;
     target-site) seed_target_site "${2:-}" ;;
     workstation) seed_workstation ;;
-    *) printf 'usage: wpsb-seed source|target|target-config [prefix]|target-site [prefix]|workstation\n' >&2; exit 2 ;;
+    plugin-stub) plugin_stub "$2" "$3" ;;
+    *) printf 'usage: wpsb-seed source|target|target-config [prefix]|target-site [prefix]|workstation|plugin-stub <root> <slug>\n' >&2; exit 2 ;;
 esac
