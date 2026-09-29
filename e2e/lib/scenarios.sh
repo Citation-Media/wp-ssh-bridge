@@ -15,9 +15,12 @@ SUITE_DDEV="ddev-pull ddev-native-pull"
 SUITE_WPENV="wp-env-pull"
 SCENARIOS="$SUITE_CONTAINERS $SUITE_DDEV $SUITE_WPENV"
 
+# The blocked plugins the source runs; see e2e/host/fixtures/blocked-plugins.txt.
+BLOCKED_SAMPLE=$(grep -v -e '^#' -e '^$' "$E2E_DIR/host/fixtures/blocked-plugins.txt" | tr '\n' ' ')
+
 describe_scenario() {
     case "$1" in
-        pull) echo "standalone pull: prefix alignment, installation-only export, table cleanup, URLs, blocked plugin, uploads" ;;
+        pull) echo "standalone pull: prefix alignment, installation-only export, table cleanup, URLs, blocked plugins, uploads" ;;
         pull-db-reset-none) echo "db_reset none keeps the old local installation's tables" ;;
         pull-legacy) echo "pull through a host without rsync, with exec() disabled and legacy MariaDB names" ;;
         page-builders) echo "cache rebuild runs, a failing builder only warns, --skip-cache-rebuild skips it" ;;
@@ -27,9 +30,9 @@ describe_scenario() {
         clone-existing-site) echo "clone on the target replaces the previous installation, keeps neighbours" ;;
         clone-db-prefix) echo "clone --db-prefix renames tables, user_roles, and user meta keys" ;;
         clone-foreign-table) echo "clone stops before the import when it would overwrite a foreign table" ;;
-        ddev-pull) echo "direct pull into a DDEV project" ;;
-        ddev-native-pull) echo "ddev pull wp-ssh through the generated provider" ;;
-        wp-env-pull) echo "pull into a wp-env project" ;;
+        ddev-pull) echo "direct pull into a DDEV project: tables, URLs, blocked plugins, cache rebuild" ;;
+        ddev-native-pull) echo "ddev pull wp-ssh through the generated provider: the same checks" ;;
+        wp-env-pull) echo "pull into a wp-env project: tables, URLs, blocked plugins, cache rebuild" ;;
     esac
 }
 
@@ -138,12 +141,55 @@ url_rows() { # database prefix url
 
 pull_workstation() { cli workstation /work pull --silent "$@"; }
 
+# WP-CLI against the site of a machine or local project.
+site_wp() { # workstation|target|ddev|wp-env args...
+    local site=$1
+    shift
+    case "$site" in
+        workstation) in_machine workstation wp --path=/work/public "$@" ;;
+        target) in_machine target wp --path=/var/www/site "$@" ;;
+        ddev) (cd "$DDEV_DIR" && ddev wp "$@") ;;
+        wp-env) wpenv run cli wp "$@" ;;
+    esac
+}
+
+# Writes a do-nothing plugin under a slug into a WordPress root on this machine,
+# as `wpsb-seed plugin-stub` does in the containers.
+write_plugin_stub() { # wordpress-root slug
+    mkdir -p "$1/wp-content/plugins/$2"
+    printf '<?php\n/**\n * Plugin Name: %s (wp-ssh-bridge E2E stand-in)\n * Version: 0.0.0\n */\n' "$2" \
+        > "$1/wp-content/plugins/$2/$2.php"
+}
+
+# After a pull: no blocked plugin is installed or active, the ordinary plugin
+# arrived and stays active, and the one blocked plugin placed locally before
+# the pull was removed.
+expect_blocked_plugins_cleaned() { # site path-machine wordpress-root
+    local active slug
+    active=" $(site_wp "$1" plugin list --status=active --field=name 2> /dev/null | tr '\n' ' ') "
+    for slug in $BLOCKED_SAMPLE; do
+        if path_exists "$2" "$3/wp-content/plugins/$slug"; then
+            fail "blocked plugin $slug is gone" "$3/wp-content/plugins/$slug exists"
+        else
+            case "$active" in
+                *" $slug "*) fail "blocked plugin $slug is gone" "it is still active" ;;
+                *) pass "blocked plugin $slug is gone" ;;
+            esac
+        fi
+    done
+    case "$active" in
+        *" wpsb-e2e-keep "*) pass "ordinary plugin wpsb-e2e-keep is active" ;;
+        *) fail "ordinary plugin wpsb-e2e-keep is active" "active plugins:$active" ;;
+    esac
+    expect_output "Removed 1 local-only blocked plugin"
+}
+
 # --- scenarios ------------------------------------------------------------------
 
 scenario_pull() {
     seed source workstation
     # A blocked plugin already in the local copy, as after an older pull.
-    in_machine workstation cp -a /opt/wpsb-e2e/fixtures/plugins/cloudflare /work/public/wp-content/plugins/
+    in_machine workstation wpsb-seed plugin-stub /work/public updraftplus
 
     local status=0
     pull_workstation --clone-images || status=$?
@@ -160,8 +206,7 @@ scenario_pull() {
     expect_eq "home in the database is the local URL" "$(option workstation abc_ home)" https://workstation.wpsb.test
     expect_eq "no source URL left in options and posts" "$(url_rows workstation abc_ source.wpsb.test)" 0
 
-    expect_output "Removed 1 local-only blocked plugin"
-    expect_no_path workstation /work/public/wp-content/plugins/cloudflare
+    expect_blocked_plugins_cleaned workstation workstation /work/public
     expect_path workstation /work/public/wp-content/uploads/2026/09/wpsb-e2e.txt
     expect_path workstation /work/public/wp-content/mu-plugins/wpsb-e2e-page-builders.php
 }
@@ -275,7 +320,10 @@ scenario_clone_existing_site() {
     expect_eq "home stays the source URL" "$(option target abc_ home)" https://source.wpsb.test
     expect_eq "wp-config.php uses the source prefix" \
         "$(in_machine target wp --path=/var/www/site config get table_prefix)" abc_
-    expect_path target /var/www/site/wp-content/plugins/cloudflare
+    local slug
+    for slug in $BLOCKED_SAMPLE; do
+        expect_path target "/var/www/site/wp-content/plugins/$slug"
+    done
 }
 
 scenario_clone_db_prefix() {
@@ -315,7 +363,7 @@ expect_project_pull() { # project wordpress-root local-url
     expect_no_table "$1" wp_options
     expect_eq "home in the database is the project URL" "$(option "$1" abc_ home)" "$3"
     expect_eq "no source URL left in options and posts" "$(url_rows "$1" abc_ source.wpsb.test)" 0
-    expect_no_path local "$2/wp-content/plugins/cloudflare"
+    expect_blocked_plugins_cleaned "$1" local "$2"
     expect_path local "$2/wp-content/mu-plugins/wpsb-e2e-page-builders.php"
     expect_set "Elementor stand-in ran" "$(option "$1" abc_ wpsb_e2e_elementor_flushed)"
 }
@@ -324,6 +372,7 @@ scenario_ddev_pull() {
     seed source
     ddev_ensure
     ddev_reset
+    write_plugin_stub "$DDEV_DIR" wp-mail-smtp
     local status=0
     local_run "$DDEV_DIR" wp-ssh-bridge pull --silent -y || status=$?
     expect_ok "pull succeeds" "$status"
@@ -339,6 +388,7 @@ scenario_ddev_native_pull() {
     seed source
     ddev_ensure
     ddev_reset
+    write_plugin_stub "$DDEV_DIR" wp-mail-smtp
     local status=0
     local_run "$DDEV_DIR" wp-ssh-bridge provider install || status=$?
     local_run "$DDEV_DIR" ddev pull wp-ssh -y || status=$?
@@ -350,6 +400,7 @@ scenario_wp_env_pull() {
     seed source
     wpenv_ensure
     wpenv_reset
+    write_plugin_stub "$(wpenv_root)" cloudflare
     local status=0
     local_run "$WPENV_DIR" wp-ssh-bridge pull --silent || status=$?
     expect_ok "pull succeeds" "$status"

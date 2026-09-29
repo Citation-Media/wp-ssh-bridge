@@ -144,7 +144,11 @@ wpenv_ensure() {
 wpenv_reset() {
     local root
     root=$(wpenv_root)
-    rm -rf "$root/wp-content/mu-plugins" "$root/wp-content/plugins/cloudflare" "$root/wp-content/uploads/2026"
+    rm -rf "$root/wp-content/mu-plugins" "$root/wp-content/uploads/2026"
+    local slug
+    for slug in $BLOCKED_SAMPLE wpsb-e2e-keep; do
+        rm -rf "${root:?}/wp-content/plugins/$slug"
+    done
     wpenv reset development > /dev/null
     wpenv_sql "CREATE TABLE zz_local_only (id INT PRIMARY KEY)"
 }

@@ -30,7 +30,7 @@ After changing Go code, run `e2e/wpsb-e2e build`. The containers pick up the new
 
 | Machine | SSH alias | What it simulates |
 | --- | --- | --- |
-| `source` | `wpsb-source` (127.0.0.1:22221) | The production site. Prefix `abc_`. Its database also holds a second installation (`abc_shop_`) and another application (`other_app_sessions`). It has the Cloudflare plugin active and an mu-plugin that stands in for Elementor and Bricks. |
+| `source` | `wpsb-source` (127.0.0.1:22221) | The production site. Prefix `abc_`. Its database also holds a second installation (`abc_shop_`) and another application (`other_app_sessions`). It runs a sample of the blocked plugins, one per category (`host/fixtures/blocked-plugins.txt`), next to an ordinary one, all active, plus an mu-plugin that stands in for Elementor and Bricks. |
 | `legacy` | `wpsb-legacy` (127.0.0.1:22222) | The same site and database behind a hardened shared host: no rsync, a `php.ini` that disables `exec()` (Hostinger), and a MariaDB client without its `mariadb`/`mariadb-dump` names (Netcup). |
 | `target` | `wpsb-target` (127.0.0.1:22223) | The push target, and the new server a clone runs on. The login key is installed there as a client key too, so it can reach the source. |
 | `workstation` | — | A developer machine in standalone mode. `/work/.wp-ssh.yaml` points at the source and the target, and `/work/public` holds an older local copy under the `wp_` prefix. |
@@ -49,6 +49,12 @@ ssh wpsb-source 'wp --path=/var/www/site option get home'
 Or for a single command: `e2e/wpsb-e2e run wp-ssh-bridge pull --silent`.
 
 ## Scenarios
+
+Every pull scenario checks the blocked-plugin cleanup:
+
+- None of the sampled plugins arrives or stays active, and the ordinary plugin does.
+- Each runtime also gets one blocked plugin placed locally beforehand, so the removal of a local copy runs everywhere: UpdraftPlus in standalone, WP Mail SMTP in DDEV, Cloudflare in wp-env.
+- A clone keeps them all.
 
 Scenarios come in three suites:
 

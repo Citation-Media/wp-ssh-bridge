@@ -1,0 +1,9 @@
+# A sample of the CLI's default blocked plugins, one or two per category. The
+# source runs all of them as active stand-ins, and every pull scenario checks
+# that none arrives or stays active. The scenarios also place one of them in
+# each local project beforehand, so the removal of a local copy runs too.
+cloudflare
+wp-mail-smtp
+mainwp-child
+wp-smushit
+updraftplus
