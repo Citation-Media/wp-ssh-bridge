@@ -21,7 +21,7 @@ report_local_site() { # project (ddev or wp-env)
     printf 'table prefix:  %s\n' "$prefix"
     printf 'home (DB):     %s\n' "$(project_sql "$1" "SELECT option_value FROM ${prefix}options WHERE option_name = 'home'")"
     printf 'source URLs:   %s rows in options and posts\n' \
-        "$(project_sql "$1" "SELECT (SELECT COUNT(*) FROM ${prefix}options WHERE option_value LIKE '%source.wpsb.test%') + (SELECT COUNT(*) FROM ${prefix}posts WHERE post_content LIKE '%source.wpsb.test%' OR guid LIKE '%source.wpsb.test%')")"
+        "$(project_sql "$1" "SELECT (SELECT COUNT(*) FROM ${prefix}options WHERE option_value LIKE '%source.wpsb.test%') + (SELECT COUNT(*) FROM ${prefix}posts WHERE post_content LIKE '%source.wpsb.test%')")"
     printf 'tables:        %s\n' "$(project_sql "$1" "SHOW TABLES" | tr '\n' ' ')"
 }
 

@@ -131,9 +131,10 @@ expect_set() { # description value
 option() { # database prefix name
     sql "$1" "SELECT option_value FROM ${2}options WHERE option_name = '$3'"
 }
-# Counts rows anywhere in the site's posts and options that still carry a URL.
+# Counts the options and post contents that still carry a URL. GUIDs are left
+# out: the CLI skips them on purpose, as WordPress asks.
 url_rows() { # database prefix url
-    sql "$1" "SELECT (SELECT COUNT(*) FROM ${2}options WHERE option_value LIKE '%$3%') + (SELECT COUNT(*) FROM ${2}posts WHERE post_content LIKE '%$3%' OR guid LIKE '%$3%')"
+    sql "$1" "SELECT (SELECT COUNT(*) FROM ${2}options WHERE option_value LIKE '%$3%') + (SELECT COUNT(*) FROM ${2}posts WHERE post_content LIKE '%$3%')"
 }
 
 pull_workstation() { cli workstation /work pull --silent "$@"; }
