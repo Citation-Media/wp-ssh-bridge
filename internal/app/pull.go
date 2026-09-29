@@ -808,10 +808,10 @@ func (a *App) siteURLReplacementPairs(ctx context.Context, projectRoot string, c
 }
 
 // storedSiteURL returns the local home URL as the database stores it, falling back to
-// siteurl. `wp option get home` reports WP_HOME instead when wp-config.php defines it:
-// a standalone pull writes the local URL there before the replacement, and wp-env's
-// generated config always defines it, so the replacement would rewrite the local URL
-// to itself and leave the imported rows untouched. The option lookup is the fallback
+// siteurl. `wp option get home` reports WP_HOME instead when the config defines it: a
+// standalone pull writes the local URL there before the replacement, DDEV's
+// wp-config-ddev.php and wp-env's generated config always define it, so the replacement
+// would rewrite the local URL to itself and leave the imported rows untouched. The option lookup is the fallback
 // when the table cannot be queried.
 func (a *App) storedSiteURL(ctx context.Context, projectRoot string, cfg Config) string {
 	if prefix := a.localTablePrefix(ctx, projectRoot, cfg); prefix != "" {
