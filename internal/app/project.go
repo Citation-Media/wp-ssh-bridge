@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,8 +338,8 @@ func ddevDescribe(projectRoot string) (DDEVDescription, bool) {
 		return DDEVDescription{}, false
 	}
 
-	var desc DDEVDescription
-	if err := json.Unmarshal(output, &desc); err != nil {
+	desc, ok := parseDDEVDescribe(output)
+	if !ok {
 		ddevDescribeCache.Lock()
 		ddevDescribeCache.values[key] = ddevDescribeResult{}
 		ddevDescribeCache.Unlock()
@@ -348,6 +349,31 @@ func ddevDescribe(projectRoot string) (DDEVDescription, bool) {
 	ddevDescribeCache.values[key] = ddevDescribeResult{desc: desc, ok: true}
 	ddevDescribeCache.Unlock()
 	return desc, true
+}
+
+// parseDDEVDescribe reads `ddev describe -j`, which prints JSON log records and puts the
+// project description under "raw". Reading the record itself left every field empty, so
+// a direct pull never learned the project URL. Output without a "raw" record is read as
+// a bare description, as before.
+func parseDDEVDescribe(output []byte) (DDEVDescription, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	var first DDEVDescription
+	decoded := false
+	for {
+		var record struct {
+			DDEVDescription
+			Raw *DDEVDescription `json:"raw"`
+		}
+		if err := decoder.Decode(&record); err != nil {
+			return first, decoded
+		}
+		if record.Raw != nil {
+			return *record.Raw, true
+		}
+		if !decoded {
+			first, decoded = record.DDEVDescription, true
+		}
+	}
 }
 
 // readSimpleYAMLValue reads top-level scalar config values used by DDEV config.yaml.

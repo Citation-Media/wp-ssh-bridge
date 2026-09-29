@@ -1,9 +1,21 @@
 name: ci
 
+# The fast checks run first and in parallel. The end-to-end suites only start
+# when both pass and the change can affect the CLI or the e2e environment, so
+# a failing unit test or lint never spends runner minutes on Docker, DDEV, or
+# wp-env. See e2e/README.md.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -23,3 +35,116 @@ jobs:
 
       - name: Build
         run: go build ./cmd/wp-ssh-bridge
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            printf 'Not gofmt-formatted:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: shellcheck
+        run: shellcheck -x e2e/wpsb-e2e e2e/lib/*.sh e2e/host/seed e2e/host/entrypoint.sh
+
+  # Decides whether the end-to-end suites are worth running: only for changes
+  # to the CLI, its module, the e2e environment, or this workflow. A path
+  # filter on the workflow would skip the fast checks too.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.diff.outputs.e2e }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compare with the base
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -eu
+          run_e2e=true
+          # A manual run, a new branch, or a base that is gone runs everything.
+          if [ "$EVENT" != workflow_dispatch ] && [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ]; then
+            if files=$(git diff --name-only "$BASE" HEAD); then
+              printf '%s\n' "$files"
+              if ! printf '%s\n' "$files" | grep -qE '^(cmd/|internal/|e2e/|go\.mod$|go\.sum$|\.github/workflows/ci\.yml$)'; then
+                run_e2e=false
+              fi
+            fi
+          fi
+          echo "e2e=$run_e2e" >> "$GITHUB_OUTPUT"
+          echo "Run the end-to-end suites: $run_e2e"
+
+  # One job per suite, in parallel with each other. See e2e/README.md.
+  e2e:
+    name: e2e (${{ matrix.suite }})
+    needs: [test, lint, changes]
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [containers, ddev, wp-env]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Set up DDEV
+        if: matrix.suite == 'ddev'
+        uses: ddev/github-action-setup-ddev@v1
+        with:
+          autostart: false
+
+      - name: Set up Node
+        if: matrix.suite == 'wp-env'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Start the hosts
+        run: e2e/wpsb-e2e up
+
+      - name: Run the ${{ matrix.suite }} scenarios
+        run: e2e/wpsb-e2e test ${{ matrix.suite }}
+
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p e2e-logs
+          cp e2e/.state/last-run.log e2e-logs/ 2> /dev/null || true
+          docker compose -f e2e/compose.yaml logs --no-color > e2e-logs/compose.log 2>&1 || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.suite }}-logs
+          path: e2e-logs/
+          if-no-files-found: ignore
