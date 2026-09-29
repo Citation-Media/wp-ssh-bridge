@@ -8,7 +8,7 @@ The CLI only needs SSH, so there is no SFTP server. Each host runs `sshd` and gi
 
 - Docker with Compose v2
 - Go, to build the CLI under test
-- Optional: DDEV and Node.js/npm, for the local runtime projects
+- Optional: DDEV, or Node.js/npm, plus `jq`, for the local runtime projects
 
 ## Start
 
@@ -50,7 +50,15 @@ Or for a single command: `e2e/wpsb-e2e run wp-ssh-bridge pull --silent`.
 
 ## Scenarios
 
-`e2e/wpsb-e2e test --list` lists the scenarios, and `e2e/wpsb-e2e test pull clone-db-prefix` runs a selection. Each scenario reseeds the machines it uses. The output of the CLI goes to `e2e/.state/last-run.log`.
+Scenarios come in three suites:
+
+- `containers`: the default; needs only Docker
+- `ddev`: also starts a DDEV project on this machine
+- `wp-env`: also starts a wp-env project on this machine
+
+`e2e/wpsb-e2e test ddev` runs a suite, `e2e/wpsb-e2e test all` runs all three, and `e2e/wpsb-e2e test pull clone-db-prefix` runs single scenarios. `e2e/wpsb-e2e test --list` lists them all. Each scenario reseeds the machines it uses. The output of the CLI goes to `e2e/.state/last-run.log`.
+
+`.github/workflows/e2e.yml` runs each suite as its own job whenever Go code or `e2e/` changes. A runner has no global DDEV configuration or SSH agent that could get in the way. When a job fails, the log and the container output are uploaded as an artifact.
 
 Seed a machine by hand with `e2e/wpsb-e2e seed <machine>`. The machines are:
 
@@ -74,7 +82,7 @@ e2e/wpsb-e2e wp-env pull   # creates the project on port 8920 (WPSB_E2E_WPENV_PO
 e2e/wpsb-e2e ddev pull     # direct pull; `ddev native` runs `ddev pull wp-ssh` instead
 ```
 
-After each pull the command prints the imported table prefix and `home` twice: once as stored in the database and once as WordPress reports it. It also prints how many rows still carry the source URL.
+After each pull the command prints the imported table prefix, `home` as stored in the database, and how many rows still carry the source URL. The `ddev` and `wp-env` suites reset the projects first and assert on the same values.
 
 `e2e/wpsb-e2e ddev rm` and `e2e/wpsb-e2e wp-env rm` remove the projects.
 

@@ -44,8 +44,9 @@ Local runtimes
                      Pull into a wp-env project in e2e/.state/projects/wp-env
 
 Checks
-  test [scenario...]  Run the scenarios against the containers; list them
-                      with `test --list`
+  test [suite|scenario...]
+                     Run scenarios; suites are containers (the default),
+                     ddev, wp-env, and all. `test --list` lists them.
 EOF
 }
 
