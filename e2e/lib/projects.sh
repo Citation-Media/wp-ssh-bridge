@@ -64,9 +64,10 @@ ddev_ensure() {
 
 # Empties the project for the next pull: no WordPress files, and a database
 # holding only a table of something else, which the pull's default
-# db_reset (database) must remove.
+# db_reset (database) must remove. wp-config-ddev.php stays, as in any started
+# DDEV project: the sanitized wp-config.php takes its database settings from it.
 ddev_reset() {
-    find "$DDEV_DIR" -mindepth 1 -maxdepth 1 ! -name .ddev -exec rm -rf {} +
+    find "$DDEV_DIR" -mindepth 1 -maxdepth 1 ! -name .ddev ! -name wp-config-ddev.php -exec rm -rf {} +
     rm -rf "$DDEV_DIR/.ddev/.downloads"
     ddev_sql "DROP DATABASE IF EXISTS db; CREATE DATABASE db; CREATE TABLE db.zz_local_only (id INT PRIMARY KEY);"
 }
