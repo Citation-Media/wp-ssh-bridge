@@ -785,7 +785,7 @@ func (a *App) siteURLReplacementPairs(ctx context.Context, projectRoot string, c
 		pairs = append(pairs, replacementPairsForConfiguredDomain(configured)...)
 	}
 
-	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"))
+	oldURL := a.storedSiteURL(ctx, projectRoot, cfg)
 	newURL := localSiteURL(projectRoot, cfg)
 	if oldURL != "" && newURL != "" {
 		autoPairs := replacementPairsForURLs(oldURL, newURL)
@@ -805,6 +805,27 @@ func (a *App) siteURLReplacementPairs(ctx context.Context, projectRoot string, c
 		pairs = append(pairs, autoPairs...)
 	}
 	return uniqueReplacementPairs(pairs), true
+}
+
+// storedSiteURL returns the local home URL as the database stores it, falling back to
+// siteurl. `wp option get home` reports WP_HOME instead when wp-config.php defines it:
+// a standalone pull writes the local URL there before the replacement, and wp-env's
+// generated config always defines it, so the replacement would rewrite the local URL
+// to itself and leave the imported rows untouched. The option lookup is the fallback
+// when the table cannot be queried.
+func (a *App) storedSiteURL(ctx context.Context, projectRoot string, cfg Config) string {
+	if prefix := a.localTablePrefix(ctx, projectRoot, cfg); prefix != "" {
+		query := fmt.Sprintf("SELECT option_value FROM `%soptions` WHERE option_name IN ('home', 'siteurl') ORDER BY option_name = 'siteurl'", prefix)
+		output, err := a.wpOutputSilent(ctx, projectRoot, cfg, "db", "query", query, "--skip-column-names")
+		if err == nil {
+			for _, line := range strings.Split(output, "\n") {
+				if value := strings.TrimSpace(line); urlBase(value) != "" {
+					return value
+				}
+			}
+		}
+	}
+	return firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"))
 }
 
 // applySiteURLReplacements runs the replacements against the local database, per blog
