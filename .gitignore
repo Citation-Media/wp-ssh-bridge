@@ -20,3 +20,6 @@ packages/documentation/dist/
 .claude-plugin/
 apm_modules/
 apm.lock.yaml
+
+# End-to-end environment (e2e/wpsb-e2e)
+/e2e/.state/

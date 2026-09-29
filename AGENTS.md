@@ -10,6 +10,7 @@ It is a monorepo with two parts:
 | Documentation | `packages/documentation` | The Blume site that renders the MDX pages. An npm workspace. |
 | npm wrapper | `packages/npm` | The `@citation-media/wp-ssh-bridge` npm package. Ships no binary; downloads the release matching its own version. Its `bin` stays `wp-ssh-bridge`, so commands are unaffected by the scope. |
 | Documentation content | `docs/` | The MDX pages themselves, deliberately outside the site package. |
+| End-to-end environment | `e2e/` | Docker hosts reached over real SSH, plus local DDEV and wp-env projects. See `e2e/README.md`. |
 
 Writing documentation means editing `docs/`. Only changes to the site itself, its theme, the landing page, or `install.sh` touch `packages/documentation`.
 
@@ -161,3 +162,4 @@ After changing any of this, run a real build. Neither failure shows up in `npm i
 - Run `gofmt` on modified Go files.
 - Run `go test ./...` before finishing code changes. If the sandbox blocks the default Go cache, use a writable cache such as `GOCACHE=/private/tmp/wp-ssh-bridge-go-cache go test ./...`.
 - Do not commit generated local project files or machine-specific paths.
+- For changes to pull, push, or clone behavior, run `e2e/wpsb-e2e up` once and then `e2e/wpsb-e2e test`. The scenarios run against real SSH, WP-CLI, and MariaDB in Docker and assert on the databases, which unit tests with faked binaries cannot. Add a scenario to `e2e/lib/scenarios.sh` when a change has an observable outcome there.
