@@ -58,7 +58,7 @@ Scenarios come in three suites:
 
 `e2e/wpsb-e2e test ddev` runs a suite, `e2e/wpsb-e2e test all` runs all three, and `e2e/wpsb-e2e test pull clone-db-prefix` runs single scenarios. `e2e/wpsb-e2e test --list` lists them all. Each scenario reseeds the machines it uses. The output of the CLI goes to `e2e/.state/last-run.log`.
 
-`.github/workflows/e2e.yml` runs each suite as its own job whenever Go code or `e2e/` changes. A runner has no global DDEV configuration or SSH agent that could get in the way. When a job fails, the log and the container output are uploaded as an artifact.
+In CI, `.github/workflows/ci.yml` runs each suite as its own job, in parallel. The suites start only after the unit tests and lint have passed, and only when Go code, `go.mod`, `e2e/`, or the workflow itself changed. A runner has no global DDEV configuration or SSH agent that could get in the way. When a job fails, the log and the container output are uploaded as an artifact.
 
 Seed a machine by hand with `e2e/wpsb-e2e seed <machine>`. The machines are:
 
