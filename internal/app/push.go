@@ -177,7 +177,7 @@ func (a *App) postPush(ctx context.Context, projectRoot string, cfg Config) erro
 		pairs = append(pairs, replacementPairsForConfiguredDomain(configured)...)
 	}
 
-	oldURL := firstNonEmpty(a.wpOutput(ctx, projectRoot, cfg, "option", "get", "home"), a.wpOutput(ctx, projectRoot, cfg, "option", "get", "siteurl"), localSiteURL(projectRoot, cfg))
+	oldURL := firstNonEmpty(a.storedSiteURL(ctx, projectRoot, cfg), localSiteURL(projectRoot, cfg))
 	newURL := firstNonEmpty(cfg.PushURL, readPushURLCache(projectRoot, target))
 	if oldURL != "" && newURL != "" {
 		autoPairs := replacementPairsForURLs(oldURL, newURL)

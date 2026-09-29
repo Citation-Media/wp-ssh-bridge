@@ -985,3 +985,27 @@ func TestSanitizeWPConfigIsSilentWhenAlreadySanitized(t *testing.T) {
 		t.Fatalf("sanitize reported %d times, want once for the pre-import and post-pull runs:\n%s", count, stdout.String())
 	}
 }
+
+// A pull writes WP_HOME as the local URL before the replacement, and wp-env's config
+// always defines it, so `wp option get home` reports the local URL. The replacement must
+// start from the URL the imported rows hold.
+func TestPullReplacesTheStoredURLWhenWPHomeIsDefined(t *testing.T) {
+	dir := t.TempDir()
+	wpConfig := "<?php\n$table_prefix = 'abc_';\ndefine( 'WP_HOME', 'https://local.example.test' );\n/* That's all, stop editing! Happy publishing. */\n"
+	if err := os.WriteFile(filepath.Join(dir, "wp-config.php"), []byte(wpConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "wp.log")
+	installFakeCommand(t, dir, "wp", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\ncase \"$*\" in\n  *'config get table_prefix'*) printf 'abc_\\n' ;;\n  *'db query SELECT option_value FROM `abc_options`'*) printf 'https://source.example.com\\n' ;;\n  *'option get home'*|*'option get siteurl'*) printf 'https://local.example.test\\n' ;;\n  *'plugin list'*) printf '[]\\n' ;;\nesac\n")
+	stdout := bytes.Buffer{}
+	app := newApp(strings.NewReader(""), &stdout, &bytes.Buffer{})
+	cfg := Config{LocalWPPath: ".", LocalURL: "https://local.example.test"}
+	adapter := standaloneAdapter{runtime: runtimeContext{Mode: modeStandalone, Root: dir}}
+	if err := app.postPull(context.Background(), adapter, cfg, false); err != nil {
+		t.Fatalf("postPull() error = %v\n%s", err, stdout.String())
+	}
+	log, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(log), "search-replace https://source.example.com https://local.example.test") {
+		t.Fatalf("the replacement must start from the stored source URL:\n%s", log)
+	}
+}
