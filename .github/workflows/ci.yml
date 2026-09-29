@@ -23,3 +23,31 @@ jobs:
 
       - name: Build
         run: go build ./cmd/wp-ssh-bridge
+
+  # Checks that need no environment, next to the tests rather than after them.
+  # The end-to-end suites (containers, ddev, wp-env) run in parallel in e2e.yml.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            printf 'Not gofmt-formatted:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: shellcheck
+        run: shellcheck -x e2e/wpsb-e2e e2e/lib/*.sh e2e/host/seed e2e/host/entrypoint.sh
