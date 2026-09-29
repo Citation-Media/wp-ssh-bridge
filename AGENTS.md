@@ -30,7 +30,7 @@ Do not copy broad README narrative, release marketing, internal implementation d
 
 The skill lives in `skills/wp-ssh-bridge-cli/`, the agentskills.io layout, and reaches users three ways at once:
 
-- **As an APM package.** `apm.yml` at the repository root makes the repo installable with `apm install Citation-Media/wp-ssh-bridge`. Its `marketplace:` block is the source for the catalogue served at `/marketplace.json`; regenerate that file with `npm run skill:pack` after a version bump, which runs `apm pack` and copies the result into `packages/documentation/public/`.
+- **As an APM package.** `apm.yml` at the repository root makes the repo installable with `apm install Citation-Media/wp-ssh-bridge`. Its `marketplace:` block is the source for the catalogue served at `/marketplace.json`; regenerate that file with `npm run skill:pack` after a version bump, which runs `apm pack` and copies the result into `packages/documentation/public/`. Tag releases with a lightweight tag (`git tag vX.Y.Z <commit>`): `apm pack` records the SHA the tag points to, which for an annotated tag is the tag object instead of the release commit, so check the `sha` in the regenerated file.
 - **From the documentation site.** `ai.skills` in `packages/documentation/blume.config.ts` points at `skills/`, so every build bundles the directory into `/.well-known/agent-skills/` with a discovery index. `npx skills add https://wp-ssh-bridge.citation.media` reads that index, so the skill installs from the site without touching Git.
 - **As a plain archive**, unpacked by hand from the same URL.
 
