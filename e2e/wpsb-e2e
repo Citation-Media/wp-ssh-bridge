@@ -220,17 +220,14 @@ main() {
             ;;
         wp) cmd_wp "$@" ;;
         ddev)
-            # shellcheck source=lib/projects.sh
             source "$E2E_DIR/lib/projects.sh"
             cmd_ddev "$@"
             ;;
         wp-env)
-            # shellcheck source=lib/projects.sh
             source "$E2E_DIR/lib/projects.sh"
             cmd_wpenv "$@"
             ;;
         test)
-            # shellcheck source=lib/scenarios.sh
             source "$E2E_DIR/lib/scenarios.sh"
             cmd_test "$@"
             ;;

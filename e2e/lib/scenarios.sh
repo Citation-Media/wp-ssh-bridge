@@ -8,7 +8,6 @@
 # Scenarios come in suites: `containers` needs only Docker, `ddev` and
 # `wp-env` also start a local project of that runtime on this machine.
 
-# shellcheck source=lib/projects.sh
 source "$E2E_DIR/lib/projects.sh"
 
 SUITE_CONTAINERS="pull pull-db-reset-none pull-legacy page-builders push-new-host push-prefix-mismatch push-after-skip-import clone-existing-site clone-db-prefix clone-foreign-table"
