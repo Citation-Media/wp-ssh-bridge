@@ -1,0 +1,12 @@
+# The same aliases the host uses, so a clone on the target and a pull on the
+# workstation read exactly like the commands in the README.
+Host wpsb-source
+    HostName source
+Host wpsb-legacy
+    HostName legacy
+Host wpsb-target
+    HostName target
+Host wpsb-*
+    User site
+    HostKeyAlias wpsb-e2e
+    StrictHostKeyChecking yes

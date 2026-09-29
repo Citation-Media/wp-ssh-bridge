@@ -1,0 +1,89 @@
+# Simulated SSH hosts for end-to-end runs of wp-ssh-bridge. Drive it with
+# ./wpsb-e2e rather than docker compose directly: the script generates the
+# keys and binaries mounted below and seeds the sites. The seed script and
+# fixtures are mounted rather than copied, so edits apply without a rebuild.
+name: wpsb-e2e
+
+x-host: &host
+  build: ./host
+  image: wpsb-e2e-host:latest
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: mariadb:lts
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # The pull source: rsync, a current MariaDB client, an unrestricted PHP.
+  source:
+    <<: *host
+    hostname: source
+    ports:
+      - "127.0.0.1:${WPSB_E2E_SOURCE_PORT:-22221}:22"
+    volumes:
+      - ./.state/keys:/run/wpsb-e2e:ro
+      - ./.state/bin/linux:/opt/wpsb-e2e/bin:ro
+      - ./host/seed:/usr/local/bin/wpsb-seed:ro
+      - ./host/fixtures:/opt/wpsb-e2e/fixtures:ro
+      - source-site:/var/www/site
+
+  # The same site and database behind a hardened shared host: no rsync, a
+  # php.ini that disables exec() (Hostinger), and a MariaDB client without its
+  # mariadb/mariadb-dump names (Netcup).
+  legacy:
+    <<: *host
+    hostname: legacy
+    environment:
+      WPSB_NO_RSYNC: "1"
+      WPSB_DISABLE_FUNCTIONS: "exec,passthru,shell_exec,system,popen"
+      WPSB_MARIADB_LEGACY_NAMES: "1"
+    ports:
+      - "127.0.0.1:${WPSB_E2E_LEGACY_PORT:-22222}:22"
+    volumes:
+      - ./.state/keys:/run/wpsb-e2e:ro
+      - ./.state/bin/linux:/opt/wpsb-e2e/bin:ro
+      - ./host/seed:/usr/local/bin/wpsb-seed:ro
+      - ./host/fixtures:/opt/wpsb-e2e/fixtures:ro
+      - source-site:/var/www/site
+
+  # The push target, and the new server a clone runs on.
+  target:
+    <<: *host
+    hostname: target
+    ports:
+      - "127.0.0.1:${WPSB_E2E_TARGET_PORT:-22223}:22"
+    volumes:
+      - ./.state/keys:/run/wpsb-e2e:ro
+      - ./.state/bin/linux:/opt/wpsb-e2e/bin:ro
+      - ./host/seed:/usr/local/bin/wpsb-seed:ro
+      - ./host/fixtures:/opt/wpsb-e2e/fixtures:ro
+      - target-site:/var/www/site
+
+  # A developer machine in standalone mode, with its own local database.
+  workstation:
+    <<: *host
+    hostname: workstation
+    volumes:
+      - ./.state/keys:/run/wpsb-e2e:ro
+      - ./.state/bin/linux:/opt/wpsb-e2e/bin:ro
+      - ./host/seed:/usr/local/bin/wpsb-seed:ro
+      - ./host/fixtures:/opt/wpsb-e2e/fixtures:ro
+      - workstation:/work
+
+volumes:
+  db:
+  source-site:
+  target-site:
+  workstation:

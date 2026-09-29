@@ -264,3 +264,20 @@ func TestDefaultPluginListIncludesBackupMigrationSMTPMonitoringAndCDNPlugins(t *
 		}
 	}
 }
+
+func TestParseDDEVDescribeReadsTheRawRecord(t *testing.T) {
+	output := []byte(`{"level":"info","msg":"┌───┐","raw":{"name":"example","type":"wordpress","primary_url":"https://example.ddev.site","approot":"/work/example"},"time":"2026-09-29T08:00:00Z"}` + "\n")
+	desc, ok := parseDDEVDescribe(output)
+	if !ok || desc.PrimaryURL != "https://example.ddev.site" || desc.Type != "wordpress" || desc.Approot != "/work/example" {
+		t.Fatalf("parseDDEVDescribe() = %+v, %v", desc, ok)
+	}
+
+	bare, ok := parseDDEVDescribe([]byte(`{"type":"wordpress","app_root":"/work/bare"}`))
+	if !ok || bare.Type != "wordpress" || bare.AppRoot != "/work/bare" {
+		t.Fatalf("parseDDEVDescribe(bare) = %+v, %v", bare, ok)
+	}
+
+	if _, ok := parseDDEVDescribe([]byte("not json")); ok {
+		t.Fatal("parseDDEVDescribe must reject output that is not JSON")
+	}
+}

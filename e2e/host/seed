@@ -1,0 +1,115 @@
+#!/bin/sh
+# Resets a simulated machine to a known state. Runs inside a container as the
+# `site` user; `wpsb-e2e seed` calls it.
+#
+#   wpsb-seed source               the pull source (shared by source and legacy)
+#   wpsb-seed target               an empty push or clone target
+#   wpsb-seed target-config [prefix]  a new host: core and wp-config.php, empty database
+#   wpsb-seed target-site [prefix] a target that already runs WordPress
+#   wpsb-seed workstation          a standalone project with an older local site
+#
+# Test credentials only. The admin password exists so the sites are complete;
+# nothing serves them over HTTP.
+set -eu
+
+FIXTURES=/opt/wpsb-e2e/fixtures
+SITE=/var/www/site
+
+wp() { command wp --quiet "$@"; }
+
+reset_database() {
+    mysql -h db -u "$1" -p"$1" -e "DROP DATABASE IF EXISTS \`$1\`; CREATE DATABASE \`$1\`;"
+}
+
+empty_dir() {
+    mkdir -p "$1"
+    find "$1" -mindepth 1 -delete
+}
+
+install_site() { # path db prefix url title
+    empty_dir "$1"
+    cp -a /usr/src/wordpress/. "$1/"
+    wp --path="$1" config create --dbname="$2" --dbuser="$2" --dbpass="$2" --dbhost=db --dbprefix="$3" --skip-check
+    reset_database "$2"
+    wp --path="$1" core install --url="$4" --title="$5" --admin_user=admin \
+        --admin_password=wpsb-e2e-admin --admin_email="admin@example.test" --skip-email
+}
+
+seed_source() {
+    install_site "$SITE" source abc_ https://source.wpsb.test "WPSB E2E Source"
+    cd "$SITE"
+
+    # Content carrying the source URL, for the search-replace check.
+    wp post create --post_status=publish --post_title="Hello from the source" \
+        --post_content='<a href="https://source.wpsb.test/about/">About the source</a>'
+
+    # A blocked plugin (removed on pull) and the page builder stand-ins.
+    cp -a "$FIXTURES/plugins/cloudflare" wp-content/plugins/
+    wp plugin activate cloudflare
+    mkdir -p wp-content/mu-plugins
+    cp "$FIXTURES"/mu-plugins/*.php wp-content/mu-plugins/
+
+    # An upload, pulled only with --clone-images.
+    mkdir -p wp-content/uploads/2026/09
+    printf 'uploaded on the source\n' > wp-content/uploads/2026/09/wpsb-e2e.txt
+
+    # A plugin table of this installation: exported.
+    wp db query "CREATE TABLE abc_wpsb_log (id INT PRIMARY KEY, note VARCHAR(64)); INSERT INTO abc_wpsb_log VALUES (1, 'belongs to the source site');"
+
+    # Neighbours sharing the database: a second installation whose prefix
+    # starts with the same characters, and another application. Neither may
+    # leave the source.
+    wp db query "CREATE TABLE abc_shop_options LIKE abc_options; CREATE TABLE abc_shop_users LIKE abc_users; CREATE TABLE abc_shop_posts LIKE abc_posts; INSERT INTO abc_shop_options (option_name, option_value, autoload) VALUES ('siteurl', 'https://shop.wpsb.test', 'yes'), ('home', 'https://shop.wpsb.test', 'yes');"
+    wp db query "CREATE TABLE other_app_sessions (id INT PRIMARY KEY, token VARCHAR(64)); INSERT INTO other_app_sessions VALUES (1, 'not a WordPress table');"
+}
+
+seed_target() {
+    empty_dir "$SITE"
+    reset_database target
+}
+
+# A new host prepared as docs/migrate-a-site.mdx asks: WordPress core and a
+# wp-config.php, with an empty database and no installed site.
+seed_target_config() {
+    empty_dir "$SITE"
+    reset_database target
+    cp -a /usr/src/wordpress/. "$SITE/"
+    cp /usr/src/wordpress/wp-config-sample.php "$SITE/wp-config.php"
+    wp --path="$SITE" config set DB_NAME target
+    wp --path="$SITE" config set DB_USER target
+    wp --path="$SITE" config set DB_PASSWORD target
+    wp --path="$SITE" config set DB_HOST db
+    wp --path="$SITE" config set table_prefix "${1:-abc_}" --type=variable
+    wp --path="$SITE" config shuffle-salts
+}
+
+seed_target_site() {
+    install_site "$SITE" target "${1:-wp_}" https://target.wpsb.test "WPSB E2E Previous Target"
+    wp --path="$SITE" db query "CREATE TABLE other_app_sessions (id INT PRIMARY KEY, token VARCHAR(64)); INSERT INTO other_app_sessions VALUES (1, 'shares the target database');"
+}
+
+seed_workstation() {
+    empty_dir /work
+    # An older local copy under the default prefix, and a table of something
+    # else in the same database.
+    install_site /work/public workstation wp_ https://workstation.wpsb.test "WPSB E2E Old Local Copy"
+    wp --path=/work/public db query "CREATE TABLE unrelated_local (id INT PRIMARY KEY);"
+    cat > /work/.wp-ssh.yaml <<'YAML'
+pull_destination: wpsb-source
+pull_remote_path: /var/www/site
+local_wp_path: public
+local_url: https://workstation.wpsb.test
+push_destination: wpsb-target
+push_remote_path: /var/www/site
+push_url: https://target.wpsb.test
+YAML
+}
+
+case "${1:-}" in
+    source) seed_source ;;
+    target) seed_target ;;
+    target-config) seed_target_config "${2:-}" ;;
+    target-site) seed_target_site "${2:-}" ;;
+    workstation) seed_workstation ;;
+    *) printf 'usage: wpsb-seed source|target|target-config [prefix]|target-site [prefix]|workstation\n' >&2; exit 2 ;;
+esac
