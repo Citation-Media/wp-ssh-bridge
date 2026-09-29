@@ -88,7 +88,7 @@ ddev pull wp-ssh -y            # DDEV
 wp-ssh-bridge pull --silent    # wp-env and standalone
 ```
 
-5. Verify with the WP-CLI that matches the runtime: `ddev wp option get home`, `npx wp-env run cli wp option get home`, or `wp option get home --path=<local wp path>`. Then `... wp plugin list`.
+5. Verify with the WP-CLI that matches the runtime (`ddev wp`, `npx wp-env run cli wp`, or `wp --path=<local wp path>`): `option get home`, then `search-replace <production-host> x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only`, which must report `0 replacements to be made`, then `plugin list`. Do not rely on `option get home` alone: it reports `WP_HOME`, which DDEV, wp-env, and a standalone pull define, so it looks local even when the content still points at production.
 
 6. The config contains no secrets unless `clone_db_password` is set, so commit it. Keep paths in it relative so it works for every checkout.
 
@@ -128,6 +128,7 @@ Read the most specific workflow reference first. Read only one reference unless 
 - `MariaDB client compatibility enabled` is expected on hosts that report MariaDB but only ship `mysql`/`mysqldump` (seen on Netcup/Plesk). An error about a missing `mariadb-dump` means the CLI needs updating or the host lacks `mysqldump` as well.
 - Hosts that disable PHP `exec()` for the command line (verified on Hostinger) are handled automatically; preflight reports `PHP function compatibility enabled (exec allowed for WP-CLI db export only)`. A fatal error containing `does not allow re-enabling them` means the host blocks even that: ask the provider to allow the named functions for PHP CLI. `PHP function check failed ... could not determine the PHP that runs WP-CLI` means `wp cli info` fails on the host; have the user run it there. A silent exit 255 during export means the CLI needs updating. Details: https://wp-ssh-bridge.citation.media/docs/troubleshooting/disabled-php-functions.
 - A direct run authenticates once per SSH login; repeated agent approval prompts within one run mean the CLI needs updating. Native DDEV provider steps authenticate once each.
+- Production URLs left in the database after a pull (the dry run above finds the host) come from a CLI before 0.9.0, which skipped the rewrite whenever `WP_HOME` was defined, or from `skip_search_replace`. Update the CLI and pull again; check targets pushed from such a copy the same way.
 - A pull mirrors the source with rsync `--delete`. Log files in the WordPress tree are not copied and are removed locally; `.ddev/`, `.git/`, config files, and uploads (when not cloned) stay.
 - Without rsync on either side, files fall back to tar over SSH (messages say `scp/tar`), which cannot remove stale files and warns `scp/tar transport: stale local files not removed (no --delete equivalent)`. `--force-scp` forces it. The database dump always streams over SSH.
 - Do not instruct the AI to run lower-level provider callbacks, hand-written rsync commands, direct WP-CLI repair commands, or manual file edits as the normal DDEV workflow. If DDEV setup or pull fails, show the exact error, ask the user to confirm debugging, and suggest the smallest next debugging step.

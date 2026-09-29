@@ -162,6 +162,7 @@ This guide takes you from nothing to a working local copy of a live WordPress si
 
         ```bash
         wp option get home
+        wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
         wp plugin list
         ```
 
@@ -170,6 +171,7 @@ This guide takes you from nothing to a working local copy of a live WordPress si
 
         ```bash
         ddev wp option get home
+        ddev wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
         ddev wp plugin list
         ```
 
@@ -178,13 +180,14 @@ This guide takes you from nothing to a working local copy of a live WordPress si
 
         ```bash
         npx wp-env run cli wp option get home
+        npx wp-env run cli wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
         npx wp-env run cli wp plugin list
         ```
 
       </Tab>
     </Tabs>
 
-    The home URL should be your local URL, and production-only plugins such as caching or security tools should be gone from the list.
+    Replace `example.com` with your production host. The home URL should be your local URL, the dry run should report `0 replacements to be made`, and production-only plugins such as caching or security tools should be gone from the list. The dry run reads the database itself: `option get home` reports `WP_HOME` when the config defines it, which DDEV and wp-env always do, so it can look local while the content still links to production.
 
   </Step>
 </Steps>

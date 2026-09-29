@@ -208,6 +208,7 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
 
     ```bash
     wp option get home
+    wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
     wp plugin list
     ```
 
@@ -216,6 +217,7 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
 
     ```bash
     ddev wp option get home
+    ddev wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
     ddev wp plugin list
     ```
 
@@ -224,13 +226,14 @@ wp-ssh-bridge pull --silent --skip-files --skip-import
 
     ```bash
     npx wp-env run cli wp option get home
+    npx wp-env run cli wp search-replace example.com x --dry-run --all-tables-with-prefix --skip-columns=guid --report-changed-only
     npx wp-env run cli wp plugin list
     ```
 
   </Tab>
 </Tabs>
 
-The home URL should be local, and production-only plugins should be gone.
+Replace `example.com` with your production host. The home URL should be local, the dry run should report `0 replacements to be made`, and production-only plugins should be gone. The dry run checks the database itself, because `option get home` reports `WP_HOME` when the config defines it.
 
 ## When something fails
 
@@ -241,6 +244,7 @@ The home URL should be local, and production-only plugins should be gone.
 | `mariadb-dump: command not found` | The host ships only the legacy MySQL client names, and the installed binary predates the workaround. | [Update the CLI](/docs/installation#updating). If preflight prints the compatibility line and the export still fails, the host lacks `mysqldump` as well. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
 | Local files not writable | Ownership or permissions on the local WordPress directory. | Fix them, then run again. The error names the exact path. |
 | WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. | Set the source prefix where your config defines it. |
+| The dry run still finds the production host | The copy was pulled with a version before 0.9.0, which left the production URLs in the database when `WP_HOME` was defined, or with `skip_search_replace`. | [Update the CLI](/docs/installation#updating) and pull again. Check targets pushed from such a copy the same way. |
 | Tables the source no longer has remain after a pull | `db_reset` is `none`, or the CLI warned that it could not list the local tables or read the local `$table_prefix`, and left them in place. | Unset `db_reset` or choose `installation` or `database`, fix what the warning names, and pull again. |
 | `scp/tar transport: stale local files not removed (no --delete equivalent)` | rsync is missing on one side, so the tar-over-SSH fallback is in use. | Install rsync on both machines, or accept that files removed on the source stay behind locally. |
 
