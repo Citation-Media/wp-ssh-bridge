@@ -2,7 +2,7 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
-## [0.9.0] - 2026-09-28
+## [0.9.0] - 2026-09-29
 
 ### Added
 
@@ -38,6 +38,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - A pull now removes local tables the pulled database does not contain. In DDEV and wp-env that is every such table in the project database, in standalone mode every such table of the local installation. Keep local-only tables with `db_reset: none`, `WP_SSH_DB_RESET=none`, or `--db-reset none` before the next pull.
 - A clone into a target that already runs WordPress removes that installation's tables the dump does not contain. Back up the target database first, or set `db_reset: none`.
+- Local copies pulled with an earlier version may still hold the production URL in the database, and so may targets pushed from them. `wp db search <production-host>` finds them; pull again to rewrite a local copy.
 - Older CLI versions stop with an unknown-key error on a config that uses `db_reset` or `skip_cache_rebuild`. Update the CLI in every checkout, including the project-local binary DDEV calls, before committing such a config.
 
 ## [0.8.1] - 2026-09-25
