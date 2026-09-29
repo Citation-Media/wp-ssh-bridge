@@ -2,7 +2,7 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-29
 
 ### Added
 
@@ -33,6 +33,13 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 - Stop a clone before the import when `wp-config.php` resolves to another database than the target credentials, for example because an included file defines the database constants first.
 - Stop a push into a target without an installed site before anything is uploaded when no target URL is known. The target URL is read from the site the import replaces, so a first push into an empty directory found none, imported anyway, and left the local URLs in the target database. The push now asks for `push_url`, `WP_SSH_PUSH_URL`, or `--push-url` unless a push domain mapping or `--skip-search-replace` covers the URLs.
 - Keep a cloned site's URLs unless a target is named. A clone fell back to a development host and wrote `WP_HOME` and `WP_SITEURL` as `https://localhost` into the target's `wp-config.php`, also with a domain mapping without a protocol, so the migrated site redirected to `localhost`. Now a clone without `local_url`, `WP_SSH_PULL_LOCAL_URL`, `--local-url`, or a pull domain mapping keeps the source URL and says so. With a target, the database is rewritten and the URL constants get the same replacements, but only where the copied `wp-config.php` already defines them, so a site that keeps its URLs in the database gets no new constants and a `WP_SITEURL` in a subdirectory keeps its path.
+
+### Upgrading
+
+- A pull now removes local tables the pulled database does not contain. In DDEV and wp-env that is every such table in the project database, in standalone mode every such table of the local installation. Keep local-only tables with `db_reset: none`, `WP_SSH_DB_RESET=none`, or `--db-reset none` before the next pull.
+- A clone into a target that already runs WordPress removes that installation's tables the dump does not contain. Back up the target database first, or set `db_reset: none`.
+- Local copies pulled with an earlier version may still hold the production URL in the database, and so may targets pushed from them. `wp db search <production-host>` finds them; pull again to rewrite a local copy.
+- Older CLI versions stop with an unknown-key error on a config that uses `db_reset` or `skip_cache_rebuild`. Update the CLI in every checkout, including the project-local binary DDEV calls, before committing such a config.
 
 ## [0.8.1] - 2026-09-25
 
@@ -114,6 +121,7 @@ All notable changes to `wp-ssh-bridge` are documented in this file.
 
 - Prevent protocol-less multisite domain mappings from rewriting a newly generated local hostname a second time. A mapping such as `acme-group.de` to `acme-group.de.ddev.site` now updates bare domains and complete URLs exactly once ([#7]).
 
+[0.9.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Citation-Media/wp-ssh-bridge/compare/v0.6.0...v0.7.0
