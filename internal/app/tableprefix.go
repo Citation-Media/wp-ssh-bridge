@@ -25,15 +25,23 @@ const tablePrefixMarker = "wp-ssh-table-prefix="
 // notices to stdout first. Without a prefix or a table list the whole database is
 // exported, and a failed lookup never aborts the export.
 func remoteExportCommands(wpExport string, remoteDump string) string {
-	query := wpExport + ` --allow-root --skip-plugins --skip-themes db query "` + baseTablesQuery + `" --skip-column-names`
 	export := wpExport + " --allow-root db export " + shellQuote(remoteDump)
+	return strings.Join([]string{
+		remoteTableSelectionCommands(wpExport),
+		`if [ -n "$wp_ssh_tables" ]; then ` + export + ` --tables="$wp_ssh_tables"; else ` + export + `; fi;`,
+	}, " ")
+}
+
+// remoteTableSelectionCommands sets $wp_ssh_prefix and $wp_ssh_tables to the source
+// installation's prefix and tables, and prints the prefix for recordPullSourceTablePrefix.
+func remoteTableSelectionCommands(wpExport string) string {
+	query := wpExport + ` --allow-root --skip-plugins --skip-themes db query "` + baseTablesQuery + `" --skip-column-names`
 	return strings.Join([]string{
 		`wp_ssh_prefix=$({ wp_ssh_wp --allow-root --skip-plugins --skip-themes config get table_prefix 2>/dev/null || true; } | tail -n 1);`,
 		`case "$wp_ssh_prefix" in ''|*[!A-Za-z0-9_]*) wp_ssh_prefix='';; esac;`,
 		`printf '` + tablePrefixMarker + `%s\n' "$wp_ssh_prefix";`,
 		`wp_ssh_tables='';`,
 		`if [ -n "$wp_ssh_prefix" ]; then wp_ssh_tables=$({ ` + query + ` 2>/dev/null || true; } | awk -F '\t' -v p="$wp_ssh_prefix" ` + shellQuote(installationTablesAwk) + `); fi;`,
-		`if [ -n "$wp_ssh_tables" ]; then ` + export + ` --tables="$wp_ssh_tables"; else ` + export + `; fi;`,
 	}, " ")
 }
 

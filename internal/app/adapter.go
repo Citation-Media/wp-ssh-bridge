@@ -59,7 +59,9 @@ func (adapter standaloneAdapter) PreparePush(app *App, cfg Config, opts configOp
 // persistPromptedConfig saves what the user confirmed at the prompts, so the next run
 // does not ask again. A --silent run prompted nothing, so it keeps flag and environment
 // values one-shot, and the clone database password never moves from the environment or
-// a flag into the config file, which is meant to be committed.
+// a flag into the config file, which is meant to be committed. Nor do the two settings that
+// lift a pseudonymization safeguard: a clone sets one by itself, and using one once must not
+// lift it for good. Those only change by editing the file.
 func persistPromptedConfig(runtime runtimeContext, opts configOptions, cfg Config) error {
 	if opts.Silent {
 		return nil
@@ -69,6 +71,8 @@ func persistPromptedConfig(runtime runtimeContext, opts configOptions, cfg Confi
 		return err
 	}
 	cfg.CloneDBPassword = saved.CloneDBPassword
+	cfg.SkipPseudonymize = saved.SkipPseudonymize
+	cfg.AllowPseudonymizedPush = saved.AllowPseudonymizedPush
 	return writeConfigForRuntime(runtime, opts.ConfigFile, cfg)
 }
 

@@ -145,11 +145,13 @@ seed() {
     for machine in "${machines[@]}"; do
         case "$machine" in
             source) log "Seeding the source (shared with legacy)"; in_machine source wpsb-seed source ;;
+            source-shop) log "Seeding the source with WooCommerce, EDD, and customers (${SEED_ORDERS:-both})"; in_machine source wpsb-seed source-shop "${SEED_ORDERS:-both}" ;;
+            source-multisite) log "Seeding the source as a multisite network"; in_machine source wpsb-seed source-multisite ;;
             target) log "Emptying the target"; in_machine target wpsb-seed target ;;
             target-config) log "Preparing the target as a new host (core and wp-config.php, no site)"; in_machine target wpsb-seed target-config "${SEED_PREFIX:-abc_}" ;;
             target-site) log "Installing a site on the target"; in_machine target wpsb-seed target-site "${SEED_PREFIX:-wp_}" ;;
             workstation) log "Seeding the workstation"; in_machine workstation wpsb-seed workstation ;;
-            *) die "unknown machine: $machine (source, target, target-config, target-site, workstation)" ;;
+            *) die "unknown machine: $machine (source, source-shop, source-multisite, target, target-config, target-site, workstation)" ;;
         esac
     done
 }

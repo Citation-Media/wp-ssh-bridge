@@ -6,7 +6,7 @@ FROM php:8.3-cli-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        openssh-server openssh-client rsync mariadb-client gzip tar less \
+        openssh-server openssh-client rsync mariadb-client gzip tar less unzip \
     && rm -rf /var/lib/apt/lists/* \
     && docker-php-ext-install mysqli \
     && printf 'memory_limit = 512M\n' > /usr/local/etc/php/conf.d/wpsb-e2e.ini
@@ -20,14 +20,26 @@ RUN curl -fsSL -o /usr/local/bin/wp \
 ARG WP_VERSION=latest
 RUN wp core download --allow-root --path=/usr/src/wordpress --version="${WP_VERSION}"
 
+# Real shop plugins for the pseudonymization scenarios, pinned so a new release
+# with a changed schema shows up as a deliberate update. Baked in like core.
+ARG WOOCOMMERCE_VERSION=11.2.1
+ARG EDD_VERSION=3.7.3
+RUN mkdir -p /usr/src/wp-plugins \
+    && cd /usr/src/wp-plugins \
+    && curl -fsSL -o wc.zip "https://downloads.wordpress.org/plugin/woocommerce.${WOOCOMMERCE_VERSION}.zip" \
+    && curl -fsSL -o edd.zip "https://downloads.wordpress.org/plugin/easy-digital-downloads.${EDD_VERSION}.zip" \
+    && unzip -q wc.zip && unzip -q edd.zip && rm wc.zip edd.zip
+
 # The SSH login. Hosts rarely hand out root, and the CLI must not depend on it.
 RUN useradd --create-home --uid 1000 --shell /bin/bash site \
     && install -d -o site -g site /var/www/site /work \
     && mkdir -p /run/sshd \
     && rm -f /etc/ssh/ssh_host_*
 
-COPY sshd_config /etc/ssh/sshd_config.d/wpsb-e2e.conf
-COPY ssh_config /etc/ssh/ssh_config.d/wpsb-e2e.conf
+# ssh rejects a group-writable config, and COPY keeps the mode of the checkout,
+# which is 664 under a umask of 002.
+COPY --chmod=644 sshd_config /etc/ssh/sshd_config.d/wpsb-e2e.conf
+COPY --chmod=644 ssh_config /etc/ssh/ssh_config.d/wpsb-e2e.conf
 COPY entrypoint.sh /usr/local/bin/wpsb-entrypoint
 
 EXPOSE 22

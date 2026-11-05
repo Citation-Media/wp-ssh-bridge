@@ -41,6 +41,15 @@ type Config struct {
 	CloneDBPassword        string
 	CloneDBPrefix          string
 	Integration            string
+	// SkipPseudonymize is what the pipeline reads: a pull sets it from skip_pseudonymize, and
+	// a clone always, since pseudonymization only applies to a pull.
+	SkipPseudonymize        bool
+	PseudonymizeEmailDomain string
+	PseudonymizeKeepUserIDs string
+	PseudonymizeKeepFields  string
+	PseudonymizeKeepText    string
+	PseudonymizeRules       []PseudonymizeRule
+	AllowPseudonymizedPush  bool
 }
 
 // DomainReplacement stores an old-to-new WordPress URL/domain replacement pair.
@@ -130,6 +139,14 @@ func readConfigFile(path string) (Config, error) {
 			}
 			index = nextIndex - 1
 			continue
+		case "pseudonymize_rules":
+			rules, nextIndex, err := parsePseudonymizeRules(lines, index+1, path)
+			if err != nil {
+				return cfg, err
+			}
+			cfg.PseudonymizeRules = rules
+			index = nextIndex - 1
+			continue
 		}
 
 		if strings.HasPrefix(value, "#") {
@@ -195,6 +212,18 @@ func readConfigFile(path string) (Config, error) {
 			cfg.CloneDBPassword = value
 		case "clone_db_prefix":
 			cfg.CloneDBPrefix = value
+		case "skip_pseudonymize":
+			cfg.SkipPseudonymize = parseBool(value)
+		case "pseudonymize_email_domain":
+			cfg.PseudonymizeEmailDomain = value
+		case "pseudonymize_keep_user_ids":
+			cfg.PseudonymizeKeepUserIDs = value
+		case "pseudonymize_keep_fields":
+			cfg.PseudonymizeKeepFields = value
+		case "pseudonymize_keep_text":
+			cfg.PseudonymizeKeepText = value
+		case "allow_pseudonymized_push":
+			cfg.AllowPseudonymizedPush = parseBool(value)
 		default:
 			return cfg, fmt.Errorf("unknown config key %q in %s", key, path)
 		}
@@ -257,6 +286,54 @@ func parseDomainReplacements(lines []string, start int, source string) ([]Domain
 		return nil, index, err
 	}
 	return replacements, index, nil
+}
+
+// parsePseudonymizeRules reads project rules for tables no adapter knows:
+//
+//	pseudonymize_rules:
+//	  - table: crm_contacts
+//	    columns: "email=email,full_name=full_name,notes=text"
+//	    user_column: user_id
+//	  - table: form_entries
+//	    drop: true
+func parsePseudonymizeRules(lines []string, start int, source string) ([]PseudonymizeRule, int, error) {
+	rules := []PseudonymizeRule{}
+	index := start
+	for ; index < len(lines); index++ {
+		rawLine := lines[index]
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if leadingSpaces(rawLine) == 0 {
+			break
+		}
+		if rest, isItem := strings.CutPrefix(line, "-"); isItem {
+			rules = append(rules, PseudonymizeRule{})
+			line = strings.TrimSpace(rest)
+			if line == "" {
+				continue
+			}
+		}
+		key, value, ok := parseNestedYAMLScalar(line)
+		if !ok || len(rules) == 0 {
+			return nil, index, fmt.Errorf("invalid pseudonymize_rules line in %s: %s", source, line)
+		}
+		current := &rules[len(rules)-1]
+		switch key {
+		case "table":
+			current.Table = value
+		case "columns":
+			current.Columns = value
+		case "user_column":
+			current.UserColumn = value
+		case "drop":
+			current.Drop = parseBool(value)
+		default:
+			return nil, index, fmt.Errorf("unknown pseudonymize_rules key %q in %s", key, source)
+		}
+	}
+	return rules, index, nil
 }
 
 func parseNestedYAMLScalar(line string) (string, string, bool) {
@@ -328,6 +405,13 @@ func writeConfigFile(path string, cfg Config, defaults Config) error {
 	writeStringValue(&body, "clone_db_user", cfg.CloneDBUser, defaults.CloneDBUser)
 	writeStringValue(&body, "clone_db_password", cfg.CloneDBPassword, defaults.CloneDBPassword)
 	writeStringValue(&body, "clone_db_prefix", cfg.CloneDBPrefix, defaults.CloneDBPrefix)
+	writeBoolValue(&body, "skip_pseudonymize", cfg.SkipPseudonymize, defaults.SkipPseudonymize)
+	writeStringValue(&body, "pseudonymize_email_domain", cfg.PseudonymizeEmailDomain, defaults.PseudonymizeEmailDomain)
+	writeStringValue(&body, "pseudonymize_keep_user_ids", cfg.PseudonymizeKeepUserIDs, defaults.PseudonymizeKeepUserIDs)
+	writeStringValue(&body, "pseudonymize_keep_fields", cfg.PseudonymizeKeepFields, defaults.PseudonymizeKeepFields)
+	writeStringValue(&body, "pseudonymize_keep_text", cfg.PseudonymizeKeepText, defaults.PseudonymizeKeepText)
+	writePseudonymizeRules(&body, cfg.PseudonymizeRules)
+	writeBoolValue(&body, "allow_pseudonymized_push", cfg.AllowPseudonymizedPush, defaults.AllowPseudonymizedPush)
 
 	return os.WriteFile(path, []byte(body.String()), 0o644)
 }
@@ -343,6 +427,25 @@ func writeDomainReplacements(body *strings.Builder, key string, replacements []D
 		}
 		body.WriteString(fmt.Sprintf("  - old: %s\n", quoteYAML(replacement.Old)))
 		body.WriteString(fmt.Sprintf("    new: %s\n", quoteYAML(replacement.New)))
+	}
+}
+
+func writePseudonymizeRules(body *strings.Builder, rules []PseudonymizeRule) {
+	if len(rules) == 0 {
+		return
+	}
+	body.WriteString("pseudonymize_rules:\n")
+	for _, rule := range rules {
+		body.WriteString(fmt.Sprintf("  - table: %s\n", quoteYAML(rule.Table)))
+		if rule.Drop {
+			body.WriteString("    drop: true\n")
+		}
+		if rule.Columns != "" {
+			body.WriteString(fmt.Sprintf("    columns: %s\n", quoteYAML(rule.Columns)))
+		}
+		if rule.UserColumn != "" {
+			body.WriteString(fmt.Sprintf("    user_column: %s\n", quoteYAML(rule.UserColumn)))
+		}
 	}
 }
 
@@ -395,7 +498,17 @@ func (cfg *Config) applyEnv(env []string) {
 	cfg.CloneDBUser = firstNonEmpty(values["WP_SSH_CLONE_DB_USER"], cfg.CloneDBUser)
 	cfg.CloneDBPassword = firstNonEmpty(values["WP_SSH_CLONE_DB_PASSWORD"], cfg.CloneDBPassword)
 	cfg.CloneDBPrefix = firstNonEmpty(values["WP_SSH_CLONE_DB_PREFIX"], cfg.CloneDBPrefix)
+	cfg.PseudonymizeEmailDomain = firstNonEmpty(values["WP_SSH_PSEUDONYMIZE_EMAIL_DOMAIN"], cfg.PseudonymizeEmailDomain)
+	cfg.PseudonymizeKeepUserIDs = firstNonEmpty(values["WP_SSH_PSEUDONYMIZE_KEEP_USER_IDS"], cfg.PseudonymizeKeepUserIDs)
+	cfg.PseudonymizeKeepFields = firstNonEmpty(values["WP_SSH_PSEUDONYMIZE_KEEP_FIELDS"], cfg.PseudonymizeKeepFields)
+	cfg.PseudonymizeKeepText = firstNonEmpty(values["WP_SSH_PSEUDONYMIZE_KEEP_TEXT"], cfg.PseudonymizeKeepText)
 
+	if value, ok := values["WP_SSH_SKIP_PSEUDONYMIZE"]; ok {
+		cfg.SkipPseudonymize = parseBool(value)
+	}
+	if value, ok := values["WP_SSH_ALLOW_PSEUDONYMIZED_PUSH"]; ok {
+		cfg.AllowPseudonymizedPush = parseBool(value)
+	}
 	if value, ok := values["WP_SSH_PULL_CLONE_IMAGES"]; ok {
 		cfg.CloneImages = parseBool(value)
 	}
@@ -499,6 +612,12 @@ func (cfg Config) validatePullRequired() error {
 	if err := cfg.validateDBReset(); err != nil {
 		return err
 	}
+	// A clone sets this too, so its settings cannot stop what does not use them.
+	if !cfg.SkipPseudonymize {
+		if err := cfg.validatePseudonymize(); err != nil {
+			return err
+		}
+	}
 	return cfg.pullTarget().validate("pull source", "configure pull_destination (or pull_user and pull_host) and pull_remote_path in wp-ssh.yaml, set WP_SSH_PULL_* env vars, or pass --destination and --remote-path")
 }
 
@@ -518,6 +637,9 @@ func (cfg Config) validateConfiguredPush() error {
 // validateInitValues permits partial setup while rejecting unsafe provided values.
 func (cfg Config) validateInitValues() error {
 	if err := cfg.validateDBReset(); err != nil {
+		return err
+	}
+	if err := cfg.validatePseudonymize(); err != nil {
 		return err
 	}
 	if err := cfg.pullTarget().validateValues("pull source"); err != nil {
@@ -675,10 +797,16 @@ func (cfg Config) envArgs() string {
 	add("WP_SSH_CLONE_DB_USER", cfg.CloneDBUser)
 	add("WP_SSH_CLONE_DB_PASSWORD", cfg.CloneDBPassword)
 	add("WP_SSH_CLONE_DB_PREFIX", cfg.CloneDBPrefix)
+	add("WP_SSH_PSEUDONYMIZE_EMAIL_DOMAIN", cfg.PseudonymizeEmailDomain)
+	add("WP_SSH_PSEUDONYMIZE_KEEP_USER_IDS", cfg.PseudonymizeKeepUserIDs)
+	add("WP_SSH_PSEUDONYMIZE_KEEP_FIELDS", cfg.PseudonymizeKeepFields)
+	add("WP_SSH_PSEUDONYMIZE_KEEP_TEXT", cfg.PseudonymizeKeepText)
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_CLONE_IMAGES=%t", cfg.CloneImages))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PULL_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_PUSH_SKIP_SEARCH_REPLACE=%t", cfg.SkipSearchReplace))
 	pairs = append(pairs, fmt.Sprintf("WP_SSH_SKIP_CACHE_REBUILD=%t", cfg.SkipCacheRebuild))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_SKIP_PSEUDONYMIZE=%t", cfg.SkipPseudonymize))
+	pairs = append(pairs, fmt.Sprintf("WP_SSH_ALLOW_PSEUDONYMIZED_PUSH=%t", cfg.AllowPseudonymizedPush))
 
 	return strings.Join(pairs, ",")
 }
@@ -766,6 +894,23 @@ func mergeConfig(base Config, overlay Config) Config {
 	base.CloneImages = overlay.CloneImages || base.CloneImages
 	base.SkipSearchReplace = overlay.SkipSearchReplace || base.SkipSearchReplace
 	base.SkipCacheRebuild = overlay.SkipCacheRebuild || base.SkipCacheRebuild
+	if overlay.PseudonymizeEmailDomain != "" {
+		base.PseudonymizeEmailDomain = overlay.PseudonymizeEmailDomain
+	}
+	if overlay.PseudonymizeKeepUserIDs != "" {
+		base.PseudonymizeKeepUserIDs = overlay.PseudonymizeKeepUserIDs
+	}
+	if overlay.PseudonymizeKeepFields != "" {
+		base.PseudonymizeKeepFields = overlay.PseudonymizeKeepFields
+	}
+	if overlay.PseudonymizeKeepText != "" {
+		base.PseudonymizeKeepText = overlay.PseudonymizeKeepText
+	}
+	if len(overlay.PseudonymizeRules) > 0 {
+		base.PseudonymizeRules = overlay.PseudonymizeRules
+	}
+	base.SkipPseudonymize = overlay.SkipPseudonymize || base.SkipPseudonymize
+	base.AllowPseudonymizedPush = overlay.AllowPseudonymizedPush || base.AllowPseudonymizedPush
 	return base
 }
 

@@ -64,8 +64,10 @@ func TestProviderDBPullFallsBackToSCPWhenRemoteRsyncIsMissing(t *testing.T) {
 
 	stdout := bytes.Buffer{}
 	stderr := bytes.Buffer{}
-	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app := newApp(strings.NewReader(realDataConfirmation+"\n"), &stdout, &stderr)
+	app.stdinTerminal = func() bool { return true }
 	app.WorkDir = dir
+	t.Setenv("WP_SSH_SKIP_PSEUDONYMIZE", "true")
 	if err := app.commandProviderRuntime("db-pull", []string{"--project-root", dir}); err != nil {
 		t.Fatalf("provider db-pull() error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}

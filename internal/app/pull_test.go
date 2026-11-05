@@ -311,7 +311,7 @@ func TestBuildRsyncExcludes(t *testing.T) {
 		t.Fatalf("hide rules missing recursive log rule:\n%s", got)
 	}
 
-	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true}, false, false)
+	excludeList, err = buildRsyncExcludes(dir, Config{CloneImages: true, SkipPseudonymize: true}, false, false)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() with CloneImages error = %v", err)
 	}
@@ -355,7 +355,7 @@ func TestBuildRsyncExcludesKeepsPluginsAndUploadsForClone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt"}, false, true)
+	excludeList, err := buildRsyncExcludes(dir, Config{PluginRemoveFile: ".ddev/extra-plugins.txt", SkipPseudonymize: true}, false, true)
 	if err != nil {
 		t.Fatalf("buildRsyncExcludes() error = %v", err)
 	}

@@ -59,10 +59,10 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
   <Tab title="Pull">
 
     1. Preflight.
-    2. `wp db export` of the installation's tables on the source, into the remote temp directory. Other sites sharing the source database are left out.
-    3. Download the dump, then delete it remotely. The cleanup is retried during error handling.
+    2. `wp db export` of the installation's tables on the source, streamed through the [pseudonymization](/docs/pseudonymization) filter into a local file. With `--skip-pseudonymize` it goes through the remote temp directory instead. Other sites sharing the source database are left out.
+    3. Keep the result only once the whole export has passed. With `--skip-pseudonymize`, download the dump and delete it remotely, with the cleanup retried during error handling.
     4. Sync files with rsync `--delete`, minus the exclusions.
-    5. In DDEV, sanitise the copied `wp-config.php` so WP-CLI reaches the DDEV database instead of the production one.
+    5. In DDEV, read the source's `wp-config.php` over SSH, remove the database settings, replace salts and other secrets, and only then write it locally, so production credentials never reach a file and WP-CLI reaches the DDEV database.
     6. Enable local maintenance mode, when a WordPress site is already installed locally.
     7. Import the dump locally, then delete the local copy of it. After a successful import, remove the local tables the dump did not contain, as `db_reset` sets.
     8. Point the local `$table_prefix` at the imported tables when the source uses a different prefix. Tables are not renamed.
@@ -114,11 +114,13 @@ If remote `wp` is missing or unusable, the CLI downloads `wp-cli.phar` into the 
 ## Safety rules
 
 :::note[The rules that matter]
-- A pull never writes to the source host, apart from a temporary dump that is deleted again.
+- A pull never writes to the source host, apart from temporary files that are deleted again.
+- A pull replaces personal data while the export streams in, so no file on either side holds production users, customers, or orders. It stops and keeps nothing when it cannot fully process the dump. A clone keeps real data unless asked otherwise. See [Pseudonymization](/docs/pseudonymization).
+- A push stops before it overwrites a target with pseudonyms, unless `--allow-pseudonymized-push` says otherwise.
 - In a direct run, maintenance mode wraps every database import into an installed WordPress site, on both sides, and is lifted even when the run fails. A local WordPress root or target without an installed site, such as an empty directory or a new database, has nothing to protect and is imported without it.
 - Remote temporary files and the MariaDB compatibility shim are removed on success and by a cleanup trap on failure.
 - PHP functions a host disables are re-enabled only for the export step's WP-CLI processes that need them, never in the host's PHP configuration.
-- Exports cover only the WordPress installation's tables: on the source for a pull or clone, locally for a direct push. Other sites sharing the database never travel along. Another WordPress installation, even one whose prefix starts with the same characters, such as `wp_shop_` next to `wp_`, is recognised by its own `options` and `users` tables. When the prefix or the table list cannot be read, the whole database is exported.
+- Exports cover only the WordPress installation's tables: on the source for a pull or clone, locally for a direct push. Other sites sharing the database never travel along. Another WordPress installation, even one whose prefix starts with the same characters, such as `wp_shop_` next to `wp_`, is recognised by its own `options` and `users` tables. When the prefix or the table list cannot be read, the whole database is exported, unless the export is pseudonymized, which then stops instead.
 - After a successful import, a pull removes the local tables the pulled database does not contain: by default every such table in DDEV and wp-env, and only the local installation's in standalone mode. `db_reset` changes that; see [Pull](/docs/commands/pull#what-happens-in-order).
 - A push stops before maintenance mode and the upload when the target's `$table_prefix` differs from the local one.
 - `wp-config.php` is never pushed, so a target keeps its own credentials.

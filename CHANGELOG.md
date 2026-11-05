@@ -2,6 +2,26 @@
 
 All notable changes to `wp-ssh-bridge` are documented in this file.
 
+## [Unreleased]
+
+## [0.10.0] - 2026-11-05
+
+### Added
+
+- Replace personal data during `pull`, while the database downloads, so no file on either side ever holds production users, customers, or orders. The export streams over SSH through a filter in the CLI: the production database is only read, the source does nothing but the export, and the pull stops and keeps nothing when it cannot process something. The real data does pass through the memory of the machine running the pull. Adapters cover WordPress including multisite, WooCommerce with orders in HPOS tables, in `posts` and `postmeta`, or both, and Easy Digital Downloads. One person keeps one pseudonym across all tables, and sessions, payment tokens, API keys, logs, and transients stay behind. Every other value is checked for email addresses, phone numbers, IP addresses, IBANs, card numbers, and known names, and columns and keys named like personal data get placeholders, in plugin tables as well. A pull names any table without a rule where it found something; describe those with `pseudonymize_rules`. Keep your own account with `pseudonymize_keep_user_ids`. See [Pseudonymization](https://wp-ssh-bridge.citation.media/docs/pseudonymization).
+- Protect what a site needs as it is. Slugs, article numbers, attachment paths, and site settings keep their values, and `pseudonymize_keep_fields` and `pseudonymize_keep_text` add your own. Email addresses are replaced in all of them.
+
+### Changed
+
+- **A pull now pseudonymizes by default.** Production logins and passwords no longer work on a pulled copy; see [Log in after a pull](https://wp-ssh-bridge.citation.media/docs/pseudonymization#log-in-after-a-pull). Pull real data with `--skip-pseudonymize`, `skip_pseudonymize: true`, or `WP_SSH_SKIP_PSEUDONYMIZE=true`, and confirm it by typing `real data` at a terminal; `--yes` and `--silent` do not answer this, so a script or an agent cannot switch it off by accident. A clone is unchanged and keeps real data and every file.
+- **A push stops when the local database holds pseudonyms**, because it would replace the target's real users, customers, and orders. Pull with `--skip-pseudonymize` before a push that should carry real data, or pass `--allow-pseudonymized-push` when the target's data may be overwritten. A file push keeps what a pull left out on the target instead of deleting it.
+- **A DDEV pull no longer writes production credentials to disk.** The file sync leaves `wp-config.php` out, and the CLI writes only the sanitised result. Before, the file sat there with the production database password until the whole sync had finished, and stayed if it failed. Salts and constants named like secrets, such as `*_KEY`, `*_SECRET`, or `*_TOKEN`, now lose their values too, and a password holding a quote or a closing parenthesis, or a `define()` over several lines, no longer slips through. A pull also leaves out copies such as `wp-config.php.bak` and `.env`.
+- A pseudonymized pull also skips `*.sql` and `*.sql.gz` files, backup directories, WooCommerce logs and protected downloads, and Gravity Forms and WPForms uploads.
+
+### Fixed
+
+- Recognize tables in the comma-separated output of `wp db tables --format=csv`, so multisite URL rewrites find the `site` and `blogs` tables.
+
 ## [0.9.0] - 2026-09-29
 
 ### Added

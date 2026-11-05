@@ -57,6 +57,10 @@ clone_images: false                            # include wp-content/uploads on p
 skip_search_replace: false
 skip_cache_rebuild: false                      # page builder CSS after pull, clone, push
 db_reset: "installation"                       # optional: database, installation, or none
+skip_pseudonymize: false                       # true pulls real personal data, after a typed confirmation
+pseudonymize_keep_user_ids: "1"                # optional: accounts to leave untouched
+pseudonymize_keep_fields: "catalog.code"       # optional: columns and meta keys to protect
+pseudonymize_keep_text: "Paul Smith"           # optional: values to leave alone in free text
 plugin_remove_file: ".wp-ssh-plugins.txt"      # optional, extends the built-in list
 
 # --- Domain rewrites, both directions ---
@@ -92,7 +96,7 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `pull_host` | `WP_SSH_PULL_HOST` | SSH host. |
 | `pull_port` | `WP_SSH_PULL_PORT` | SSH port. Without one, the `Port` from `~/.ssh/config` applies, otherwise 22. |
 | `pull_remote_path` | `WP_SSH_PULL_REMOTE_PATH` | Absolute path of the source WordPress root, containing `wp-config.php`. |
-| `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Where the database dump is written before download. Defaults to `/tmp`. |
+| `pull_remote_tmp_dir` | `WP_SSH_PULL_REMOTE_TMP_DIR` | Temporary files on the source, such as the dump of a pull with `--skip-pseudonymize`. Defaults to `/tmp`. |
 
 ### Push target
 
@@ -135,6 +139,20 @@ Never put `clone_db_password` in a committed config file, and never put private 
 | `integration` | `WP_SSH_INTEGRATION` | Pin the runtime to `ddev`, `wp-env`, or `standalone`. Strict: it fails rather than falling back. |
 | `provider` | `WP_SSH_PROVIDER` | DDEV provider name. Defaults to `wp-ssh`. |
 | Config path | `WP_SSH_CONFIG_FILE` | Alternative YAML file. Relative paths resolve from the project root. |
+
+### Pseudonymization
+
+See [Pseudonymization](/docs/pseudonymization) for what these do.
+
+| Key | Environment variable | Purpose |
+| --- | --- | --- |
+| `skip_pseudonymize` | `WP_SSH_SKIP_PSEUDONYMIZE` | Pull real personal data, after a person types `real data` at a terminal. |
+| `pseudonymize_email_domain` | `WP_SSH_PSEUDONYMIZE_EMAIL_DOMAIN` | Domain of the pseudonymous addresses. Defaults to `example.invalid`. |
+| `pseudonymize_keep_user_ids` | `WP_SSH_PSEUDONYMIZE_KEEP_USER_IDS` | Comma-separated user IDs to leave untouched. |
+| `pseudonymize_keep_fields` | `WP_SSH_PSEUDONYMIZE_KEEP_FIELDS` | Comma-separated `table.column` or `table.meta_key` that only the email scan may touch, for [what the site needs as it is](/docs/pseudonymization#what-stays-on-purpose). |
+| `pseudonymize_keep_text` | `WP_SSH_PSEUDONYMIZE_KEEP_TEXT` | Comma-separated values to leave alone, such as a brand or a hotline. Email addresses are not allowed. |
+| `pseudonymize_rules` | | Rules for tables no adapter covers. Config file only. |
+| `allow_pseudonymized_push` | `WP_SSH_ALLOW_PSEUDONYMIZED_PUSH` | Let a push overwrite the target with pseudonyms. |
 
 ## Setting it up
 
@@ -402,6 +420,8 @@ wp-ssh-bridge plugins remove
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during write operations. |
 | `--skip-cache-rebuild` | Do not rebuild page builder CSS after the database transfer. Also `skip_cache_rebuild` and `WP_SSH_SKIP_CACHE_REBUILD`. |
 | `--db-reset` | Which tables to remove after the import when the dump does not contain them: `database`, `installation`, or `none`. Pull and clone. Also `db_reset` and `WP_SSH_DB_RESET`. |
+| `--skip-pseudonymize` | Pull only. Transfer real personal data instead of pseudonyms, after a person types `real data` at a terminal. |
+| `--allow-pseudonymized-push` | Push only. Overwrite the target although the local database holds pseudonyms. |
 | `--force-scp` | Use tar over SSH even when rsync is available. |
 
 ### Project and runtime

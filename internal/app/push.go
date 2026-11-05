@@ -125,6 +125,14 @@ func (a *App) filesPush(ctx context.Context, projectRoot string, cfg Config, use
 	for _, exclude := range buildPushRsyncExcludes() {
 		args = append(args, "--exclude="+exclude)
 	}
+	for _, rule := range filesPullLeavesOut() {
+		args = append(args, "--filter=P "+rule)
+		// A rule for a directory only covers the directory, and its files are at risk as soon
+		// as the local copy has that directory too.
+		if strings.HasSuffix(rule, "/") {
+			args = append(args, "--filter=P "+rule+"**")
+		}
+	}
 	args = append(args, "-e", a.sshCommandString(target), source+"/", sshTarget(target)+":"+trimTrailingSlash(target.RemotePath)+"/")
 	return a.runStep("Syncing WordPress files to push target", "Push target files synced", func() error {
 		return a.runExternal(ctx, projectRoot, "rsync", args...)
@@ -266,6 +274,13 @@ func buildPushRsyncExcludes() []string {
 		"wp-config.php",
 		"wp-config-ddev.php",
 	}
+}
+
+// filesPullLeavesOut names what a local copy lacks because a pull never brought it. A mirror
+// must not read that as deleted and remove it from the target. The rules only guard against
+// deletion, so such a file that does exist locally is still sent.
+func filesPullLeavesOut() []string {
+	return append(wpConfigCopies(), pseudonymizedFileExcludes()...)
 }
 
 // remoteSiteURL detects the current target URL before a database import overwrites it.
