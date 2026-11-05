@@ -23,6 +23,6 @@
     "js-yaml": "^5.4.2"
   },
   "devDependencies": {
-    "wrangler": "^4.132.0"
+    "wrangler": "^4.156.1"
   }
 }
