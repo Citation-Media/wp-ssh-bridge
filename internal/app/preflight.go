@@ -104,7 +104,13 @@ func (a *App) preflightPush(ctx context.Context, root string, mode runtimeMode, 
 	if !opts.SkipFiles {
 		plan.NeedLocalPathReadable = localWPRoot(root, cfg)
 	}
-	return a.runPreflight(ctx, plan, cfg)
+	if err := a.runPreflight(ctx, plan, cfg); err != nil {
+		return err
+	}
+	if opts.SkipDB {
+		return nil
+	}
+	return a.refusePseudonymizedPush(ctx, root, cfg)
 }
 
 func (a *App) preflightProviderAuth(ctx context.Context, projectRoot string, cfg Config) error {

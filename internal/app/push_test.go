@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,34 @@ func TestBuildPushRsyncExcludes(t *testing.T) {
 	}
 	if strings.Contains(excludes, "wp-content/uploads/") {
 		t.Fatalf("push excludes should not skip uploads:\n%s", excludes)
+	}
+}
+
+// A mirror must not delete what a pull only left out, and must still send what exists locally.
+func TestPushProtectsWhatAPullLeavesOut(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "rsync.args")
+	installFakeSSH(t, dir, "#!/bin/sh\nexit 0\n")
+	installFakeCommand(t, dir, "rsync", "#!/bin/sh\nprintf '%s\\n' \"$@\" > "+shellQuote(log)+"\n")
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	app := newApp(strings.NewReader(""), io.Discard, io.Discard)
+	cfg := Config{PushUser: "deploy", PushHost: "example.com", PushRemotePath: "/var/www/html", LocalWPPath: "."}
+	if err := app.filesPush(context.Background(), dir, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--delete", "--filter=P .env", "--filter=P wp-config.php.*", "--filter=P *.sql", "--filter=P wp-content/uploads/woocommerce_uploads/", "--filter=P wp-content/uploads/woocommerce_uploads/**"} {
+		if !strings.Contains(string(args), want+"\n") {
+			t.Errorf("rsync args miss %q:\n%s", want, args)
+		}
+	}
+	for _, unwanted := range []string{"--exclude=.env", "--exclude=*.sql", "--exclude=wp-content/uploads/woocommerce_uploads/"} {
+		if strings.Contains(string(args), unwanted+"\n") {
+			t.Errorf("a local copy of this should still be sent, but rsync got %q", unwanted)
+		}
 	}
 }
 

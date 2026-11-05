@@ -125,10 +125,11 @@ func TestDBPullRemovesMariaDBCompatibilityAliasesAfterExport(t *testing.T) {
 	target := RemoteTarget{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", RemoteTmpDir: "/var/tmp"}
 	app.setRemoteMariaDBCompatibility(target, true)
 	err := app.dbPull(context.Background(), dir, Config{
-		User:         target.User,
-		Host:         target.Host,
-		RemotePath:   target.RemotePath,
-		RemoteTmpDir: target.RemoteTmpDir,
+		User:             target.User,
+		Host:             target.Host,
+		RemotePath:       target.RemotePath,
+		RemoteTmpDir:     target.RemoteTmpDir,
+		SkipPseudonymize: true,
 	}, true)
 	if err != nil {
 		t.Fatalf("dbPull() error = %v", err)
@@ -164,9 +165,10 @@ func TestDBPullCleansRemoteAndPartialLocalDumpAfterDownloadFailure(t *testing.T)
 
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	err := app.dbPull(context.Background(), dir, Config{
-		User:       "deploy",
-		Host:       "example.com",
-		RemotePath: "/var/www/html",
+		User:             "deploy",
+		Host:             "example.com",
+		RemotePath:       "/var/www/html",
+		SkipPseudonymize: true,
 	}, true)
 	if err == nil {
 		t.Fatal("dbPull() succeeded despite a failed database download")

@@ -56,6 +56,8 @@ Every pull scenario checks the blocked-plugin cleanup:
 - Each runtime also gets one blocked plugin placed locally beforehand, so the removal of a local copy runs everywhere: UpdraftPlus in standalone, WP Mail SMTP in DDEV, Cloudflare in wp-env.
 - A clone keeps them all.
 
+The `pseudonymize-*` scenarios run the real WooCommerce and Easy Digital Downloads, pinned in `host/Dockerfile`. `host/fixtures/shop-data.php` fills them through their own APIs with customers whose personal data all carries `canary`, sits in `203.0.113.0/24`, or uses `realmail.test`, plus phone numbers, an IBAN, and a card number in plugin tables without a rule. A scenario first proves the source holds that data in each table, then searches the real dump of the receiving database for it, and finally checks through the plugins' own APIs that the shop still works.
+
 Scenarios come in three suites:
 
 - `containers`: the default; needs only Docker
@@ -69,6 +71,8 @@ In CI, `.github/workflows/ci.yml` runs each suite as its own job, in parallel. T
 Seed a machine by hand with `e2e/wpsb-e2e seed <machine>`. The machines are:
 
 - `source`
+- `source-shop`: the source plus WooCommerce, EDD, and customers; `SEED_ORDERS=legacy` keeps orders in `posts` and `postmeta` instead of HPOS with sync
+- `source-multisite`: the source converted to a multisite network
 - `target`: empty directory and database
 - `target-config`: core and `wp-config.php` only, as the migration guide prepares a new host
 - `target-site`: an installed site, with the prefix from `SEED_PREFIX`

@@ -52,7 +52,7 @@ func TestDBPullRecordsSourceTablePrefixFromExport(t *testing.T) {
 	installFakeCommand(t, dir, "scp", "#!/bin/sh\nexit 0\n")
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 
-	err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html"}, true)
+	err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", SkipPseudonymize: true}, true)
 	if err != nil {
 		t.Fatalf("dbPull() error = %v", err)
 	}
@@ -76,7 +76,7 @@ func TestDBPullRecordsNoPrefixWhenDownloadFails(t *testing.T) {
 	installFakeSSH(t, dir, "#!/bin/sh\ncase \"$*\" in\n  *' cat '*) exit 1 ;;\nesac\nprintf '"+tablePrefixMarker+"abc_\\n'\n")
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 
-	if err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html"}, true); err == nil {
+	if err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", SkipPseudonymize: true}, true); err == nil {
 		t.Fatal("dbPull() succeeded despite a failed download")
 	}
 	if _, err := os.Stat(pullSourcePrefixPath(dir)); !os.IsNotExist(err) {

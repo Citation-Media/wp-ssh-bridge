@@ -105,6 +105,8 @@ Common flags:
   --skip-maintenance-mode    Skip enabling WordPress maintenance mode during write operations
   --skip-cache-rebuild       Skip rebuilding page builder CSS after the database transfer
   --db-reset string          Tables to remove after the import that the dump lacks: database, installation, or none
+  --skip-pseudonymize        Pull only; transfer real personal data, after a typed confirmation in a terminal
+  --allow-pseudonymized-push Push only; overwrite the target although the local database holds pseudonyms
   --silent                   Do not prompt; use saved config, environment, and flags
   --integration string       Pin the runtime: ddev, wp-env, or standalone
 
@@ -204,6 +206,9 @@ func (a *App) commandPull(args []string) error {
 	if err != nil {
 		return err
 	}
+	if opts.AllowPseudonymized {
+		return errors.New("--allow-pseudonymized-push only applies to push")
+	}
 
 	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
 	if err != nil {
@@ -238,6 +243,12 @@ func (a *App) commandClone(args []string) error {
 	if err != nil {
 		return err
 	}
+	if opts.SkipPseudonymize {
+		return errors.New("--skip-pseudonymize only applies to pull; a clone always keeps real data")
+	}
+	if opts.AllowPseudonymized {
+		return errors.New("--allow-pseudonymized-push only applies to push")
+	}
 	opts.Clone = true
 
 	runtime, err := a.resolveRuntime(opts.ProjectRoot, opts.Integration, opts.ConfigFile)
@@ -254,6 +265,8 @@ func (a *App) commandClone(args []string) error {
 	}
 	adapter.ApplyConfigDefaults(&cfg)
 	cfg = opts.apply(cfg)
+	// A clone may become the live site, so it always keeps real data.
+	cfg.SkipPseudonymize = true
 	if adapter.Mode() != modeDDEV && !opts.Silent {
 		prompter := newPrompter(a.Stdin, a.Stdout)
 		if err := prompter.fillPullConfig(&cfg); err != nil {
@@ -307,6 +320,9 @@ func (a *App) commandPush(args []string) error {
 	}
 	if opts.SkipImport {
 		return errors.New("--skip-import only applies to pull")
+	}
+	if opts.SkipPseudonymize {
+		return errors.New("--skip-pseudonymize only applies to pull")
 	}
 	if opts.DBReset != "" {
 		return errors.New("--db-reset only applies to pull and clone; a push replaces only the tables it uploads")
@@ -451,17 +467,27 @@ func (a *App) commandProviderRuntime(name string, args []string) error {
 	case "auth":
 		return a.providerAuth(ctx, runtime.Root, cfg)
 	case "db-pull":
+		if err := a.confirmRealDataPull(cfg); err != nil {
+			return err
+		}
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipFiles: true}); err != nil {
 			return err
 		}
 		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pullTarget(), false)
+		a.warnPseudonymizationOff(cfg)
 		return a.dbPull(ctx, runtime.Root, cfg, useSCP)
 	case "files-pull":
+		if err := a.confirmRealDataPull(cfg); err != nil {
+			return err
+		}
 		if err := a.preflightPull(ctx, adapter, cfg, configOptions{SkipDB: true, SkipImport: true}); err != nil {
 			return err
 		}
 		useSCP := a.needsScpTransport(ctx, runtime.Root, cfg.pullTarget(), false)
-		return a.filesPull(ctx, runtime.Root, cfg, false, false, false, useSCP)
+		if err := a.filesPull(ctx, runtime.Root, cfg, true, false, false, useSCP); err != nil {
+			return err
+		}
+		return a.pullSanitizedWPConfig(ctx, runtime.Root, cfg)
 	case "files-import":
 		a.filesImport()
 		return nil
@@ -773,10 +799,16 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 	root := adapter.Root()
 
+	// Before anything reaches the source, and before a subprocess can read this terminal.
+	if !opts.Clone {
+		if err := a.confirmRealDataPull(cfg); err != nil {
+			return err
+		}
+	}
+
 	if err := a.preflightPull(ctx, adapter, cfg, opts); err != nil {
 		return err
 	}
-
 	useSCP := a.needsScpTransport(ctx, root, cfg.pullTarget(), opts.ForceScpTransport)
 	shouldImportDB := !opts.SkipDB && !opts.SkipImport
 	// Read before the file sync replaces the target's wp-config.php, so the previous
@@ -792,6 +824,9 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 	}
 
 	if !opts.SkipDB {
+		if !opts.Clone {
+			a.warnPseudonymizationOff(cfg)
+		}
 		if err := a.dbPull(ctx, root, cfg, useSCP); err != nil {
 			return err
 		}
@@ -806,12 +841,17 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 				return err
 			}
 		}
-		// Only DDEV replaces wp-config.php from the remote and sanitizes it afterwards.
 		// Standalone and wp-env keep the local file, which already carries working local
-		// database credentials.
-		preserveLocalWPConfig := adapter.Mode() != modeDDEV && !opts.Clone
-		if err := a.filesPull(ctx, root, cfg, preserveLocalWPConfig, opts.Clone, opts.CleanTarget, useSCP); err != nil {
+		// database credentials. DDEV takes the source's, but only in its sanitized form, so
+		// the production credentials never reach a file on this machine. A clone copies it
+		// with the other files and applies its target's database settings.
+		if err := a.filesPull(ctx, root, cfg, !opts.Clone, opts.Clone, opts.CleanTarget, useSCP); err != nil {
 			return err
+		}
+		if adapter.Mode() == modeDDEV && !opts.Clone {
+			if err := a.pullSanitizedWPConfig(ctx, root, cfg); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -820,7 +860,7 @@ func (a *App) runPullPipeline(ctx context.Context, adapter runtimeAdapter, cfg C
 			return err
 		}
 	}
-	// A DDEV pull copies the source wp-config.php with production database constants.
+	// With --skip-files, a DDEV project may still hold a wp-config.php from an earlier pull.
 	// Sanitize it before maintenance mode and the import run WP-CLI against it, so both
 	// reach the DDEV database. postPull runs the hooks again for the provider flow.
 	if !opts.Clone {
@@ -967,6 +1007,8 @@ type configOptions struct {
 	LocalURL            string
 	SkipSearchReplace   bool
 	SkipCacheRebuild    bool
+	SkipPseudonymize    bool
+	AllowPseudonymized  bool
 	DBReset             string
 	CloneDBHost         string
 	CloneDBName         string
@@ -1013,6 +1055,8 @@ func parseConfigCommand(name string, args []string, stderr io.Writer) (configOpt
 	fs.StringVar(&opts.Integration, "integration", "", "pin the runtime: ddev, wp-env, or standalone")
 	fs.BoolVar(&opts.SkipSearchReplace, "skip-search-replace", false, "skip URL search-replace")
 	fs.BoolVar(&opts.SkipCacheRebuild, "skip-cache-rebuild", false, "skip rebuilding page builder CSS after the database transfer")
+	fs.BoolVar(&opts.SkipPseudonymize, "skip-pseudonymize", false, "pull only; transfer real personal data, after a typed confirmation in a terminal")
+	fs.BoolVar(&opts.AllowPseudonymized, "allow-pseudonymized-push", false, "push only; overwrite the target although the local database holds pseudonyms")
 	fs.StringVar(&opts.DBReset, "db-reset", "", "tables to remove after the import when the dump does not contain them: database, installation, or none")
 	if name == "clone" {
 		fs.StringVar(&opts.CloneDBHost, "db-host", "", "clone target DB host")
@@ -1169,6 +1213,12 @@ func (opts configOptions) apply(cfg Config) Config {
 	}
 	if opts.SkipSearchReplace {
 		cfg.SkipSearchReplace = true
+	}
+	if opts.SkipPseudonymize {
+		cfg.SkipPseudonymize = true
+	}
+	if opts.AllowPseudonymized {
+		cfg.AllowPseudonymizedPush = true
 	}
 	if opts.SkipCacheRebuild {
 		cfg.SkipCacheRebuild = true

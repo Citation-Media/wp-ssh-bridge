@@ -3,6 +3,8 @@
 # `site` user; `wpsb-e2e seed` calls it.
 #
 #   wpsb-seed source               the pull source (shared by source and legacy)
+#   wpsb-seed source-shop [both|legacy]  the source plus WooCommerce, EDD, and customers
+#   wpsb-seed source-multisite     the source converted to a multisite network
 #   wpsb-seed target               an empty push or clone target
 #   wpsb-seed target-config [prefix]  a new host: core and wp-config.php, empty database
 #   wpsb-seed target-site [prefix] a target that already runs WordPress
@@ -76,6 +78,28 @@ seed_source() {
     wp db query "CREATE TABLE other_app_sessions (id INT PRIMARY KEY, token VARCHAR(64)); INSERT INTO other_app_sessions VALUES (1, 'not a WordPress table');"
 }
 
+# The real plugins with real orders, whose personal data all carries the word
+# "canary" or the 203.0.113.0/24 address, so a scenario can grep for leaks.
+# `both` runs WooCommerce on HPOS with sync, which fills wc_orders and postmeta;
+# `legacy` keeps orders in posts and postmeta only.
+seed_source_shop() {
+    seed_source
+    cd "$SITE"
+    cp -a /usr/src/wp-plugins/woocommerce /usr/src/wp-plugins/easy-digital-downloads wp-content/plugins/
+    wp plugin activate woocommerce easy-digital-downloads
+    wp eval-file "$FIXTURES/shop-data.php" "${1:-both}"
+}
+
+seed_source_multisite() {
+    seed_source
+    cd "$SITE"
+    wp core multisite-convert --title="WPSB E2E Network"
+    wp user create canarynetwork canary-network@realmail.test --user_pass=wpsb-e2e-admin --display_name="Canary Network"
+    wp super-admin add canarynetwork
+    wp site create --slug=second --title="Second" --email=canary-network@realmail.test
+    wp eval-file "$FIXTURES/multisite-data.php"
+}
+
 seed_target() {
     empty_dir "$SITE"
     reset_database target
@@ -120,10 +144,12 @@ YAML
 
 case "${1:-}" in
     source) seed_source ;;
+    source-shop) seed_source_shop "${2:-both}" ;;
+    source-multisite) seed_source_multisite ;;
     target) seed_target ;;
     target-config) seed_target_config "${2:-}" ;;
     target-site) seed_target_site "${2:-}" ;;
     workstation) seed_workstation ;;
     plugin-stub) plugin_stub "$2" "$3" ;;
-    *) printf 'usage: wpsb-seed source|target|target-config [prefix]|target-site [prefix]|workstation|plugin-stub <root> <slug>\n' >&2; exit 2 ;;
+    *) printf 'usage: wpsb-seed source|source-shop [both|legacy]|source-multisite|target|target-config [prefix]|target-site [prefix]|workstation|plugin-stub <root> <slug>\n' >&2; exit 2 ;;
 esac

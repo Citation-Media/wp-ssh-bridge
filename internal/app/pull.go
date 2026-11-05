@@ -61,14 +61,20 @@ func (a *App) dbPull(ctx context.Context, projectRoot string, cfg Config, useSCP
 		wpExport = override.command()
 	}
 
+	if !cfg.SkipPseudonymize {
+		return a.streamPseudonymizedDump(ctx, projectRoot, target, cfg, remoteWP, wpExport, mariaDBSetup, mariaDBCleanup, filepath.Join(downloadDir, "db.sql.gz"))
+	}
+
+	transferList := shellQuote(remoteDump) + " " + shellQuote(remoteDumpGZ)
+
 	remoteCommand := strings.Join([]string{
 		"set -eu;",
-		fmt.Sprintf("cleanup() { rm -f %s %s || true; %s; };", shellQuote(remoteDump), shellQuote(remoteDumpGZ), mariaDBCleanup),
+		fmt.Sprintf("cleanup() { rm -f %s || true; %s; };", transferList, mariaDBCleanup),
 		"trap cleanup INT TERM HUP EXIT;",
 		"cd " + shellQuote(remoteWP) + ";",
 		remoteWPCLIPrelude(target),
 		mariaDBSetup,
-		fmt.Sprintf("rm -f %s %s;", shellQuote(remoteDump), shellQuote(remoteDumpGZ)),
+		fmt.Sprintf("rm -f %s;", transferList),
 		remoteExportCommands(wpExport, remoteDump),
 		fmt.Sprintf("gzip -f %s;", shellQuote(remoteDump)),
 		mariaDBCleanup + ";",
@@ -138,9 +144,9 @@ func (a *App) removeRemoteDatabaseDump(ctx context.Context, projectRoot string, 
 
 // filesPull syncs the remote WordPress tree into the local project.
 // When useSCP is true it uses a tar pipe over SSH instead of rsync.
-func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool, cleanTarget bool, useSCP bool) error {
+func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, leaveOutWPConfig bool, clone bool, cleanTarget bool, useSCP bool) error {
 	if useSCP {
-		return a.filesPullTar(ctx, projectRoot, cfg, preserveLocalWPConfig, clone, cleanTarget)
+		return a.filesPullTar(ctx, projectRoot, cfg, leaveOutWPConfig, clone, cleanTarget)
 	}
 
 	target := cfg.pullTarget()
@@ -161,7 +167,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 		args = append(args, "--delete")
 	}
 	args = append(args, "--safe-links")
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, clone)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, leaveOutWPConfig, clone)
 	if err != nil {
 		return err
 	}
@@ -182,7 +188,7 @@ func (a *App) filesPull(ctx context.Context, projectRoot string, cfg Config, pre
 // The tar step itself only adds or updates files; when cleanTarget is set the destination
 // was already emptied by cleanCloneTarget before this runs (there is no rsync --delete
 // equivalent for the tar transport).
-func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool, cleanTarget bool) error {
+func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, leaveOutWPConfig bool, clone bool, cleanTarget bool) error {
 	target := cfg.pullTarget()
 	if err := cfg.validatePullRequired(); err != nil {
 		return err
@@ -193,7 +199,7 @@ func (a *App) filesPullTar(ctx context.Context, projectRoot string, cfg Config, 
 		return err
 	}
 
-	excludes, err := buildRsyncExcludes(projectRoot, cfg, preserveLocalWPConfig, clone)
+	excludes, err := buildRsyncExcludes(projectRoot, cfg, leaveOutWPConfig, clone)
 	if err != nil {
 		return err
 	}
@@ -406,8 +412,14 @@ func rewriteWPConfigURLDefinesContents(contents string, pairs []replacementPair)
 	return wpConfigURLDefines.ReplaceAllStringFunc(contents, strings.NewReplacer(replacements...).Replace)
 }
 
+// wpConfigCopies names what a pull leaves out next to wp-config.php, because the copies
+// people leave lying around hold the same credentials, and so does .env.
+func wpConfigCopies() []string {
+	return []string{"wp-config.php.*", "wp-config.php~", "wp-config*.bak", "wp-config*.old", "wp-config*.orig", "wp-config*.save", "wp-config-backup*", "wp-config-old*", ".env", ".env.*"}
+}
+
 // buildRsyncExcludes keeps parity with the original shell provider exclude set.
-func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bool, clone bool) ([]string, error) {
+func buildRsyncExcludes(projectRoot string, cfg Config, leaveOutWPConfig bool, clone bool) ([]string, error) {
 	excludes := []string{
 		".git/",
 		".ddev/",
@@ -420,12 +432,16 @@ func buildRsyncExcludes(projectRoot string, cfg Config, preserveLocalWPConfig bo
 		"wp-content/languages/wpml/queue/",
 	}
 
-	if preserveLocalWPConfig {
-		excludes = append(excludes, "wp-config.php")
+	if leaveOutWPConfig {
+		excludes = append(append(excludes, "wp-config.php"), wpConfigCopies()...)
 	}
 
 	if !cfg.CloneImages && !clone {
 		excludes = append(excludes, "wp-content/uploads/")
+	}
+
+	if !cfg.SkipPseudonymize {
+		excludes = append(excludes, pseudonymizedFileExcludes()...)
 	}
 
 	// wp-env bind-mounts plugins/themes/mappings entries over wp-content. Pulled files in
@@ -700,10 +716,7 @@ func (a *App) sanitizeWPConfig(projectRoot string, cfg Config) error {
 
 // sanitizeWPConfigContents is pure so config rewrite behavior is testable.
 func sanitizeWPConfigContents(contents string) string {
-	dbDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]DB_[A-Z0-9_]+['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
-	contents = dbDefine.ReplaceAllString(contents, "")
-	wpDebugDefine := regexp.MustCompile(`(?m)^[ \t]*define\(\s*['"]WP_DEBUG['"]\s*,\s*.*?\);[ \t]*(?:\r?\n)?`)
-	contents = wpDebugDefine.ReplaceAllString(contents, "")
+	contents = (&wpConfigSanitizer{contents: contents}).run()
 	contents = ensureDDEVConfigIncludeAtTop(contents)
 
 	cookieDomain := regexp.MustCompile(`define\(\s*['"]COOKIE_DOMAIN['"]\s*,\s*\$_SERVER\s*\[\s*['"]HTTP_HOST['"]\s*\]\s*\);`)
@@ -1520,8 +1533,9 @@ func flushPrefixed(writer io.Writer) {
 }
 
 func lineSetContains(output string, value string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.TrimSpace(line) == value {
+	// `wp db tables --format=csv` prints all names on one comma-separated line.
+	for _, entry := range strings.FieldsFunc(output, func(char rune) bool { return char == '\n' || char == '\r' || char == ',' }) {
+		if strings.TrimSpace(entry) == value {
 			return true
 		}
 	}

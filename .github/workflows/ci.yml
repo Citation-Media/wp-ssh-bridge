@@ -20,6 +20,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -38,6 +39,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -67,6 +69,7 @@ jobs:
   # filter on the workflow would skip the fast checks too.
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       e2e: ${{ steps.diff.outputs.e2e }}
     steps:

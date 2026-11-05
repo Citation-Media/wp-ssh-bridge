@@ -1,0 +1,223 @@
+---
+title: Pseudonymization
+description: How wp-ssh-bridge pull replaces users, customers, orders, and other personal data while the database downloads, so no file on your machine ever holds it.
+sidebar:
+  order: 7.5
+  icon: user-x
+---
+
+A pull replaces personal data while the database downloads, before anything is written to disk. Users, comments, and the customers and orders of WooCommerce and Easy Digital Downloads arrive as pseudonyms, while the site itself keeps working: order totals, statuses, products, and content stay as they are.
+
+It is on by default for every `pull`, in DDEV, wp-env, and standalone mode. It only applies to a pull: a `clone` keeps real data and every file, because it may become the live site, and a `push` sends what you have locally.
+
+## How it works
+
+The export streams over SSH through a filter inside the CLI, and only the result reaches your disk:
+
+```text
+source: wp db export → gzip -1  ═══ SSH ═══▶  your machine: filter → gzip → db.sql.gz
+```
+
+- The production database is only read. Nothing is written to it, and the source writes no dump file.
+- No file on either side holds real data. It exists in the SSH connection and in the memory of the running CLI. The dump file only appears once the whole export has passed the filter.
+- When anything goes wrong, the pull stops and removes what it wrote. The filter treats a statement it cannot parse as a failure rather than passing it through.
+- The CLI disables core dumps while it runs, so a crash cannot write that memory to disk. It cannot keep the operating system from swapping it out, so use an encrypted disk.
+
+The source only runs the export and the fastest gzip level, at lowered CPU priority where the host allows it, and it skips the rows of tables a pull never keeps, such as sessions and logs. The filter runs on your machine, on all CPU cores. In our measurements on a synthetic dump, this side handled about 120 MB of dump per second on one core and about 450 MB on eight, including both gzip steps, so the download is usually what you wait for. A text-heavy site with many known names costs more: the filter alone then handled about 80 MB per second on one core and about 300 MB on eight. The export stays open during the download, so a very slow connection keeps it running for longer.
+
+:::note[Real data does pass through your machine]
+This keeps personal data out of every file, including the ones an AI coding agent or a backup tool can read. It cannot keep it from a process that deliberately reads the SSH stream: anyone with this SSH access can run `wp db export` directly. `--skip-pseudonymize` asks a person at a terminal to confirm, which stops an agent or a script that merely wants the pull to work, but not one set on getting around it. Keep the SSH access away from anything that must not see production data.
+:::
+
+## What a person looks like afterwards
+
+One person keeps one pseudonym across all tables, so an order still belongs to its customer and reports still group correctly. The one exception is the names on a legacy order in `postmeta`, which get a pseudonym per order, while its address and customer link follow the person. Rows are matched by user ID first and by email address otherwise, ignoring case, so a guest checkout under a registered address joins that user.
+
+| | Registered user 5 | Guest |
+| --- | --- | --- |
+| Email | `user-5@example.invalid` | `guest-3fa94c01d2e7@example.invalid` |
+| Login | `user-5` | `guest-3fa94c01d2e7` |
+| Name | `User 5` | `Guest 3fa94c01d2e7` |
+| Address | `Example Street 1`, `Example City`, `12345` | the same |
+| Phone | `+00 000 0000000` | the same |
+| Company | `Example Company` | the same |
+| IP address | `192.0.2.1`, or `2001:db8::1` for IPv6 | the same |
+| User agent | `Pseudonymized` | the same |
+
+The `.invalid` domain is reserved and cannot receive mail, so a development copy with a working mail setup cannot reach anyone. Guest pseudonyms use a random key that is generated for each pull and only ever held in memory, so they cannot be reversed or linked between two pulls.
+
+The placeholders have the format software expects, so forms and IP checks keep working on the copy. Empty values stay empty. Country and state stay real, because they decide tax and shipping.
+
+## What is covered
+
+| Source | Rewritten | Left out of the export |
+| --- | --- | --- |
+| WordPress | Users, user meta, comments, comment meta, privacy requests, admin addresses; on multisite also signups, the registration log, network options, and super admins | Session tokens, application passwords, transients, Akismet copies of comments |
+| WooCommerce | Orders in `wc_orders`, `wc_order_addresses`, and `wc_orders_meta`; orders in `posts` and `postmeta`; customer records and lookups; download permissions and logs | Sessions, saved payment tokens, API keys, logs, gateway settings with API keys |
+| Easy Digital Downloads | Customers, their addresses and emails, orders, order addresses, transactions, notes, download logs, and meta | Sessions, payment tokens, logs |
+
+Webhooks stay in the database but are disabled and lose their URL and secret, so a development copy cannot deliver order events to live endpoints.
+
+Options whose name ends in something like `secret`, `password`, `api_key`, `access_token`, or `license_key` are emptied, including inside serialized settings such as `edd_settings`. This is a safety net for credentials and goes by the name alone, so check a site's payment and mail settings before you use real API access locally.
+
+In order and user meta, keys that look personal are emptied too, such as anything containing `email`, `phone`, `address`, `vat`, `iban`, or `token`.
+
+### Everything else
+
+Every other value in every other table runs through three checks, including inside serialized and JSON data and in binary columns.
+
+**By what it looks like**, in any text:
+
+| Found | Replaced with |
+| --- | --- |
+| Email addresses, also JSON or URL encoded, as HTML entities, or written `anna(at)example.com` | That person's pseudonym. An address that belongs to nobody the pull knows still gets one: `stranger@example.com` becomes a `guest-` address, and every later mention of it gets the same one. |
+| Phone numbers with a `+` or `00` prefix, a national number with its area code set apart, `(030) 1234567`, `212-555-0123`, or any number after a label such as `Tel.:` | `+00 000 0000000` |
+| Public IPv4 and IPv6 addresses. Private ranges and version numbers such as `8.6.1.0` stay. | `192.0.2.1`, `2001:db8::1` |
+| IBANs with valid check digits | `XX00REDACTED` |
+| Card numbers with a valid check digit | `0000-0000-0000-0000` |
+| The full name of anyone met earlier in the export, see [Names in free text](#names-in-free-text) | That person's pseudonym |
+
+**By what it is called.** A column, a meta key, or a key in serialized or JSON data named like `phone`, `first_name`, `street`, `zip`, `date_of_birth`, `iban`, or `company` gets a placeholder, in tables no adapter knows as well. So do the fields of a form plugin that stores one row per field. Names that describe a field rather than hold it, such as `phone_label` or `show_phone`, stay. A column called `name` only counts next to an email column, because on its own it is as likely a product or a menu.
+
+**By its column type.** Numbers and dates cannot hold text, so the scan skips them. A number or date named like personal data, such as a `phone` of type `bigint` or an `ip` of type `binary(16)`, still gets a placeholder. A column with a unique index gets a distinct value instead of the shared placeholder, so the import does not fail.
+
+Column comments and trigger bodies are scanned for email addresses too.
+
+### Names in free text
+
+The filter collects full names while it runs and replaces them in all text after that point. So the export starts with the tables that hold people: users, then customers and orders, then plugin tables whose columns look like they hold names, then comments. Options, posts, and everything else follow.
+
+- **Who counts:** users, WooCommerce and Easy Digital Downloads customers and order addresses, commenters, and the people in plugin tables with name columns or form fields such as `first_name` and `last_name`. A pingback's site name does not count.
+- **How it matches:** whole words, ignoring case, however they are spaced: `Anna Real`, `anna real`, `ANNA  REAL`, a line break or a no-break space between the words, `Anna Real's`, also inside typographic quotation marks or next to a dash.
+- **In the same row:** a message signed with the name of the person who sent it is replaced too.
+
+### What stays on purpose
+
+Replacing what merely looks personal would break the site, so some values are protected. Everything but the email scan skips them. **An email address is replaced everywhere, in protected values too.** A pseudonymized copy could otherwise send mail to a real person.
+
+| Protected | Why |
+| --- | --- |
+| Slugs, post types and statuses, GUIDs, meta keys, option names, taxonomies, term names | Code compares these. A slug shaped like a phone number stays a slug. |
+| Article numbers: `_sku`, `_global_unique_id`, and the matching columns of `wc_product_meta_lookup` | `0123-456789` is an article number here, and it has to stay unique. |
+| Attachment paths and metadata, including a photo's `credit` and `caption`, menu items, product attributes, gallery and download lists, EDD email templates | They hold paths, IDs, and settings. A `recipient` of `customer` in EDD's email table is a role. |
+| Site settings such as `siteurl`, `blogname`, `active_plugins`, `cron`, the shop's own address and currency | They describe the site rather than a person. |
+| Values such as `yes` or `no` under a key that looks personal | `woocommerce_registration_generate_password` is a setting, not a password. |
+
+**The site's own names.** A term name or the site title that equals a person's name is left alone in free text. If a commenter calls themselves like your brand, `Paul Smith` stays in a product text, while the commenter's own fields still get a pseudonym. In free text the two cannot be told apart, and that text is public anyway.
+
+Add your own with two settings:
+
+```yaml title=".wp-ssh.yaml"
+pseudonymize_keep_fields: "catalog.code, postmeta._my_article_number"
+pseudonymize_keep_text: "Paul Smith, 0800-123456"
+```
+
+- `pseudonymize_keep_fields` protects columns and keys, written as `table.column` or `table.meta_key`, without the table prefix. A field that a rule replaces, or a table a pull leaves out, is an error rather than a setting that silently does nothing.
+- `pseudonymize_keep_text` leaves exact values alone wherever the scan or a key's name would replace them, such as your hotline or a brand. It separates values by commas. Names match however they are written. Fields a rule replaces are still replaced, and an email address is rejected.
+
+The file sync leaves out what would undo all this: database dumps such as `*.sql` and `*.sql.gz`, common backup directories, WooCommerce logs and protected downloads, form uploads from Gravity Forms and WPForms, and personal data exports.
+
+## What is not covered
+
+:::warning[Check these yourself]
+- **Plugins without a rule.** The checks above find what has a recognizable shape or name, but not a first name alone, a street in a sentence, or a column with a neutral name such as `field_3`. When a table without a rule held personal data, the pull names it, and that table deserves a look and possibly a [project rule](#project-rules). A table where nothing was found is not reported, whatever else it holds.
+- **Names in free text.** A first name alone stays, and so do `Real, Anna`, `A. Real`, `Anna M&uuml;ller`, and a name split by HTML such as `Anna<br>Real`. Names of more than six words are not learned, nor a form field called just `name`. Text ahead of a person's table in the export is missed: a plugin table can only be found by its column names, a name inside serialized or JSON data does not count as a source, a customer's name in a post is missed if their order sits in `postmeta`, and a mention of someone in a table that also holds them is only replaced in their own row.
+- **False matches.** Outside [protected values](#what-stays-on-purpose) the checks favor privacy: a code shaped like `0123-456789` in a text becomes a phone placeholder, a 16-digit number with a valid check digit a card placeholder, and a four-part version number outside a key such as `db_version` an IP placeholder. A customer who enters `Black Friday` as their name turns that phrase into a pseudonym in product texts, unless a term or `pseudonymize_keep_text` names it.
+- **Text that hides an address.** Encrypted or base64-encoded values are out of reach for the scan, and so are addresses spelled out in words, such as `anna at example dot com`, or written entirely in numeric HTML entities.
+- **Unusual addresses.** A domain needs a dot, because `swiper@latest` in a script URL looks just like `anna@intranet`, so the second stays. With rare characters in the name, such as `anna!x@example.com`, the domain and the last part are replaced, while `anna!` stays. A quoted name, such as `"anna smith"@example.com`, or one in braces is not recognized as an address.
+- **Copies of core tables.** A leftover such as `wp_users_old` is a table without a rule, including its password hashes. It is only named when it held an address.
+- **Personal data in content.** Pages and posts stay as they are, apart from what the checks above find.
+- **Uploads.** With `--clone-images`, images and documents arrive as they are, apart from the excluded directories above.
+:::
+
+Legally this is pseudonymization, not anonymization: user IDs, order dates, and amounts remain, so the data can still relate to a person. It reduces what a development machine holds, but it does not take the copy out of data protection law. Ask whoever is responsible for data protection in your organization whether it fits your case.
+
+## Log in after a pull
+
+All passwords are replaced and logins are renamed, so nobody can sign in with production credentials. Set a password for the account you need:
+
+```bash
+wp user update 1 --user_pass=local-password
+```
+
+The login is then `user-1`. To keep your own account as it is, list its user ID:
+
+```yaml title=".wp-ssh.yaml"
+pseudonymize_keep_user_ids: "1,7"
+```
+
+A kept account keeps its login, email, password hash, and profile, and so do the rows tied to it by user ID, such as its comments and orders. Its real data then does reach the development machine. A row that only carries the account's address, such as a guest order, is still pseudonymized.
+
+## Project rules
+
+Describe a table no adapter knows in the config file. Table names leave out the prefix:
+
+```yaml title=".wp-ssh.yaml"
+pseudonymize_rules:
+  - table: crm_contacts
+    columns: "email=email,full_name=full_name,notes=text"
+    user_column: user_id
+  - table: form_entries
+    drop: true
+```
+
+`drop: true` leaves the rows out of the export and keeps the empty table. Otherwise, `columns` lists `column=strategy` pairs. The column with the `email` strategy, or `user_column` when it holds a WordPress user ID, ties the row to its person.
+
+| Strategy | Replacement |
+| --- | --- |
+| `email` | The person's pseudonymous address |
+| `first_name`, `last_name`, `full_name`, `login` | The matching part of the pseudonym |
+| `street`, `city`, `postcode` | `Example Street 1`, `Example City`, `12345` |
+| `text` | `Pseudonymized text.` |
+| `token` | A random-looking value, distinct for distinct inputs |
+| `company`, `phone`, `ip`, `user_agent` | The placeholders above |
+| `blank` | Empty |
+
+## Settings
+
+| Flag | Config key | Environment variable | Effect |
+| --- | --- | --- | --- |
+| `--skip-pseudonymize` | `skip_pseudonymize` | `WP_SSH_SKIP_PSEUDONYMIZE` | Pull real data, after a person types `real data` at a terminal. `--yes` and `--silent` do not answer this, and without a terminal the pull stops. |
+| | `pseudonymize_email_domain` | `WP_SSH_PSEUDONYMIZE_EMAIL_DOMAIN` | Another domain for the addresses. Defaults to `example.invalid`. |
+| | `pseudonymize_keep_user_ids` | `WP_SSH_PSEUDONYMIZE_KEEP_USER_IDS` | Comma-separated user IDs to leave untouched. |
+| | `pseudonymize_keep_fields` | `WP_SSH_PSEUDONYMIZE_KEEP_FIELDS` | Comma-separated `table.column` or `table.meta_key` to [protect](#what-stays-on-purpose). |
+| | `pseudonymize_keep_text` | `WP_SSH_PSEUDONYMIZE_KEEP_TEXT` | Comma-separated values to leave alone, such as a brand or a hotline. |
+| | `pseudonymize_rules` | | Rules for your own tables, as above. |
+| `--allow-pseudonymized-push` | `allow_pseudonymized_push` | `WP_SSH_ALLOW_PSEUDONYMIZED_PUSH` | Let a push overwrite the target with pseudonyms. |
+
+## Pushing a pseudonymized copy
+
+Pushing such a database would replace the target's real users, customers, and orders with pseudonyms, so a push stops first:
+
+```text
+Error: the local database holds pseudonyms from a pull on 2026-11-04T10:00:00Z, and pushing it would replace the target's real users, customers, and orders; …
+```
+
+The pull leaves a `wp_ssh_bridge_pseudonymized` option in the local database for this check, so a push of a database without pseudonyms runs as before. A file push also keeps what a pull left out, such as `.env`, dumps, and protected downloads, instead of deleting them from the target as missing. Use `--skip-db` to push files only. Pass `--allow-pseudonymized-push` only when the target's data may be overwritten, such as a staging site.
+
+## Verify
+
+Search the local database for a customer's address you know from production. It should find nothing. The user list should show only pseudonyms and the accounts you kept:
+
+```bash
+wp db search 'someone@their-real-domain.example' --all-tables-with-prefix
+wp user list --fields=ID,user_login,user_email
+```
+
+## When something fails
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `pseudonymizing the export failed: the export must start with …` or `does not contain the …users table` | The site keeps its users in a table with another name, for example through `CUSTOM_USER_TABLE`. | The filter resolves people through that table, so this setup is not supported. Use `--skip-pseudonymize` only if real data on this machine is acceptable. |
+| `cannot pseudonymize the export: the table prefix or table list of the pull source could not be read` | WP-CLI could not read `$table_prefix` or the tables on the source. | Run `wp config get table_prefix` and `wp db tables` on the source and fix what they report. |
+| `the database export failed on the source with status …` | `wp db export` failed. What it printed is shown above the message. | Run `wp db export - > /dev/null` on the source and fix what it reports. |
+| `the source stopped before the export started` | The remote shell failed before the export, as the lines above the message show. | Run `wp --info` on the source. |
+| `the connection to the pull source failed during the export` | The SSH connection dropped. Nothing was kept. | Run the pull again. |
+| `writing the pseudonymized export failed` | The local disk is full. | Free up space in `.wp-ssh/.downloads`. |
+| `the database export has no closing "-- Dump completed" line` | The export was cut off, or the client configuration on the source sets `skip-comments` or `compact`. | Run the pull again. If it persists, remove those options from the source's `.my.cnf`. |
+| `Pseudonymization rules name columns these tables do not have` | A typo in `pseudonymize_rules`, or a plugin renamed a column. Nothing was replaced in that column. | Fix the rule, or report the plugin version. |
+| `could not check whether the local database holds pseudonyms` | The push could not read the local database. | Fix the local database, or pass `--allow-pseudonymized-push` when the target's data may be overwritten. |
+| `Personal data was replaced in tables no pseudonymization rule covers` | A plugin table holds personal data, and may hold more that the checks cannot recognize. | Add a [project rule](#project-rules). |
+| A plugin misbehaves because a value is empty or a placeholder | A value that merely looks personal was replaced. | Add it to [`pseudonymize_keep_fields`](#what-stays-on-purpose), and report the key so it can become a default. |
+| A product text shows `User 12` where a brand belongs | Someone's name equals the phrase. | Add the phrase to `pseudonymize_keep_text`. |
+| `pulling real personal data needs a person to confirm it in a terminal` | Pseudonymization is switched off, but the pull has no terminal, as in a script, an agent, or `ddev pull`. | Run `wp-ssh-bridge pull` yourself in a terminal, or remove `--skip-pseudonymize`, `skip_pseudonymize`, and `WP_SSH_SKIP_PSEUDONYMIZE`. |

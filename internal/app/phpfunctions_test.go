@@ -273,11 +273,11 @@ func TestDBPullExportsThroughPHPFunctionOverride(t *testing.T) {
 	dir := t.TempDir()
 	logPath := installLoggingFakeSSH(t, dir, "")
 	app := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-	target := Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html"}.pullTarget()
+	target := Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", SkipPseudonymize: true}.pullTarget()
 	override := remotePHPFunctionOverride{remotePHPRuntime: hostingerRuntime, Reenable: []string{"exec"}, DisableFunctions: "system"}
 	app.setRemotePHPFunctionOverride(target, override)
 
-	if err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html"}, true); err != nil {
+	if err := app.dbPull(context.Background(), dir, Config{User: "deploy", Host: "example.com", RemotePath: "/var/www/html", SkipPseudonymize: true}, true); err != nil {
 		t.Fatalf("dbPull() error = %v", err)
 	}
 	log, err := os.ReadFile(logPath)

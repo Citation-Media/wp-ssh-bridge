@@ -40,6 +40,12 @@ When changing the embedded default blocked-plugin list, update the list and its 
 
 The documentation does list every slug, on `docs/troubleshooting/blocked-plugins.mdx`, because users need to know which plugins vanish from their site. `TestDocumentationListsEveryBlockedPlugin` compares that page against `defaultPluginList` in both directions and checks the count in the prose, so the page cannot drift; adding a plugin without documenting it fails the suite. The page collects slugs from its bare ```text blocks, so give any other example block a title.
 
+## Pseudonymization Adapters
+
+`pull` streams the export over SSH through the filter in `internal/app/pseudonymize_filter.go`, driven by the declarative rules in `internal/app/pseudonymize_adapters.go`. `pseudonymize_scan.go` finds personal data by its shape and `pseudonymize_structured.go` by its key, inside serialized and JSON data. To support another plugin, add an adapter there, checked against the plugin's real schema, and plant its data in `e2e/host/fixtures/shop-data.php`, so `expect_source_holds` and `expect_no_leaks` prove the rule works. Update the coverage table in `docs/pseudonymization.mdx`. Values the site needs as they are, such as an article number, belong in the adapter's `Protect` or a meta rule's `ProtectKeys`; these never spare email addresses.
+
+The real data passes through this process, so an error message must never quote a value, and nothing but the finished result may reach a file. Changes to the filter need `go test -race ./internal/app -run 'TestFilter'` and the `pseudonymize-*` scenarios.
+
 ## Keep The Documentation Site Current
 
 `docs/` holds the public documentation, published at https://wp-ssh-bridge.citation.media. When changing user-facing behavior, update the page that covers it in the same change:

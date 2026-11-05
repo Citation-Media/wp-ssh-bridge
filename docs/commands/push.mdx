@@ -130,7 +130,7 @@ wp-config-ddev.php    DDEV's generated config
 .wp-ssh/              the CLI's scratch directory, including the downloaded dump
 ```
 
-That list is deliberately short. A push is meant to make the target match your local tree, so everything else, including `wp-content/uploads` and your plugins and themes, is sent.
+That list is deliberately short. A push is meant to make the target match your local tree, so everything else, including `wp-content/uploads` and your plugins and themes, is sent. What a pull leaves out, such as `.env`, copies of `wp-config.php`, dumps, backups, protected downloads, and form uploads, is sent if you have it locally, but not deleted from the target if you do not.
 
 ## Flags
 
@@ -143,6 +143,7 @@ That list is deliberately short. A push is meant to make the target match your l
 | `--skip-search-replace` | Do not rewrite URLs on the target. |
 | `--skip-maintenance-mode` | Leave the target site reachable during the push. |
 | `--skip-cache-rebuild` | Do not rebuild page builder CSS on the target. |
+| `--allow-pseudonymized-push` | Overwrite the target although the local database holds [pseudonyms](/docs/pseudonymization#pushing-a-pseudonymized-copy) from a pull. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--push-destination`, `--push-remote-path`, `--push-remote-tmp-dir`, `--push-url` | The push target. On `push`, the short forms `--destination`, `--remote-path`, and `--remote-tmp-dir` are aliases for these. |
 | `--push-user`, `--push-host`, `--push-port` | The split form of the address, aliased by `--user`, `--host`, and `--port` on `push`. Not combinable with a destination. |
@@ -211,6 +212,7 @@ A push rewrites the local URL to the target URL and then applies every push doma
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `push does not support wp-env projects; …` | Expected in a wp-env project. | Push from a standalone checkout instead; see the wp-env tab above. |
+| `the local database holds pseudonyms from a pull on …` | The local copy came from a pseudonymizing pull, and pushing it would replace the target's real users, customers, and orders. Nothing was changed. | Use `--skip-db` to push files only. Pass `--allow-pseudonymized-push` only when the target's data may be overwritten. See [Pseudonymization](/docs/pseudonymization#pushing-a-pseudonymized-copy). |
 | `the push target uses the table prefix …, but the local database uses …` | The target's `wp-config.php` names another `$table_prefix` than your local copy, so its WordPress would not see the pushed tables. Nothing was changed. | Set `$table_prefix` in the target's `wp-config.php` to the local prefix, or pull from that target first so the local copy takes its prefix. |
 | The target still shows the old or the local URL after a push | `push_url` was not set, so the push reused the target's home URL from before the import, and that value was wrong. | Set `push_url` and run again with `--skip-files`. |
 | `the push target URL is unknown because it could not be read from the target` | A first push into an empty target has no URL to read, or the target's WP-CLI could not report it. | Set `push_url`, `WP_SSH_PUSH_URL`, or `--push-url`, add a push domain mapping, or pass `--skip-search-replace` to keep the local URLs. |

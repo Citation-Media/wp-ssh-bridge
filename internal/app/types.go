@@ -22,6 +22,8 @@ type App struct {
 	remoteMariaDBCompatibility map[string]bool
 	remotePHPFunctions         map[string]remotePHPFunctionOverride
 	sshSessions                *sshSessionPool
+	// stdinTerminal overrides the terminal check on Stdin, for tests.
+	stdinTerminal func() bool
 }
 
 // newApp builds the runtime wrapper used by main and tests.

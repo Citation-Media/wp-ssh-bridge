@@ -5,12 +5,12 @@ sidebar:
   icon: download
 ---
 
-`pull` brings the remote site to you. It exports the source database with WP-CLI, downloads it, syncs the files, imports the database locally, rewrites every URL for your environment, and removes plugins that only belong on production.
+`pull` brings the remote site to you. It streams the source database from WP-CLI, replaces personal data with pseudonyms before anything is written to disk, syncs the files, imports the database locally, rewrites every URL for your environment, and removes plugins that only belong on production.
 
 It is the command you run before you start working, and again whenever the local copy has gone stale.
 
 :::note[Reads from the source, writes locally]
-A pull never modifies the source site. It creates a temporary database dump in the remote temp directory and deletes it again, including on failure. When the host has no usable WP-CLI, a `wp-ssh-bridge-wp-cli.phar` is also left in that directory for later runs. Everything else it changes is on your machine.
+A pull never modifies the source site. The [pseudonymized](/docs/pseudonymization) database streams straight to your machine, with no dump file on the source. When the host has no usable WP-CLI, a `wp-ssh-bridge-wp-cli.phar` is also left in that directory for later runs. Everything else it changes is on your machine.
 :::
 
 ## Run it
@@ -104,13 +104,13 @@ A pull never modifies the source site. It creates a temporary database dump in t
     Local tools, SSH access, the paths on both sides, and WP-CLI are checked first, so a failure stops the run before anything changes. [How it works](/docs/how-it-works#preflight) lists every check.
   </Step>
   <Step title="Database export and download">
-    `wp db export` on the source writes a gzipped dump of the WordPress installation's tables into the remote temp directory. Other sites or applications sharing the source database are [left out](/docs/how-it-works#safety-rules). The dump is downloaded, then removed remotely, and the cleanup is retried if the run fails.
+    `wp db export` on the source streams the WordPress installation's tables over SSH through the [pseudonymization](/docs/pseudonymization) filter, which writes the gzipped result locally. Other sites or applications sharing the source database are [left out](/docs/how-it-works#safety-rules). A failed run keeps nothing. With `--skip-pseudonymize`, a dump goes through the remote temp directory and is removed there after the download.
   </Step>
   <Step title="File sync">
     rsync mirrors the source WordPress root into your local root with `--delete`, minus the exclusions below. Without rsync on either side, a tar archive is streamed over SSH instead, which cannot delete stale files, and the CLI says so.
   </Step>
   <Step title="Import">
-    In DDEV mode, the copied `wp-config.php` is sanitised first, so the import reaches the DDEV database. The local site then goes into maintenance mode and the dump is imported. Maintenance mode stays on until the last step below has finished. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
+    In DDEV mode, `wp-config.php` arrives sanitised, so the import reaches the DDEV database. The local site then goes into maintenance mode and the dump is imported. Maintenance mode stays on until the last step below has finished. Skip it with `--skip-maintenance-mode`. When no WordPress site is installed locally yet, as on a fresh project's first pull, there is nothing to protect and the import runs without it.
 
     After a successful import, the pull removes the local tables the pulled database does not contain, so nothing of the old local copy lingers, not even under another prefix. Which tables count is decided before the import, and a failed import removes nothing. `db_reset`, `WP_SSH_DB_RESET`, or `--db-reset` choose the scope:
 
@@ -157,7 +157,21 @@ wp-content/uploads/                unless --clone-images
 blocked plugin directories         from the block list
 ```
 
-`wp-config.php` is pulled and sanitised in DDEV mode, and preserved in standalone and wp-env mode, where the local file already carries working database credentials.
+A pseudonymized pull also skips files that hold the personal data the database no longer does:
+
+```text
+*.sql, *.sql.*                     database dumps left on the server
+wp-content/backup-db/, backups/    backup directories
+wp-content/backups-dup-*/          Duplicator backups
+wp-content/wpvividbackups/         WPvivid backups
+uploads/backupbuddy_backups/       BackupBuddy backups
+uploads/gravity_forms/, wpforms/   form uploads
+uploads/wc-logs/                   WooCommerce logs
+uploads/woocommerce_uploads/       protected WooCommerce downloads
+uploads/wp-personal-data-exports/  WordPress privacy exports
+```
+
+In DDEV mode, the file sync leaves `wp-config.php` out. The CLI reads the source's file over SSH and writes only the sanitised result: database settings are removed, and the values of salts and of constants, variables, and array keys named like secrets, such as `*_KEY`, `*_SECRET`, `*_PASS`, or `*_TOKEN`, are replaced. The database password does not reach a file on your machine, even if the sync fails. The file is code, so this cannot be complete: a secret under a neutral name, or in a file it includes, stays. In standalone and wp-env mode the file is preserved, because the local one already carries working database credentials. Every pull except a clone also leaves out copies such as `wp-config.php.bak` and `.env`, and keeps your local ones.
 
 ## Flags
 
@@ -173,6 +187,7 @@ blocked plugin directories         from the block list
 | `--skip-maintenance-mode` | Do not enable WordPress maintenance mode during the import. |
 | `--skip-cache-rebuild` | Do not rebuild page builder CSS after the import. |
 | `--db-reset` | Which tables to remove after the import when the dump does not contain them: `database`, `installation`, or `none`. Defaults to `database` in DDEV and wp-env and `installation` in standalone mode. |
+| `--skip-pseudonymize` | Transfer real personal data instead of [pseudonyms](/docs/pseudonymization), after a person types `real data` at a terminal. `--yes` and `--silent` do not answer this, and without a terminal the pull stops. |
 | `--force-scp` | Use the tar-over-SSH transport even when rsync is available. |
 | `--destination`, `--remote-path`, `--remote-tmp-dir` | Override the source for this run. `--destination` takes `user@host[:port]`, an `ssh://` URL, or a `~/.ssh/config` alias. |
 | `--user`, `--host`, `--port` | The split form of the address, for configs that still use it. Not combinable with `--destination`. |
@@ -242,6 +257,7 @@ Replace `example.com` with your production host. The home URL should be local, t
 | `Permission denied (publickey)` | The source host does not accept your key. | Test `ssh <destination>` first; the CLI uses the same OpenSSH configuration. See [SSH access](/docs/ssh-access#when-a-connection-fails). |
 | Remote path errors | `pull_remote_path` is not absolute or does not contain `wp-config.php`. | Set it to the absolute WordPress root on the source. |
 | `mariadb-dump: command not found` | The host ships only the legacy MySQL client names, and the installed binary predates the workaround. | [Update the CLI](/docs/installation#updating). If preflight prints the compatibility line and the export still fails, the host lacks `mysqldump` as well. See [Netcup and MariaDB clients](/docs/troubleshooting/netcup-mariadb). |
+| `pseudonymizing the export failed` or `Personal data was replaced in tables no pseudonymization rule covers` | See [Pseudonymization](/docs/pseudonymization#when-something-fails). | |
 | Local files not writable | Ownership or permissions on the local WordPress directory. | Fix them, then run again. The error names the exact path. |
 | WordPress shows the installer after a pull | The local `$table_prefix` does not match the imported tables, and the CLI could not change it: `wp-config.php` has no `$table_prefix` line, as in Bedrock, or another file overrides it. The CLI warns about both. | Set the source prefix where your config defines it. |
 | The dry run still finds the production host | The copy was pulled with a version before 0.9.0, which left the production URLs in the database when `WP_HOME` was defined, or with `skip_search_replace`. | [Update the CLI](/docs/installation#updating) and pull again. Check targets pushed from such a copy the same way. |
